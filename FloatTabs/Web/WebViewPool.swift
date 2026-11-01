@@ -79,6 +79,10 @@ final class WebViewPool {
     typealias TrustedInteractionEventHandler = @MainActor (UUID, ChatGPTTrustedInteractionEvent) -> Void
     typealias CommittedURLChangeHandler = @MainActor (UUID, URL) -> Void
     typealias CommittedURLProvider = @MainActor (WKWebView) -> URL?
+    typealias SlotNavigationFinishProjectionHandler = @MainActor (
+        UUID,
+        WebRuntimeDiagnosticIdentity
+    ) -> Void
     typealias IncidentRequestHandler = @MainActor (
         UUID,
         RuntimeDiagnosticIncidentContext
@@ -133,6 +137,16 @@ final class WebViewPool {
     /// top-level URL. Persistence continues to use `onURLChange`; this route
     /// exists only so presentation owners can project the current-site favicon.
     var onCommittedURLChange: CommittedURLChangeHandler?
+
+    /// Phase 6 Outcome-A readiness projection. Forwards a navigation finish
+    /// only when the callback belongs to the exact currently resident Runtime
+    /// of the Slot, together with that Runtime's immutable diagnostic identity.
+    /// Read-only seam: the pool keeps no presentation or readiness state.
+    var onSlotNavigationFinish: SlotNavigationFinishProjectionHandler?
+    /// Bounded terminal-failure projection carrying the same exact-current-
+    /// Runtime guard. A failed navigation must not leave presentation owners
+    /// waiting forever; existing WebKit error/fallback behavior is unchanged.
+    var onSlotNavigationFailure: SlotNavigationFinishProjectionHandler?
 
     /// Cross-domain diagnostics callback. The pool only forwards a bounded
     /// request; PanelController owns the shared snapshot assembly.
@@ -991,6 +1005,24 @@ final class WebViewPool {
                     return
                 }
                 self.onCommittedURLChange?(slotID, committedURL)
+            },
+            onNavigationFinish: { [weak self, weak webView] slotID, _ in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView,
+                      let identity = self.runtimeDiagnosticIdentities[slotID] else {
+                    return
+                }
+                self.onSlotNavigationFinish?(slotID, identity)
+            },
+            onNavigationFailure: { [weak self, weak webView] slotID in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView,
+                      let identity = self.runtimeDiagnosticIdentities[slotID] else {
+                    return
+                }
+                self.onSlotNavigationFailure?(slotID, identity)
             },
             onInstantBackRequest: { [weak self, weak attentionBridge, weak webView] slotID, targetURL in
                 guard let self,

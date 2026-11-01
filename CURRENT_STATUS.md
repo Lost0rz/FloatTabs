@@ -6,11 +6,11 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 6 PERCEIVED-FAST RESTORE**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — CONTRACT RECONCILED / PHASE 6 CLOSEOUT + PHASE 7 AUTOMATIC LIFECYCLE**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `PHASE_6_CONTRACT_FROZEN / IMPLEMENTATION_NOT_STARTED / WAITING_FOR_FUTURE_USER_START`.
+Current execution state: `V5 CONTRACT FROZEN / PR #187 PHASE 6 CLOSEOUT PENDING / PHASE 7 IMPLEMENTATION NOT STARTED`.
 
 ## Canonical state
 
@@ -22,86 +22,107 @@ JSC_ROOT_CAUSE=UNKNOWN
 PHASE_1_SAFE_HIBERNATE_RESTORE=COMPLETE / MERGED
 PHASE_2_READY_UNREAD_DECOUPLING=COMPLETE / MERGED
 PHASE_3_NATIVE_COMPLETION_NOTIFICATION=COMPLETE / MERGED
-PHASE_4_REFERENCE_DERIVED_RUNTIME_MANAGEMENT=COMPLETE / MERGED
+PHASE_4_REFERENCE_DERIVED_RUNTIME_MANAGEMENT=DELIVERED FOUNDATION / TARGET POLICY SUPERSEDED BY V5 PHASE 7
 PHASE_5_BACKGROUND_GENERATION_THRIFT=COMPLETE / MERGED
-PHASE_5_PR=#183
-PHASE_5_MERGE_COMMIT=745d401bf9f282d19bc756c81be3f46f17161e4b
-PHASE_5_LITERAL_HEAD=f9cef25f8eee47d9973bfd9bd9401af072b1b8e6
-PHASE_5_REQUIRED_CI=PASS / RUN 1290
-PHASE_5_QA_DMG=PASS / RUN 626
-PHASE_6_AUDIT=COMPLETE
-PHASE_6_AUDIT_RECORD=FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md
-PHASE_6_CONTRACT=ACCEPTED / FROZEN
-PHASE_6_CONTRACT_RECORD=FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md
-PHASE_6_RECOMMENDATION=TWO-STAGE NATIVE RESTORE SHELL
-PHASE_6_GATE0=REAL-MAC INTERACTIONSTATE READINESS / REQUIRED BEFORE PRODUCT MUTATION
-PHASE_6_IMPLEMENTATION=NOT_STARTED
-PHASE_6_CURRENT_SESSION_PRODUCT_MUTATION=FORBIDDEN
-PHASE_6_NEXT_USER_START_REQUIRED=YES
-TASK_RECONCILIATION_REQUIRED=NO AFTER CONTRACT FREEZE
+
+PHASE_6_PR=#187 OPEN / DRAFT / UNMERGED
+PHASE_6_CURRENT_PRODUCT_HEAD=76c092523fe343eacc0592bfac25086da0d0d83d
+PHASE_6_GATE0=COMPLETE / OUTCOME_A / NAVIGATION_BACKED_READINESS
+PHASE_6_CORRECTIVE=C1-C4 FUNCTIONAL CORRECTIVE APPLIED
+PHASE_6_REQUIRED_CI=PASS / RUN 1312 / HEAD 76c092523fe343eacc0592bfac25086da0d0d83d
+PHASE_6_QA_DMG=PASS / RUN 637
+PHASE_6_REAL_MAC_QA=STARTED ON CORRECTIVE BUILD
+PHASE_6_EXACT_DIFF_FRESH_AUDIT=PENDING
+PHASE_6_MERGE=BLOCKED PENDING BOUNDED SMOKE + FRESH EXACT_DIFF AUDIT
+
+REAL_MAC_MEMORY_OBSERVATION=MULTIPLE LEGACY HOT CHATGPT RUNTIMES REMAIN RESIDENT / HIGH MEMORY
+POLICY_ROOT_CAUSE=KNOWN / LEGACY HOT EXCLUDED FROM AUTOMATIC EVICTION BY DESIGN
+PROGRAM_CONTRACT_AUDIT=V4 STOP FOR FINAL ACCEPTANCE
+PROGRAM_CONTRACT=V5 ACCEPTED / FROZEN
+TARGET_POLICY=AUTOMATIC + KEEP_LOADED
+NORMAL_AUTOMATIC_TARGET=2
+AUTOMATIC_INACTIVE_GRACE=30S
+WARNING_AUTOMATIC_TARGET=1
+CRITICAL_AUTOMATIC_TARGET=0
+
+PHASE_7_CONTRACT=ACCEPTED / FROZEN
+PHASE_7_IMPLEMENTATION=NOT_STARTED
+PHASE_7_PREDECESSOR_GATE=MERGE PR #187 FIRST
+PHASE_7_NEXT_USER_START_REQUIRED=YES
 PROGRAM_HUMAN_ACCEPTANCE=PENDING
 CI_RUNNER=macmini-floattabs-01 / self-hosted / macOS / ARM64 / mac-mini-ci
 ```
 
-## Phase 6 frozen implementation direction
+## Contract reconciliation result
 
-The Phase 6 detailed audit is complete. The accepted/frozen implementation architecture is now:
+Fresh source/contract audit found that V4's Phase 4 policy is a hybrid model rather than the intended final automatic lifecycle:
 
-```text
-selected/summoned reclaimed Slot
-→ native FloatTabs shell + lightweight restoring state immediately
-→ return to AppKit run loop
-→ revalidate current materialization request
-→ existing WebViewPool creates/restores fresh WKWebView
-→ attach fresh Runtime under restoring state
-→ current-Runtime public readiness evidence
-→ remove restoring state
-→ existing focus/input ownership resumes
-```
+- Hot is a permanent normal/critical automatic-budget exclusion;
+- Warm/Cold remain separate persisted classes with independent timers;
+- the current Tab menu still exposes Hot/Warm/Cold;
+- Performance Settings still exposes Warm retention and Cold release delay;
+- inactive Hot keeps a hidden attached WebView host;
+- normal managed target `3` is an unmeasured reference-derived assumption;
+- Phase 6 explicitly froze those semantics, so restore work alone cannot satisfy the final memory objective.
 
-The resident Slot fast path remains direct and does not pass through restoring UI.
+The Phase 6 restore architecture remains valid. The program now adds one final structural Phase 7 to retire the legacy residency product model.
 
-## Gate 0 readiness freeze
+## Current authority
 
-The final callback name is intentionally **not guessed** from structural tests.
+Program contract:
 
-Before any Phase 6 product-source mutation, the next execution session must run the frozen Gate 0 Real-Mac observation against an actually hibernated existing Slot and classify the real public behavior as one of:
+`docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`
 
-- **Outcome A — navigation-backed readiness:** compatible interaction-state restore exposes usable current-Runtime navigation/loading callbacks;
-- **Outcome B — non-navigation readiness:** compatible interaction-state restore does not reliably emit the same navigation sequence, but current Runtime readiness is provable through a bounded public renderer/page observation;
-- **STOP:** no bounded public readiness fact exists, or correctness requires private API, arbitrary delays/polling, reload/double-navigation, persistence mutation, screenshots, extra resident WebViews or ownership changes.
-
-Gate 0 records only content-free timestamps/events. It must not log page text, screenshots, DOM content, cookies, session values or opaque interaction state.
-
-The native restoring state may be removed only when the materialization generation, selected Slot and exact current Runtime still match and Gate 0 has established an approved public bounded readiness fact. `web_runtime.restore.completed` alone is not readiness truth.
-
-## Frozen ownership / safety boundaries
-
-- `WebViewPool` remains live Runtime creation/hibernate/restore owner;
-- `SlotLifecycleCoordinator` remains sole Runtime lifecycle/budget executor;
-- `PanelController` remains presentation authority and owns Phase 6 materialization orchestration;
-- `WebPanelContainerView` may own only lightweight native restoring presentation;
-- `WebAttentionCoordinator` remains Attention authority;
-- Browser Profile/session/persistent user data remain unchanged;
-- Phase 4 Runtime budget remains unchanged;
-- no persistent screenshot continuity cache;
-- no private WebKit API;
-- no release/version work in Phase 6 V1.
-
-## Durable records
-
-Audit/rationale:
-
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`
-
-Frozen execution contract:
+Phase 6 PR-scoped implementation contract:
 
 `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`
 
-The implementation contract owns Phase 6 execution scope; the audit remains evidence/rationale.
+Phase 7 implementation contract:
+
+`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`
+
+`CURRENT_TASK.md` remains the only active mutation authorization.
+
+## Phase 7 frozen target
+
+```text
+legacy Hot            -> Keep Loaded compatibility mapping
+legacy Warm / Cold    -> Automatic compatibility mapping
+new Slot              -> Automatic
+
+Automatic inactive
+→ 30s grace
+→ normal target 2 / warning 1 / critical 0
+→ LRU eligible reclaim
+→ existing WebViewPool hibernate
+→ Phase 6 restore on next use
+
+Keep Loaded
+→ no proactive launch materialization
+→ retained during normal operation when already live
+→ no hidden Hot host presentation
+→ critical pressure may reclaim if inactive and otherwise unprotected
+```
+
+Hard protection remains active/presented, fullscreen, supplemental-visible, Attention generating and allowed active/pending background media.
+
+Runtime reclaim no longer authorizes legacy Cold-based website-cache cleanup.
+
+## PR #187 disposition
+
+PR #187 remains Phase 6 only. Do not add Phase 7 product-source mutation to it.
+
+Before merge:
+
+1. finish bounded Real-Mac restore smoke on the corrective head;
+2. reconcile the known comment-only exact-diff churn;
+3. obtain fresh independent exact-diff audit PASS;
+4. merge only if those Phase 6 gates pass.
+
+The Real-Mac high-memory observation does not invalidate the Phase 6 restore implementation; it invalidates V4 as the final program policy.
 
 ## Next action
 
-Do not construct Phase 6 in the current session.
+Hold Phase 7 product mutation until PR #187 is dispositioned/merged and the user explicitly starts Phase 7 construction.
 
-When the user explicitly starts Phase 6 construction in a later conversation, refresh Authority/repository state and execute **Gate 0 first**. If Gate 0 produces Outcome A or B and no STOP condition fires, continue directly through the frozen contract. If Gate 0 produces the STOP outcome, stop before product mutation and reconcile evidence.
+Then create a fresh Phase 7 branch/worktree from updated `main` and execute the frozen Phase 7 contract WP1-WP5.

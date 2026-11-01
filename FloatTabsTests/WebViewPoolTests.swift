@@ -2946,6 +2946,76 @@ final class WebViewPoolTests: XCTestCase {
         ]
     }
 
+    func testSlotNavigationFinishProjectionRequiresExactCurrentRuntime() throws {
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in }
+        )
+        let profile = makeProfile(name: "FinishProjection")
+        let webView = try pool.webView(for: profile)
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        webView.navigationDelegate = nil
+        var finishEvents: [(UUID, WebRuntimeDiagnosticIdentity)] = []
+        pool.onSlotNavigationFinish = { slotID, identity in
+            finishEvents.append((slotID, identity))
+        }
+
+        let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        let navigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>one</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didFinish: navigation)
+
+        XCTAssertEqual(finishEvents.count, 1)
+        XCTAssertEqual(finishEvents[0].0, profile.id)
+        XCTAssertEqual(finishEvents[0].1, identity)
+
+        // A finish from a runtime that is no longer the Slot's currently
+        // resident WebView must not project as current-Runtime readiness.
+        pool.hibernate(slotID: profile.id)
+        let replaced = try pool.webView(for: profile)
+        XCTAssertFalse(replaced === webView)
+        observer.webView(webView, didFinish: navigation)
+
+        XCTAssertEqual(finishEvents.count, 1)
+        pool.release(slotID: profile.id)
+    }
+
+    func testSlotNavigationFailureProjectionIsBoundedAndCurrentRuntimeGuarded() throws {
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in }
+        )
+        let profile = makeProfile(name: "FailureProjection")
+        let webView = try pool.webView(for: profile)
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        webView.navigationDelegate = nil
+        var failureEvents: [(UUID, WebRuntimeDiagnosticIdentity)] = []
+        pool.onSlotNavigationFailure = { slotID, identity in
+            failureEvents.append((slotID, identity))
+        }
+
+        let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        let navigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>one</body></html>", baseURL: nil)
+        )
+        let error = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorCannotConnectToHost
+        )
+        observer.webView(webView, didFail: navigation, withError: error)
+        observer.webView(webView, didFailProvisionalNavigation: navigation, withError: error)
+
+        XCTAssertEqual(failureEvents.count, 2)
+        XCTAssertTrue(failureEvents.allSatisfy { $0.0 == profile.id && $0.1 == identity })
+
+        // After teardown the same observer no longer represents the resident
+        // runtime, so its failure must not project.
+        pool.release(slotID: profile.id)
+        observer.webView(webView, didFail: navigation, withError: error)
+        XCTAssertEqual(failureEvents.count, 2)
+    }
+
     private static func pageAppPayload(token: String) -> [String: Any] {
         [
             "version": 1,

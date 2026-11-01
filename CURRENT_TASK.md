@@ -1,222 +1,216 @@
 # FloatTabs Current Task
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
-**Title:** Runtime Lifecycle / Memory redesign — Phase 6 perceived-fast restore  
-**Status:** `FROZEN / IMPLEMENTATION NOT STARTED / WAITING FOR FUTURE USER START`  
-**Mode:** `IMPLEMENTATION CONTRACT READY / CURRENT SESSION NO PRODUCT MUTATION`  
-**Task class:** `WEB RUNTIME / RESTORE RESPONSIVENESS`  
+**Title:** Runtime Lifecycle / Memory redesign — Phase 6 closeout + Phase 7 automatic lifecycle retirement  
+**Status:** `ACTIVE / CONTRACT RECONCILED / PHASE 7 READY AFTER PREDECESSOR GATE`  
+**Mode:** `DESIGN FROZEN / PRODUCT MUTATION HOLD`  
+**Task class:** `WEB RUNTIME / LIFECYCLE / MEMORY`  
 **JSC root cause:** `UNKNOWN`
 
 ## Authorization state
 
-Phase 6 audit/design is complete and the implementation contract is now frozen.
+This remains the same Runtime Lifecycle / Memory task. The user requested a fresh audit of the final contract after Real-Mac QA showed that several legacy Hot ChatGPT Slots remained resident and memory stayed high.
 
-Durable audit/rationale record:
+The audit verified a material policy mismatch: V4 preserved Hot/Warm/Cold and therefore cannot be the program-final automatic lifecycle contract.
 
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`
+Task reconciliation is complete through the accepted V5 program contract and Phase 7 implementation contract.
 
-Frozen implementation contract:
+Current product-source mutation remains held until:
+
+1. Phase 6 PR #187 finishes its own merge gate and is merged;
+2. the user explicitly starts Phase 7 construction.
+
+## Current authority
+
+Program contract:
+
+`docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`
+
+Phase 6 bounded authority for PR #187:
 
 `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`
 
-The user explicitly requested that this session **only freeze/update contracts and documentation**. Therefore no product source or test mutation is authorized in the current session.
+Phase 7 frozen execution contract:
 
-A future explicit user instruction to start/continue Phase 6 construction releases the execution hold. The executor must then follow the frozen implementation contract, beginning with Gate 0. No new design cycle or duplicate task contract is required merely because execution occurs in another conversation.
+`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`
 
-## Frozen objective
+## Final objective
 
-Make a reclaimed persistent Slot feel immediately responsive without retaining extra heavyweight `WKWebView` runtimes:
-
-```text
-reclaimed Slot selected/summoned
-→ native FloatTabs shell + lightweight restoring state immediately
-→ return to AppKit run loop
-→ revalidate current materialization request
-→ existing WebViewPool creates/restores fresh Runtime
-→ attach Runtime under restoring state
-→ evidence-backed current-Runtime readiness
-→ remove restoring state
-→ existing focus/input ownership resumes
-```
-
-Resident Slot switching keeps the current direct fast path.
-
-## Frozen ownership
-
-- `PanelController` — Phase 6 presentation/materialization orchestration and stale-request generation;
-- `WebPanelContainerView` — native restoring presentation only;
-- `WebViewPool` — existing Runtime creation/restore mechanism;
-- `SlotLifecycleCoordinator` — sole lifecycle/budget executor;
-- `SlotNavigationObserver` / existing Web Runtime seams — navigation/readiness evidence only if Gate 0 requires the narrow existing owner;
-- `WebFocusRouter` / existing Panel focus path — focus ownership unchanged;
-- `WebAttentionCoordinator` — Attention unchanged;
-- `RuntimeDiagnostics` — evidence only.
-
-No second Runtime lifecycle or presentation truth owner is authorized.
-
-## Gate 0 — mandatory before product mutation
-
-On a Real Mac, use an existing Slot that has actually been hibernated and record only content-free public facts:
+Deliver a persistent-Slot architecture where live `WKWebView` Runtime is disposable and automatically managed by default:
 
 ```text
-selection / summon request
-→ shell ordering boundary
-→ fresh WKWebView allocation
-→ interactionState assignment OR URL fallback classification
-→ navigation provisional / commit / finish callbacks, if any
-→ isLoading transitions, if observable
-→ bounded current-Runtime renderer/page readiness
-→ focus success/failure boundary
+persistent Slot/Profile/session
+→ Automatic Runtime policy
+→ active/protected/recent Runtime may stay live
+→ inactive Runtime reclaimed deterministically
+→ Phase 6 fast restore when selected again
 ```
 
-Do not record page text, screenshots, DOM content, cookies, session values or opaque interaction state.
+Legacy Hot/Warm/Cold is not the final product model.
 
-### Gate 0 allowed outcomes
+## Frozen product policy
 
-**Outcome A — navigation-backed readiness**
+### Per-Slot preference
 
-A compatible interaction-state restore exposes usable current-Runtime navigation/loading callbacks. Reuse those validated callbacks as the trigger for the final bounded readiness check.
+```text
+Automatic   (default)
+Keep Loaded (normal-operation opt-out)
+```
 
-**Outcome B — non-navigation readiness**
+Legacy compatibility:
 
-A compatible interaction-state restore does not reliably expose the same navigation sequence, but readiness can be established through a bounded public current-Runtime renderer/page observation without ownership drift or unbounded polling.
+```text
+hot        -> Keep Loaded
+warm/cold  -> Automatic
+```
 
-**STOP outcome**
+### Automatic lifecycle defaults
 
-Stop before product mutation if no bounded public readiness fact exists or if readiness would require private WebKit API, arbitrary fixed delays, unbounded polling, reload/double-navigation, Browser Profile/session mutation, screenshot persistence, extra resident WebViews, or materially different ownership.
+```text
+normal target   = 2
+inactive grace  = 30 seconds
+warning target  = 1
+critical target = 0
+```
 
-The restoring presentation may be removed only after the current materialization generation, current Slot and exact current Runtime all still match and the Gate 0-approved public readiness fact succeeds.
+### Protection
 
-`web_runtime.restore.completed` alone is not readiness truth.
+Hard protection remains:
 
-## Authorized implementation scope after future user start + Gate 0 PASS
+- active / actually presented;
+- fullscreen source;
+- supplemental visible surface;
+- Attention generating;
+- active/pending allowed-background-media protection;
+- current materialization/restoring ownership boundary.
 
-Expected production files:
+Keep Loaded is protected from ordinary Automatic reclaim but is reclaimable under critical pressure when inactive and not hard-protected.
 
-- `FloatTabs/Panel/PanelController.swift`
+## Predecessor gate — Phase 6 PR #187
+
+Current PR state:
+
+```text
+PR=#187
+STATE=OPEN / DRAFT / UNMERGED
+PRODUCT_HEAD=76c092523fe343eacc0592bfac25086da0d0d83d
+CORRECTIVE=C1-C4 APPLIED
+REQUIRED_CI=PASS / RUN 1312
+QA_DMG=PASS / RUN 637
+REAL_MAC_RESTORE_SMOKE=PENDING COMPLETION
+FRESH_EXACT_DIFF_AUDIT=PENDING
+```
+
+Do not merge until the remaining bounded Phase 6 gates pass.
+
+Do not add Phase 7 product-source mutation to PR #187.
+
+## Phase 7 implementation scope
+
+Expected production owners:
+
+- `FloatTabs/Tabs/WebAppProfile.swift`
+- `FloatTabs/Tabs/TabStore.swift`
+- `FloatTabs/Web/SlotLifecycleCoordinator.swift`
 - `FloatTabs/Web/WebViewContainer.swift`
-- `FloatTabs/Web/WebViewPool.swift` only for a narrow read-only query/result if needed; no semantic restore rewrite
-- `FloatTabs/Web/SlotNavigationObserver.swift` only if Gate 0 Outcome A proves a narrow existing-owner readiness seam is required
+- `FloatTabs/Web/WebViewPool.swift`
+- `FloatTabs/Panel/PanelController.swift`
+- `FloatTabs/UI/ExternalTabRail.swift`
+- `FloatTabs/UI/GlobalSettingsController.swift`
+- `FloatTabs/Persistence/AppPreferencesStore.swift`
 
-Expected tests:
+Persistence/backup files may change only if compatibility evidence requires it.
 
-- `FloatTabsTests/ExternalShellTests.swift`
-- `FloatTabsTests/WebViewPoolTests.swift`
-- existing focus-related tests only if deferred materialization changes focus timing
+## Phase 7 work packages
 
-Any additional production file with material semantic responsibility requires STOP/reconciliation.
+### WP0 — predecessor / fresh-main gate
 
-## Frozen implementation requirements
+- finish PR #187 smoke;
+- fresh exact-diff audit PASS;
+- merge PR #187;
+- refresh main/control identity;
+- create one Phase 7 implementation branch/worktree.
 
-1. Resident Slot fast path remains direct.
-2. Reclaimed Slot receives native restoring feedback before fresh Runtime materialization starts.
-3. Early shell presentation returns control to AppKit before WebKit materialization.
-4. One private materialization generation/request identity prevents stale attach/focus/activation/completion.
-5. Selection change, dismissal, termination/reset and incompatible fullscreen/source lock invalidate pending work.
-6. Revalidate request before materialization, before attachment, and before restoring-state dismissal.
-7. `WebViewPool` remains the only Runtime creation/interaction-state restore owner.
-8. Browser Profile/session identity remains unchanged.
-9. Compatible interaction-state restore still avoids duplicate ordinary URL load.
-10. Phase 4 Runtime budget/ranking/protection semantics remain unchanged.
-11. No page screenshot or opaque interaction state is persisted/logged.
-12. No arbitrary fixed timer becomes readiness truth.
-13. Existing focus/fullscreen ownership remains canonical.
+### WP1 — canonical model / persistence compatibility
 
-## Work packages
+- add `SlotRuntimeRetentionPreference`;
+- default Automatic;
+- legacy Hot -> Keep Loaded;
+- legacy Warm/Cold -> Automatic;
+- transitional derived legacy encoding for rollback;
+- preserve Browser Profile/session/config data.
 
-### WP0 — Gate 0 evidence
+### WP2 — automatic lifecycle / container simplification
 
-Real-Mac readiness classification. Evidence/control only; no product source mutation.
+- one 30s Automatic grace;
+- targets 2 / 1 / 0;
+- deterministic LRU reclaim;
+- Keep Loaded normal preference + critical fallback;
+- remove Hot-only hidden host retention;
+- keep `SlotLifecycleCoordinator` as sole lifecycle writer.
 
-### WP1 — native restoring presentation
+### WP3 — current UI/settings retirement
 
-Add the bounded native restoring surface to `WebPanelContainerView` with focused deterministic tests.
+- replace Residency menu with Automatic / Keep Loaded;
+- remove Warm/Cold retention controls/current product copy;
+- retain old preference values only for rollback compatibility;
+- keep existing presentation Pin semantics separate.
 
-### WP2 — two-stage orchestration
+### WP4 — recovery/cache integration
 
-Update `PanelController` so the native shell/restoring state is presented before reclaimed Runtime materialization and stale request generations are rejected.
+- update renderer-termination recovery metadata to new preference;
+- remove legacy Cold-only website-cache cleanup coupling;
+- preserve Phase 6 restore, Attention, media, focus and fullscreen ownership.
 
-### WP3 — readiness completion
+### WP5 — verification / Real-Mac evidence
 
-Wire the Gate 0 Outcome A/B fact into current-Runtime restore completion using the smallest existing owner/seam.
-
-### WP4 — verification and merge readiness
-
-Run focused tests, full XCTest, Debug/Release arm64, required literal-head PR CI and bounded Real-Mac restore smoke; then independent exact-diff audit.
-
-This work-package structure is not a mandated Sub Agent topology.
-
-## Verification gates
-
-1. **Gate 0 Real-Mac evidence:** Outcome A or B; otherwise STOP.
-2. **Focused correctness:** resident fast path, restoring-before-materialization ordering, stale request rejection, dismiss/switch/fullscreen boundaries, current-request-only completion, unchanged restore/session invariants.
-3. **Full XCTest:** no Phase 6 regressions.
-4. **Debug + Release + native arm64:** PASS.
-5. **Required PR CI:** literal head `Build & Test (Apple Silicon arm64)` PASS on the established self-hosted runner.
-6. **Bounded Real-Mac smoke:** resident switch, compatible reclaimed restore, safe fallback if reproducible, rapid switch-away, dismiss during pending restore.
-7. **Independent exact-diff audit:** ownership/scope/data-safety/lifecycle verification before merge.
-
-No absolute latency target is frozen in V1; Phase 6 proves immediate native response ordering and correctness first.
+- focused migration/lifecycle/UI tests;
+- full XCTest;
+- Debug/Release native arm64;
+- required literal-head CI;
+- 3-Automatic-ChatGPT Real-Mac resident/PID/memory evidence;
+- fresh exact-diff audit.
 
 ## Acceptance criteria
 
-Merge readiness requires all of the following:
+Phase 7 merge readiness requires all of the following:
 
-- native shell/restoring state becomes visible before fresh Runtime materialization for a reclaimed visible Slot;
-- resident Slot path remains direct;
-- no extra persistent WebView residency;
-- stale materialization work cannot affect a newer selection/presentation;
-- interaction-state restore/session safety remains intact;
-- readiness is based on Gate 0-proven public bounded evidence;
-- Phase 4 budget semantics remain unchanged;
-- no screenshot/page-content/opaque-state persistence/logging;
-- focused/full tests and builds pass;
-- required literal-head CI passes;
-- bounded Real-Mac restore smoke passes.
-
-## Explicit non-scope
-
-- Settings-backed Runtime budget tuning;
-- managed target/ranking changes;
-- predictive prewarm;
-- screenshot continuity cache;
-- Browser Profile migration/reset;
-- persistence schema change;
-- Attention/Unread changes;
-- background-generation cadence changes;
-- fullscreen redesign;
-- generic WebView threading redesign;
-- private WebKit API;
-- release/version bump.
+- no current Hot/Warm/Cold UI or active lifecycle policy remains;
+- new Slots default Automatic;
+- compatibility decode/encode is deterministic and data-safe;
+- one active/no-protection 3-Slot scenario converges to one Automatic resident after grace;
+- rapid switching stays bounded rather than materializing every Slot indefinitely;
+- protected generation/media/fullscreen Runtime is preserved;
+- Keep Loaded does not preload at launch or require hidden presentation ownership;
+- critical pressure can reclaim inactive Keep Loaded after Automatic candidates;
+- Phase 6 restore/session continuity remains correct;
+- Runtime reclaim does not clear website/session data;
+- focused/full tests, builds, CI and Real-Mac evidence pass;
+- fresh exact-diff audit passes.
 
 ## STOP conditions
 
-STOP/reconcile if execution requires:
+STOP/reconcile if Phase 7 requires:
 
-- a second Runtime lifecycle writer or second presentation truth owner;
-- Browser Profile/session/persistent-data mutation;
-- private WebKit API;
+- Browser Profile/cookie/session reset or destructive migration;
+- a second lifecycle writer;
 - hidden persistent WebViews as continuity objects;
-- larger Runtime budget merely to mask restore cost;
-- screenshot persistence;
-- arbitrary reload/double-navigation/fixed-delay workaround;
-- unbounded readiness polling;
-- Attention semantics change;
-- unresolved fullscreen source ownership outside the current session-lock boundary;
-- material production scope outside the frozen paths;
+- restoring Hot/Warm/Cold as current policy;
+- private WebKit memory attribution/API;
+- weakening hard protection semantics outside this contract;
+- an unplanned persistence schema/version bump;
+- material product scope outside the frozen Phase 7 paths;
 - release/version work.
 
-## Current execution hold
+## Current execution state
 
 ```text
-PHASE_6_AUDIT=COMPLETE
-PHASE_6_CONTRACT=ACCEPTED / FROZEN
-SELECTED_OPTION=TWO_STAGE_NATIVE_RESTORE_SHELL
-READINESS_POLICY=GATE0_EVIDENCE_BOUND
-PRODUCT_IMPLEMENTATION=NOT_STARTED
-CURRENT_SESSION_PRODUCT_MUTATION=FORBIDDEN
+PROGRAM_CONTRACT=V5_ACCEPTED_FROZEN
+PHASE6_PR187=OPEN_DRAFT_CLOSEOUT_PENDING
+PHASE7_CONTRACT=ACCEPTED_FROZEN
+PHASE7_IMPLEMENTATION=NOT_STARTED
+PHASE7_PRODUCT_MUTATION=HELD
+NEXT_REQUIRED_GATE=PHASE6_REAL_MAC_SMOKE + FRESH EXACT_DIFF AUDIT + MERGE
 NEXT_USER_START_REQUIRED=YES
-TASK_RECONCILIATION_REQUIRED=NO AFTER THIS FREEZE
+PROGRAM_HUMAN_ACCEPTANCE=PENDING
 ```
-
-Next session: when the user explicitly says to start/continue Phase 6 construction, refresh Authority and repository state, run WP0/Gate 0 first, then continue directly if Outcome A or B is proven and no STOP condition fires.

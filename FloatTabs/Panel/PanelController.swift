@@ -276,6 +276,22 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var presentationNativeFocusPending = false
     private var presentationNativeFocusTransferState = PresentationNativeFocusTransferState()
     private var presentationWebFocusPending = false
+
+    /// Phase 6 two-stage materialization request. Identity is independent from
+    /// the presentation-focus generation above and lives only here: a pending
+    /// request may materialize, attach, activate lifecycle state, focus or
+    /// dismiss restoring UI only while the materialization generation, the
+    /// active Slot and the exact current Runtime all still match.
+    private struct PendingRuntimeMaterialization {
+        let generation: UInt64
+        let slotID: UUID
+    }
+    private var runtimeMaterializationGeneration: UInt64 = 0
+    private var pendingRuntimeMaterialization: PendingRuntimeMaterialization?
+    /// Immutable runtime identity of the Runtime attached under the current
+    /// pending materialization. Correlates the Outcome-A navigation finish to
+    /// this exact Runtime before restoring UI may disappear.
+    private var pendingRuntimeMaterializationIdentity: WebRuntimeDiagnosticIdentity?
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
     private var debugInteractionSurfaceFactOverrides: [UUID: Bool] = [:]
@@ -369,10 +385,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         showFloatTabs(trace: trace, webFocusOwner: webFocusOwner)
     }
 
-    /// Completes the remote voice handoff without making audio wait on WebKit.
-    /// Presentation already starts the normal event-driven focus handshake;
-    /// this method makes one immediate adapter attempt for the request/response
-    /// protocol and returns promptly if the page is still loading.
     @discardableResult
     func prepareInputFocusForExternalVoice(
         trace: RuntimeDiagnosticTrace? = nil
@@ -385,10 +397,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             subsystem: "focus",
             trace: trace
         )
-        // Capture the exact DOM input before activating FloatTabs. AppKit and
-        // WebKit may restore a different editor while the window becomes key;
-        // the voice path must not mistake that restored element for the user's
-        // original caret destination.
         if let prePresentationWebView = selectedPresentationWebView() {
             webFocusRouter.setCurrentWebView(prePresentationWebView)
             _ = await webFocusRouter.captureInputTargetForExternalVoice()
@@ -424,10 +432,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             return .failed("webview-loading")
         }
 
-        // Always use the voice-specific restore path. If no input was focused
-        // before presentation, it deliberately falls back to the adapter's
-        // normal candidate scoring while ignoring WebKit's post-activation
-        // activeElement history.
         let focused = await webFocusRouter.focusInputForPresentation(
             preservingCapturedTarget: true,
             trace: trace
@@ -448,9 +452,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         return focused ? .ready : .failed("dom-input-unavailable")
     }
 
-    /// Dispatch one native WebKit wheel event to the selected page. This is
-    /// intentionally not retried or queued: an unavailable presentation must
-    /// not create a background scroll loop or retain stale movement.
     @discardableResult
     func scrollWebView(lines: Int) -> Bool {
         let clampedLines = min(max(lines, -40), 40)
@@ -472,8 +473,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         return true
     }
 
-    /// Kept as a protocol endpoint for RemoteOrbit. Direct delivery has no
-    /// deferred backlog, so cancellation is intentionally just diagnostic.
     func cancelExternalScrollCommands() {
         externalCommandLogger.debug("scroll cancel received")
     }
@@ -518,9 +517,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
-    /// The global summon shortcut is both a summon and a dismiss gesture. If
-    /// FloatTabs currently owns a key window, dismiss it; if the shell is only
-    /// visible while another app owns focus, restore FloatTabs focus instead.
     func toggleOrPresentFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
         let trace = trace ?? diagnostics.beginTrace(root: "panel.summon")
         diagnostics.record(
@@ -548,16 +544,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         shellIsVisible && (shellIsKey || sourceIsKey)
     }
 
-    /// AppCoordinator uses this edge-triggered callback to wake the persisted
-    /// automatic cache scheduler. The callback never performs WebKit work on
-    /// the panel's visibility path.
     var onPanelBecameHidden: (() -> Void)?
 
-    /// Local event monitors only receive this process's events, so AppKit's
-    /// application-wide active flag is not an additional safety boundary here.
-    /// In an LSUIElement accessory app that flag can briefly be false while a
-    /// FloatTabs source window is key. A fullscreen source also remains an
-    /// interactive FloatTabs presentation when its companion shell is hidden.
     var acceptsAppCommands: Bool {
         Self.acceptsAppCommands(
             requestedVisibility: requestedVisibility,
@@ -608,9 +596,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             ?? "Selected Profile"
     }
 
-    /// The menu bar favicon source is the selected Slot's committed site when
-    /// a resident WebView has one. Cold/no-commit Slots intentionally fall back
-    /// to their configured Home URL until WebKit reports a real commit.
     var selectedSlotFaviconURL: URL? {
         guard let activeProfile = tabStore.activeProfile else { return nil }
         return faviconURL(for: activeProfile)
@@ -620,9 +605,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         unreadResponseCoordinator.unreadSlotIDs.count
     }
 
-    /// Captures one QA-only, read-only snapshot of the currently selected
-    /// Slot. It deliberately queries the pool and view hierarchy directly and
-    /// never materializes a missing runtime or changes presentation state.
     @discardableResult
     func captureStuckTabSnapshot() -> String {
         captureIncidentSnapshot(
@@ -635,10 +617,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
-    /// Shared bounded assembler for automatic incident capture. It reads the
-    /// requested resident Slot only and composes existing runtime, lifecycle,
-    /// renderer, health, and page-app probes. No runtime, presentation, or
-    /// product state is created or changed here.
     @discardableResult
     func captureIncidentSnapshot(
         context: RuntimeDiagnosticIncidentContext,
@@ -827,8 +805,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         return "Snapshot recorded for active Slot."
     }
 
-    /// Captures one opt-in periodic checkpoint from the already selected Slot.
-    /// It only reads an existing pooled WebView and never creates a runtime.
     func captureLongTermDiagnosticsCheckpoint(
         shouldRecord: @escaping @MainActor () -> Bool,
         completion: @escaping @MainActor () -> Void
@@ -1043,8 +1019,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
-    /// Assemble a one-shot projection from the live business owners. This is
-    /// intentionally not stored, restored, or consulted by any decision path.
     func runtimeDiagnosticSnapshot() -> RuntimeDiagnosticSnapshot {
         let protectedAttentionCount = tabStore.orderedProfiles.reduce(into: 0) { count, profile in
             if attentionCoordinator.isAttentionProtected(profile.id) {
@@ -1080,10 +1054,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         return RuntimeDiagnosticSnapshot(fields: fields)
     }
 
-    /// Returns read-only aggregate evidence for resident Attention-protected
-    /// runtimes. The resident filter keeps this distinct from the global
-    /// Attention state, so multi-generating conditions can be identified
-    /// without querying WebContent or changing lifecycle decisions.
     private func residentAttentionDiagnosticFields() -> [String: RuntimeDiagnosticValue] {
         let residentSlotIDs = webViewPool.residentSlotIDs
         let generatingCount = residentSlotIDs.filter {
@@ -1106,9 +1076,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     var onSelectedSlotPresentationChange: ((String?, URL?) -> Void)?
     var onAttentionPresentationChange: ((Int, Bool) -> Void)?
     var onChatGPTGenerationCompleted: ((UUID) -> Void)?
-    /// One-shot projection callback for a durable unread `.marked` completion.
-    /// Distinct from `onChatGPTGenerationCompleted`: visible completions,
-    /// stray finishes, and already-handled duplicates never fire it.
     var onChatGPTUnreadCompletionMarked: ((UUID) -> Void)?
     var onOpenGlobalSettings: (() -> Void)?
 
@@ -1179,7 +1146,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.rebuildFullscreenSourceAfterRestoreTimeout()
         }
 
-        // The animated color outline is the only persistent shell outline.
         rootView.webPanelContainerView.layer?.borderWidth = 0
         rootView.webPanelContainerView.layer?.shadowOpacity = 0
         rootView.webPanelContainerView.layer?.shadowRadius = 0
@@ -1250,9 +1216,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         webViewPool.onAttentionEvent = { [weak self] slotID, event in
             self?.handleAttentionEvent(slotID: slotID, event: event)
         }
-        // Keep the observation-only seam alive for deterministic recovery and
-        // older bridge instances. Production U3 bridges prefer the event
-        // callback above, so they do not deliver this fallback a second time.
         webViewPool.onAttentionObservation = { [weak self] slotID, observation in
             self?.handleAttentionEvent(
                 slotID: slotID,
@@ -1267,6 +1230,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         webViewPool.onCommittedURLChange = { [weak self] slotID, url in
             self?.handleCommittedURLChange(slotID: slotID, url: url)
+        }
+        webViewPool.onSlotNavigationFinish = { [weak self] slotID, identity in
+            self?.handleSlotNavigationFinish(slotID: slotID, runtimeIdentity: identity)
+        }
+        webViewPool.onSlotNavigationFailure = { [weak self] slotID, identity in
+            self?.handleSlotNavigationFailure(slotID: slotID, runtimeIdentity: identity)
         }
         tabStore.onChange = { [weak self] in
             self?.synchronizeSlotState()
@@ -1307,9 +1276,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
-    /// macOS 14 treats activation as a contextual request. Submit it directly
-    /// from the status-item action while that user intent is still available;
-    /// the actual window presentation is completed after tracking unwinds.
     func prepareForStatusItemPresentation(trace: RuntimeDiagnosticTrace? = nil) {
         guard !requestedVisibility else { return }
         invalidatePendingRestoreObservationForNewPresentation()
@@ -1317,9 +1283,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         activateFloatTabs(trace: trace)
     }
 
-    /// Application-level windows such as Settings use their own AppKit
-    /// activation path. Keep their explicit activation inside the same
-    /// diagnostics-only observation supersession boundary.
     func prepareForExplicitActivation() {
         invalidatePendingRestoreObservationForNewPresentation()
     }
@@ -1355,15 +1318,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         lastPresentationUptime = presentationUptime
         workspaceAutoHideSuppression.arm(atUptime: presentationUptime)
         updateRequestedVisibility(true)
-        // System has no explicit override: resolve it from the current macOS
-        // appearance again whenever a hidden shell is presented. Explicit
-        // Light/Dark modes use this same path so newly created Tab layers
-        // cannot retain colors from an earlier appearance.
         synchronizeAppearance()
         guard !sourceHostController.isSessionLocked else {
+            cancelPendingRuntimeMaterialization(reason: "session_locked")
             fullscreenVisibilityIntent.requestPresentation()
-            // A companion presentation is one movable window group. Remove its
-            // old Space representation before placing it on the mouse display.
             panel.orderOut(nil)
             showFullscreenCompanionIfReady()
             return
@@ -1375,24 +1333,13 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeSourceHostFrame(display: false)
         slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
         synchronizeSlotState()
-        // Activation requests for an accessory app can be rejected while the
-        // app has no ordered windows. Establish this user-requested window group
-        // in WindowServer first, then transfer application/key focus below.
         panel.orderFrontRegardless()
         activateFloatTabs(trace: trace)
-
-        // Establish the target display as AppKit's key-window context before
-        // handing focus to the ordinary Web source window. WebKit consults the
-        // main/key screen when it creates its element-fullscreen window; merely
-        // ordering the cross-Space shell left that context on the previously
-        // clicked display for the first fullscreen gesture.
         panel.makeKeyAndOrderFront(nil)
         beginPresentationFocusHandshake(
             trace: trace,
             webFocusOwner: webFocusOwner
         )
-        // The source host has now actually been ordered/presented/focused,
-        // so a previously hidden selected Ready Slot can be acknowledged.
         acknowledgeActiveAttentionIfActuallyPresented()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -1413,9 +1360,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     ) {
         let trace = trace ?? diagnostics.beginTrace(root: "panel.dismiss")
         let wasVisible = requestedVisibility
-        // A later dismiss supersedes any delayed observation from an older
-        // restore transaction. The ticket is diagnostics-only and must never
-        // be allowed to attach an observation to this dismiss.
         finishPendingRestoreObservationAsSuperseded()
         recordDismissBegin(
             trace: trace,
@@ -1456,12 +1400,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         presentationNativeFocusPending = false
         presentationNativeFocusTransferState.reset()
         presentationWebFocusPending = false
+        cancelPendingRuntimeMaterialization(reason: "panel_dismissed")
         addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
 
-        // WebKit still needs the ordered, unmoved source host and placeholder
-        // until its own fullscreen controller has reattached the WKWebView.
         guard !sourceHostController.isSessionLocked else {
             fullscreenVisibilityIntent.dismissPresentation()
             tearDownFullscreenCompanion(
@@ -1586,10 +1529,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
-    /// A new presentation supersedes only the diagnostics observation attached
-    /// to an older restore request. Explicit activation/focus uses the same
-    /// boundary. It deliberately does not touch the previous-application
-    /// context or any presentation business state.
     private func invalidatePendingRestoreObservationForNewPresentation() {
         finishPendingRestoreObservationAsSuperseded()
     }
@@ -1682,6 +1621,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             subsystem: "app",
             trace: trace
         )
+        cancelPendingRuntimeMaterialization(reason: "app_terminating")
         persistPanelFrame()
     }
 
@@ -1689,8 +1629,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         tabStore.storedStateSnapshot()
     }
 
-    /// Builds the cache-management coordinator from the same WebViewPool and
-    /// lifecycle authorities that own normal runtime creation and release.
     func websiteCacheCleanupCoordinator(
         preferencesStore: AppPreferencesStore,
         usageStore: WebsiteCacheUsageStore,
@@ -1776,9 +1714,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         for browserProfile in tabStore.browserProfiles {
             identities.insert(.custom(browserProfile.id))
         }
-        // Usage history is advisory metadata, not an authority for which
-        // Browser Profiles exist. Prune stale UUIDs and never resolve a store
-        // for one of them.
         usageStore?.prune(keeping: identities)
 
         let activeIdentity = tabStore.activeProfile.map {
@@ -1801,9 +1736,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func handleRuntimeReleased(_ profile: WebAppProfile) {
         guard profile.residencyPolicy == .cold else { return }
         let identity = BrowserProfileIdentity(browserProfileID: profile.browserProfileID)
-
-        // Cache is shared at Browser Profile scope. Do not clear it while a
-        // sibling Tab using the same store still has a live WebView runtime.
         guard webViewPool.residentSlotIDs(using: identity).isEmpty else { return }
         websiteCacheCleanupCoordinator?.requestColdCleanup(for: identity)
     }
@@ -1826,8 +1758,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         for slotID in webViewPool.residentSlotIDs(using: identity) {
-            // The lifecycle coordinator removes the view from its container
-            // before WebViewPool drops the WKWebView and its runtime callbacks.
             slotLifecycleCoordinator.remove(slotID: slotID)
             webViewPool.release(slotID: slotID)
         }
@@ -1838,9 +1768,6 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func restoreAfterWebsiteCacheCleanup() {
         guard !sourceHostController.isSessionLocked else { return }
-        // currentURL was persisted by TabStore before runtime release. The
-        // normal synchronization path therefore restores a safe currentURL or
-        // homeURL without inventing a page-derived URL.
         synchronizeSlotState()
     }
 
@@ -1938,8 +1865,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             return false
         }
 
-        // Confirmation is a re-entrancy boundary. Re-read the authoritative
-        // model and safety facts before committing the binding.
         guard let currentProfile = tabStore.profiles.first(where: { $0.id == slotID }) else {
             NSSound.beep()
             return false
@@ -1962,9 +1887,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             return true
         }
 
-        // The model/disk commit deliberately suppresses TabStore.onChange.
-        // Otherwise the normal synchronization callback would create the new
-        // runtime before the explicit old-runtime teardown below.
         guard tabStore.setBrowserProfile(
             slotID: slotID,
             profileID: targetProfileID,
@@ -2015,9 +1937,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             return nil
         }
 
-        // duplicateSlot owns the single transactional save and publishes the
-        // new active Slot through the normal TabStore.onChange path. That path
-        // creates the target runtime only after the target binding is durable.
         return tabStore.duplicateSlot(
             sourceID: sourceSlotID,
             targetBrowserProfileID: targetProfileID
@@ -2112,8 +2031,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         let identity = BrowserProfileIdentity.custom(id)
         let staleSlotIDs = webViewPool.residentSlotIDs(using: identity)
         for slotID in staleSlotIDs {
-            // This is deletion cleanup for a runtime that no longer has a
-            // corresponding persisted binding, not a residency policy change.
             slotLifecycleCoordinator.remove(slotID: slotID)
         }
         webViewPool.releaseRuntimes(using: identity)
@@ -2121,34 +2038,21 @@ final class PanelController: NSObject, NSWindowDelegate {
             throw BrowserProfileManagementError.runtimeStillResident
         }
 
-        // The metadata remains present until the provider confirms WebKit
-        // removal. TabStore owns transactional rollback if its save fails.
         try await webViewPool.removeCustomBrowserProfileDataStore(id: id)
         guard tabStore.deleteBrowserProfileMetadata(id: id) else {
             throw BrowserProfileManagementError.metadataPersistenceFailed
         }
-        // A profile's operational history is removed only after both WebKit's
-        // public profile-store deletion and metadata persistence succeed. A
-        // failed deletion therefore remains diagnosable and retryable.
         (usageStore ?? websiteCacheUsageStore)?.removeEntry(for: identity)
     }
 
-    /// Backup import must use the same geometry-aware path as the in-app
-    /// toggle: the shell constraint and the separately hosted source window
-    /// cannot be left at the previous leading inset until the next launch.
     func applyRestoredRailCollapse(_ collapsed: Bool) {
         setTabRailCollapsed(collapsed, animated: false)
     }
 
     @discardableResult
     func restoreStoredWebAppState(_ state: StoredWebAppState) -> Bool {
-        // Replacing the stored model releases every live WebView. Never allow
-        // that operation while WebKit is still using one as a fullscreen source.
         guard !sourceHostController.isSessionLocked else { return false }
 
-        // Persist and validate the replacement before touching live runtimes. A
-        // failed restore must leave the current page/DOM/session presentation
-        // untouched as well as leaving the durable model unchanged.
         let existingIDs = Set(tabStore.profiles.map(\.id))
         guard tabStore.replaceStoredState(state, notifyOnSuccess: false) else {
             return false
@@ -2158,8 +2062,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         let unreadBeforeReplacement = unreadResponseCoordinator.unreadSlotIDs
         for slotID in existingIDs {
             webViewPool.release(slotID: slotID)
-            // Replacement Slots are new identities: their attention
-            // bookkeeping starts fresh rather than being restored.
             attentionCoordinator.removeSlot(slotID)
             unreadResponseCoordinator.removeSlot(slotID: slotID)
             if unreadBeforeReplacement.contains(slotID),
@@ -2235,13 +2137,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         eventTimestamp: TimeInterval,
         mouseLocation: NSPoint
     ) {
-        // There is no auto-hide candidate while the panel is fully hidden.
-        // Keep ordinary background clicks out of Standard diagnostics; a
-        // requested-but-not-ordered transition remains observable below.
         guard requestedVisibility || panel.isVisible else { return }
-        // Global monitor delivery is bridged back to MainActor. A click that
-        // happened on B before the hotkey can otherwise arrive after A has been
-        // presented and incorrectly hide that new presentation.
         let trace = presentationTrace ?? diagnostics.beginTrace(root: "panel.auto-hide")
         let staleEvent = eventTimestamp < lastPresentationUptime
         let insidePresentation = Self.externalMouseDownIsInsideVisiblePresentation(
@@ -2364,9 +2260,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
         }
 
-        // The decision event is the authoritative production auto-hide
-        // record. It retains the complete final decision/reason and avoids
-        // persisting an identical pre-decision copy for every candidate.
         diagnostics.record(
             event: "panel.auto_hide.decision",
             level: .info,
@@ -2377,8 +2270,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     @objc private func workspaceDidActivateApplication(_ notification: Notification) {
-        // Application activation is a normal background event when FloatTabs
-        // is fully hidden, not an auto-hide candidate worth persisting.
         guard requestedVisibility || panel.isVisible else { return }
         guard let activatedApplication = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
                 as? NSRunningApplication else {
@@ -2409,17 +2300,10 @@ final class PanelController: NSObject, NSWindowDelegate {
                 presentationFocusPending: presentationFocusTask != nil,
                 frontmostMatches: true
             )
-            // Returning to FloatTabs can leave the same Slot selected, so a
-            // tab change must not be required to acknowledge Ready. The
-            // presentation fact below still rejects Settings or any other
-            // non-Web key window.
             acknowledgeActiveAttentionIfActuallyPresented()
             return
         }
 
-        // Keep the existing guard order observable without changing its
-        // business meaning: suppression, focus handoff, frontmost match, then
-        // the existing visibility/pin/owner policy.
         let suppressionActive = workspaceAutoHideSuppression.suppressesAutoHide(
             nowUptime: ProcessInfo.processInfo.systemUptime
         )
@@ -2473,10 +2357,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
-        // The notification can arrive before WindowServer has finished
-        // materializing the host application's fullscreen Space. Reconcile on
-        // two subsequent run-loop turns so both the immediate Space switch and
-        // the delayed fullscreen transition get the actual WKWebView window.
         let delays: [TimeInterval] = [0, 0.2]
         for delay in delays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -2495,9 +2375,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         trace: RuntimeDiagnosticTrace? = nil,
         reason: String = "application_deactivated"
     ) {
-        // The user has already selected another application. Unlike the explicit
-        // global-toggle hide path, do not reactivate the previous application here:
-        // doing so would steal focus from the application the user just chose.
         let trace = trace ?? presentationTrace ?? diagnostics.beginTrace(root: "panel.dismiss")
         let wasVisible = requestedVisibility
         recordDismissBegin(
@@ -2597,18 +2474,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         return snapshot
     }
 
-    /// Read-only cross-feature diagnostics. Each accessor exposes one piece
-    /// of already-existing internal state — the rail's current unread
-    /// projection and the lifecycle coordinator's current plan bookkeeping —
-    /// so integration tests can observe real wiring without any mutation,
-    /// second source of truth, or test-specific business path.
     func debugIsProjectingUnreadResponse(slotID: UUID) -> Bool {
         rootView.externalControlZoneView
             .tabView(for: slotID)?.isShowingUnreadResponse ?? false
     }
 
-    /// Test-only persistent presentation fact control for a single deferred
-    /// main-queue turn. It does not participate in production builds.
     func debugSetPresentationFactOverride(
         slotID: UUID,
         presentationFact: Bool
@@ -2625,9 +2495,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         removeConfirmedSlot(slotID: slotID)
     }
 
-    /// Test-only scoped presentation fact for deterministic observation
-    /// routing. The operation still enters through the real pool/bridge
-    /// callback; only WindowServer-owned topology is replaced for the scope.
     @discardableResult
     func debugWithPresentationFact<Result>(
         slotID: UUID,
@@ -2639,9 +2506,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         return operation()
     }
 
-    /// Test-only scoped override for the trusted interaction surface. It is
-    /// separate from strict user visibility so hover interaction can be tested
-    /// without weakening completion or attention semantics.
     @discardableResult
     func debugWithPresentationFacts<Result>(
         slotID: UUID,
@@ -2658,18 +2522,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         return operation()
     }
 
-    /// Test-only forwarding to the actual rail selection callback configured
-    /// by `configureSlotInteractions()`. Keeping this seam here lets
-    /// production-path tests exercise PanelController acknowledgement wiring
-    /// without exposing the root view or reimplementing selection behavior.
     @discardableResult
     func debugInvokeRailSelection(slotID: UUID) -> Bool {
         rootView.externalControlZoneView.onSelect?(slotID)
         return tabStore.activeTabID == slotID
     }
 
-    /// Test-only deterministic presentation fact for exercising the real
-    /// selection callback without depending on WindowServer activation.
     @discardableResult
     func debugInvokeRailSelection(
         slotID: UUID,
@@ -2689,9 +2547,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         return tabStore.activeTabID == slotID
     }
 
-    /// Test-only deterministic presentation fact for exercising the real
-    /// overflow selection callback without depending on WindowServer
-    /// activation.
     @discardableResult
     func debugInvokeOverflowSelection(
         slotID: UUID,
@@ -2714,6 +2569,14 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     var debugPendingColdReleaseCount: Int {
         slotLifecycleCoordinator.pendingColdReleaseCount
+    }
+
+    var debugIsShowingRestoringState: Bool {
+        rootView.webPanelContainerView.isShowingRestoringState
+    }
+
+    var debugPresentedWebView: WKWebView? {
+        rootView.webPanelContainerView.currentWebView
     }
 
     var debugPendingWarmReleaseCount: Int {
@@ -2849,7 +2712,6 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         case let .setResidency(policy):
             _ = setActiveResidency(policy)
-
         }
     }
 
@@ -3116,10 +2978,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         let toggleRail: () -> Void = { [weak self] in
             guard let self else { return }
-            // The fullscreen source frame is frozen by design while WebKit
-            // owns the WebView; the companion fold grip stays reachable during
-            // element fullscreen, so refuse geometry changes there instead of
-            // letting shell and source drift apart until restore.
             guard !self.sourceHostController.isSessionLocked else {
                 NSSound.beep()
                 return
@@ -3134,12 +2992,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         setTabRailCollapsed(preferencesStore.isTabRailCollapsed, animated: false)
     }
 
-    /// Collapse is physical-only (see PanelRootView.setTabRailCollapsed). The
-    /// persisted window frame, nominal panel/viewport formulas and
-    /// manual-resize persistence all stay 76-based; only the shell's zone
-    /// width, the drag bands and the source window's physical frame move.
-    /// Re-expanding therefore returns the content to exactly the persisted
-    /// nominal viewport size.
     private func setTabRailCollapsed(_ collapsed: Bool, animated: Bool) {
         guard !sourceHostController.isSessionLocked else { return }
         preferencesStore.isTabRailCollapsed = collapsed
@@ -3156,6 +3008,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeSlotState() {
+        if let pending = pendingRuntimeMaterialization,
+           pending.slotID != tabStore.activeTabID {
+            cancelPendingRuntimeMaterialization(reason: "active_slot_changed")
+        }
         synchronizeBrowserProfileMenuPresentation()
         let orderedProfiles = tabStore.orderedProfiles
         let unreadBeforePrune = unreadResponseCoordinator.unreadSlotIDs
@@ -3211,6 +3067,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
         }
 
+        if webViewPool.existingWebView(for: activeProfile.id) == nil,
+           requestedVisibility || panel.isVisible {
+            beginDeferredRuntimeMaterialization(for: activeProfile)
+            return
+        }
+
         let webView: WKWebView
         do {
             webView = try webViewPool.webView(for: activeProfile)
@@ -3231,6 +3093,9 @@ final class PanelController: NSObject, NSWindowDelegate {
             synchronizeResidentIndicators()
             return
         }
+        if pendingRuntimeMaterialization?.slotID == activeProfile.id {
+            cancelPendingRuntimeMaterialization(reason: "resident_presentation")
+        }
         rootView.webPanelContainerView.show(
             webView: webView,
             slotID: activeProfile.id,
@@ -3248,8 +3113,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             faviconURL(for: activeProfile)
         )
 
-        // The new WebView is now the physically current presentation; the
-        // helper itself refuses to acknowledge while nothing is visible.
         acknowledgeAttentionIfActuallyVisible(slotID: activeProfile.id)
 
         if panel.isVisible,
@@ -3260,6 +3123,281 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func faviconURL(for profile: WebAppProfile) -> URL? {
         webViewPool.committedURL(for: profile.id) ?? profile.homeURL
+    }
+
+    static func runtimeMaterializationRequestIsValid(
+        requestGenerationMatches: Bool,
+        requestSlotID: UUID?,
+        activeSlotID: UUID?,
+        presentationRequested: Bool,
+        sessionLocked: Bool
+    ) -> Bool {
+        guard requestGenerationMatches,
+              let requestSlotID,
+              requestSlotID == activeSlotID,
+              presentationRequested,
+              !sessionLocked else {
+            return false
+        }
+        return true
+    }
+
+    private func isPendingRuntimeMaterializationCurrent(
+        _ request: PendingRuntimeMaterialization
+    ) -> Bool {
+        Self.runtimeMaterializationRequestIsValid(
+            requestGenerationMatches: pendingRuntimeMaterialization?.generation
+                == request.generation,
+            requestSlotID: request.slotID,
+            activeSlotID: tabStore.activeTabID,
+            presentationRequested: requestedVisibility || panel.isVisible,
+            sessionLocked: sourceHostController.isSessionLocked
+        )
+    }
+
+    private func beginDeferredRuntimeMaterialization(for profile: WebAppProfile) {
+        if let pending = pendingRuntimeMaterialization, pending.slotID == profile.id {
+            rootView.webPanelContainerView.showRestoringState()
+            return
+        }
+
+        runtimeMaterializationGeneration += 1
+        let request = PendingRuntimeMaterialization(
+            generation: runtimeMaterializationGeneration,
+            slotID: profile.id
+        )
+        pendingRuntimeMaterialization = request
+        pendingRuntimeMaterializationIdentity = nil
+        onSelectedSlotPresentationChange?(
+            profile.name,
+            faviconURL(for: profile)
+        )
+        rootView.webPanelContainerView.showRestoringState()
+        // Restoring is a native-only interaction boundary. The previous Slot
+        // must not remain the canonical focus target while a reclaimed Runtime
+        // is being materialized under the overlay.
+        webFocusRouter.setCurrentWebView(nil)
+        lastSynchronizedActiveID = profile.id
+        lastSynchronizedActiveProfile = profile
+        diagnostics.record(
+            event: "panel.materialization.deferred",
+            level: .notice,
+            subsystem: "panel",
+            fields: [
+                "slot_id": .string(profile.id.uuidString),
+                "materialization_generation": .integer(Int64(request.generation))
+            ]
+        )
+        DispatchQueue.main.async { [weak self] in
+            self?.performDeferredRuntimeMaterialization(request)
+        }
+    }
+
+    private func performDeferredRuntimeMaterialization(
+        _ request: PendingRuntimeMaterialization
+    ) {
+        guard isPendingRuntimeMaterializationCurrent(request),
+              let profile = tabStore.profiles.first(where: { $0.id == request.slotID }) else {
+            cancelStaleRuntimeMaterialization(request, reason: "stale_before_materialization")
+            return
+        }
+
+        let webView: WKWebView
+        do {
+            webView = try webViewPool.webView(for: profile)
+        } catch {
+            finishPendingRuntimeMaterializationAsFailed(
+                profile: profile,
+                error: error
+            )
+            return
+        }
+
+        guard isPendingRuntimeMaterializationCurrent(request),
+              webViewPool.existingWebView(for: request.slotID) === webView else {
+            cancelStaleRuntimeMaterialization(request, reason: "stale_before_attach")
+            return
+        }
+
+        attachDeferredRuntime(webView: webView, profile: profile, request: request)
+    }
+
+    private func attachDeferredRuntime(
+        webView: WKWebView,
+        profile: WebAppProfile,
+        request: PendingRuntimeMaterialization
+    ) {
+        rootView.webPanelContainerView.show(
+            webView: webView,
+            slotID: profile.id,
+            residencyPolicy: profile.residencyPolicy
+        )
+        pendingRuntimeMaterializationIdentity = webViewPool.runtimeDiagnosticIdentity(
+            for: profile.id
+        )
+        // Attachment is not readiness. Keep focus/input and Attention closed
+        // until the exact current Runtime emits the accepted Outcome-A finish.
+        slotLifecycleCoordinator.activate(profile: profile)
+        WebViewFactory.configureHiddenScrollers(in: webView)
+        sourceHostController.observeFullscreenState(of: webView)
+
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(profile.id.uuidString),
+            "materialization_generation": .integer(Int64(request.generation))
+        ]
+        fields.merge(
+            pendingRuntimeMaterializationIdentity?.fields ?? [:]
+        ) { _, new in new }
+        diagnostics.record(
+            event: "panel.materialization.attached",
+            level: .notice,
+            subsystem: "panel",
+            fields: fields
+        )
+    }
+
+    private func cancelPendingRuntimeMaterialization(reason: String) {
+        guard let pending = pendingRuntimeMaterialization else { return }
+        pendingRuntimeMaterialization = nil
+        pendingRuntimeMaterializationIdentity = nil
+        rootView.webPanelContainerView.hideRestoringState()
+        diagnostics.record(
+            event: "panel.materialization.cancelled",
+            level: .notice,
+            subsystem: "panel",
+            fields: [
+                "slot_id": .string(pending.slotID.uuidString),
+                "materialization_generation": .integer(Int64(pending.generation)),
+                "reason": .string(reason)
+            ]
+        )
+    }
+
+    private func cancelStaleRuntimeMaterialization(
+        _ request: PendingRuntimeMaterialization,
+        reason: String
+    ) {
+        let currentGeneration = pendingRuntimeMaterialization?.generation
+        if currentGeneration == request.generation {
+            pendingRuntimeMaterialization = nil
+            pendingRuntimeMaterializationIdentity = nil
+            rootView.webPanelContainerView.hideRestoringState()
+        }
+        diagnostics.record(
+            event: "panel.materialization.cancelled",
+            level: .notice,
+            subsystem: "panel",
+            fields: [
+                "slot_id": .string(request.slotID.uuidString),
+                "materialization_generation": .integer(Int64(request.generation)),
+                "reason": .string(reason),
+                "replaced_by_newer_request": .bool(
+                    currentGeneration != nil && currentGeneration != request.generation
+                )
+            ]
+        )
+    }
+
+    private func finishPendingRuntimeMaterializationAsFailed(
+        profile: WebAppProfile,
+        error: Error
+    ) {
+        pendingRuntimeMaterialization = nil
+        pendingRuntimeMaterializationIdentity = nil
+        webFocusRouter.setCurrentWebView(nil)
+        if let profileName = Self.unsupportedBrowserProfileName(
+            for: profile,
+            error: error,
+            browserProfiles: tabStore.browserProfiles
+        ) {
+            rootView.webPanelContainerView.showUnsupportedBrowserProfile(
+                profileName: profileName,
+                defaultProfileName: tabStore.defaultBrowserProfilePresentation.name
+            )
+        } else {
+            rootView.webPanelContainerView.showEmptyState()
+        }
+        diagnostics.record(
+            event: "panel.materialization.failed",
+            level: .warning,
+            subsystem: "panel",
+            fields: [
+                "slot_id": .string(profile.id.uuidString),
+                "materialization_generation": .integer(
+                    Int64(runtimeMaterializationGeneration)
+                )
+            ].merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) {
+                current, _ in current
+            }
+        )
+    }
+
+    func handleSlotNavigationFinish(slotID: UUID, runtimeIdentity: WebRuntimeDiagnosticIdentity) {
+        guard let pending = pendingRuntimeMaterialization,
+              pending.slotID == slotID,
+              isPendingRuntimeMaterializationCurrent(pending),
+              let expectedIdentity = pendingRuntimeMaterializationIdentity,
+              expectedIdentity == runtimeIdentity,
+              let currentIdentity = webViewPool.runtimeDiagnosticIdentity(for: slotID),
+              currentIdentity == runtimeIdentity,
+              let readyWebView = webViewPool.existingWebView(for: slotID) else {
+            return
+        }
+
+        let focusTrace = presentationTrace
+        let focusOwner = presentationWebFocusOwner
+        pendingRuntimeMaterialization = nil
+        pendingRuntimeMaterializationIdentity = nil
+        rootView.webPanelContainerView.hideRestoringState()
+        webFocusRouter.setCurrentWebView(readyWebView)
+        acknowledgeAttentionIfActuallyVisible(slotID: slotID)
+        beginPresentationFocusHandshake(
+            trace: focusTrace,
+            webFocusOwner: focusOwner
+        )
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString),
+            "materialization_generation": .integer(Int64(pending.generation)),
+            "readiness_source": .string("navigation_finished")
+        ]
+        fields.merge(runtimeIdentity.fields) { _, new in new }
+        diagnostics.record(
+            event: "panel.materialization.readiness_completed",
+            level: .notice,
+            subsystem: "panel",
+            fields: fields
+        )
+    }
+
+    func handleSlotNavigationFailure(slotID: UUID, runtimeIdentity: WebRuntimeDiagnosticIdentity) {
+        guard let pending = pendingRuntimeMaterialization,
+              pending.slotID == slotID,
+              isPendingRuntimeMaterializationCurrent(pending),
+              let expectedIdentity = pendingRuntimeMaterializationIdentity,
+              expectedIdentity == runtimeIdentity,
+              let currentIdentity = webViewPool.runtimeDiagnosticIdentity(for: slotID),
+              currentIdentity == runtimeIdentity else {
+            return
+        }
+
+        pendingRuntimeMaterialization = nil
+        pendingRuntimeMaterializationIdentity = nil
+        rootView.webPanelContainerView.hideRestoringState()
+        if let failedWebView = webViewPool.existingWebView(for: slotID) {
+            webFocusRouter.setCurrentWebView(failedWebView)
+        }
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString),
+            "materialization_generation": .integer(Int64(pending.generation)),
+            "readiness_source": .string("navigation_failed")
+        ]
+        fields.merge(runtimeIdentity.fields) { _, new in new }
+        diagnostics.record(
+            event: "panel.materialization.readiness_failed",
+            level: .warning,
+            subsystem: "panel",
+            fields: fields
+        )
     }
 
     private func handleCommittedURLChange(slotID: UUID, url: URL) {
@@ -3274,9 +3412,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 guard let self, let webView else { return }
                 await self.webFocusRouter.refreshRecognition(for: webView)
             }
-            // A committed navigation is the page-readiness signal needed by
-            // presentation focus. This is one deferred attempt, not polling;
-            // the current presentation generation still owns it.
             if requestedVisibility,
                presentationWebFocusPending,
                presentationWebFocusOwner == .standardPresentation {
@@ -3335,12 +3470,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
-    // MARK: Attention visibility + acknowledgement
-
-    /// Routes an observation through the Stage C authority, then compares the
-    /// same authority on both sides of the observation. A protection-ending
-    /// runtime reset may arrive after an old inactive timer was skipped, so an
-    /// already-inactive Warm/Cold Slot gets a fresh lifecycle boundary here.
     private func handleAttentionEvent(
         slotID: UUID,
         event: ChatGPTAttentionEvent
@@ -3432,9 +3561,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 source: .generationStarted
             )
         }
-        // Native completion notification is a projection of the durable
-        // unread `.marked` transition only — never of the generic completion
-        // callback below, which also fires for visible completions.
         if case .marked = completionResult {
             onChatGPTUnreadCompletionMarked?(slotID)
         }
@@ -3454,31 +3580,25 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
-    /// The one authoritative attention-visibility mapping. Gathers the actual
-    /// physical presentation facts — pooled runtime identity, current normal
-    /// presentation, source-window visibility, fullscreen source/companion
-    /// state — and lets `AttentionPresentation` decide. Logical selection or
-    /// residency alone never make a Slot visible.
     func isAttentionUserVisible(slotID: UUID) -> Bool {
         isSlotActuallyPresented(slotID: slotID)
     }
 
-    /// Returns the physical presentation fact shared by the two independent
-    /// acknowledgement policies. This helper only observes topology; it does
-    /// not read or mutate either attention authority.
     private func attentionPresentationFacts(slotID: UUID) -> AttentionPresentation.Facts {
         let pooledWebView = webViewPool.existingWebView(for: slotID)
+        let normalRestoreBlocked = rootView.webPanelContainerView.isShowingRestoringState
+            && tabStore.activeTabID == slotID
         return AttentionPresentation.Facts(
             slotID: slotID,
             sessionIsLocked: sourceHostController.isSessionLocked,
             pooledWebViewExists: pooledWebView != nil,
-            normalCurrentWebViewIsSlotWebView: pooledWebView.map { webView in
+            normalCurrentWebViewIsSlotWebView: !normalRestoreBlocked && (pooledWebView.map { webView in
                 rootView.webPanelContainerView.currentWebView === webView
-            } ?? false,
+            } ?? false),
             sourceWindowIsVisible: sourceHostController.window.isVisible,
-            webPresentationOwnsActiveInteraction: pooledWebView.map(
+            webPresentationOwnsActiveInteraction: !normalRestoreBlocked && (pooledWebView.map(
                 ownsActiveInteraction(of:)
-            ) ?? false,
+            ) ?? false),
             fullscreenSourceSlotID: fullscreenProfile?.id,
             panelIsVisible: panel.isVisible,
             companionSlotID: companionActiveProfile?.id,
@@ -3529,19 +3649,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         return AttentionPresentation.isInteractionSurfacePresented(facts)
     }
 
-    /// Reads the current WebView/window topology at the moment the attention
-    /// decision is requested. `WKWebView.window` is the actual interaction
-    /// surface for normal, companion, and WebKit-owned fullscreen modes; its
-    /// key-window status is stronger than process-level activity and changes
-    /// with the real AppKit focus transfer. No foreground state is stored.
     private func ownsActiveInteraction(of webView: WKWebView) -> Bool {
         webView.window?.isKeyWindow == true
     }
 
-    /// Acknowledges a Slot's completed-but-unseen output only when that
-    /// output is actually presented right now. Calling this for Idle or
-    /// Generating Slots is harmless: the coordinator is the transition
-    /// authority and ignores it.
     func acknowledgeAttentionIfActuallyVisible(slotID: UUID) {
         attentionCoordinator.acknowledge(
             slotID: slotID,
@@ -3565,13 +3676,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         return true
     }
 
-    /// Phase 3 native-notification activation route. Selects the exact
-    /// persistent Slot through the canonical TabStore selector BEFORE
-    /// presenting FloatTabs, lets the existing synchronization/restoration
-    /// path supply any missing Runtime, and relies on the existing
-    /// presentation-aware explicit-selection unread acknowledgement. This
-    /// route never clears unread itself and never falls back to the current
-    /// Slot when the target is stale.
     func presentSlotFromCompletionNotification(
         _ slotID: UUID,
         trace: RuntimeDiagnosticTrace? = nil
@@ -3599,9 +3703,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         return true
     }
 
-    /// A rail/menu/keyboard selection is the only selection-driven unread
-    /// acknowledgement. It is allowed only after the selected Slot is the
-    /// actual current presentation, including a re-click of the active Tab.
     private func acknowledgeUnreadAfterExplicitSelection(
         slotID: UUID,
         trace: RuntimeDiagnosticTrace? = nil
@@ -3617,9 +3718,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
         guard facts.presentationVisible else {
-            // Preserve the existing unread acknowledgement trace for the
-            // first selection attempt, but defer the actual acknowledgement
-            // and snapshot until the presentation gate is satisfied.
             if unreadResponseCoordinator.unreadSlotIDs.contains(slotID) {
                 _ = beginUnreadAcknowledgement(
                     slotID: slotID,
@@ -3627,11 +3725,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                     trace: trace
                 )
             }
-            // WebView/window ordering can finish one main-queue turn after the
-            // model selection. Re-check once, without turning selection into a
-            // polling or focus state machine. This path is intentionally also
-            // scheduled when no unread marker exists, so presentation remains
-            // the gate for the snapshot request.
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 let deferredFacts = self.unreadPresentationFacts(slotID: slotID)
@@ -3756,19 +3849,12 @@ final class PanelController: NSObject, NSWindowDelegate {
                 return
             }
         } else {
-            // Identity-unavailable and streaming interactions retain the U1
-            // Slot-level fallback semantics. A streaming latest response is
-            // deliberately not added to handled history.
             unreadResponseCoordinator.acknowledge(slotID: slotID)
         }
         synchronizeDurableUnreadPresentation()
         finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
     }
 
-    /// A trusted page interaction means the user has started processing the
-    /// response in the WebView itself. The bridge validates the event's trust,
-    /// document, host, frame, and WebView identity before reaching this route;
-    /// this method adds the physical presentation/active-interaction gate.
     private func acknowledgeUnreadAfterTrustedPageInteraction(
         slotID: UUID,
         source: UnreadDiagnosticSource = .trustedManualScroll,
@@ -3951,7 +4037,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func focusActiveWebViewIfAvailable(makeSourceWindowMain: Bool = false) {
-        guard !addressOverlayView.isPresented else { return }
+        guard !addressOverlayView.isPresented,
+              !rootView.webPanelContainerView.isShowingRestoringState else { return }
         if sourceHostController.isSessionLocked {
             if let webView = sourceHostController.companionContainer.currentWebView {
                 WebViewFocus.focus(webView, in: panel)
@@ -3965,16 +4052,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func togglePrimaryWebFocus(trace: RuntimeDiagnosticTrace? = nil) {
-        // A manual focus toggle takes ownership of the DOM-focus decision and
-        // must not be overwritten by the presentation initializer still
-        // waiting for a WebView to finish loading.
         presentationWebFocusTask?.cancel()
         presentationWebFocusTask = nil
 
-        // A focus toggle is also an explicit request to interact with
-        // FloatTabs. Re-activate the accessory app before moving the source
-        // window's key focus, otherwise the web view can remain active-looking
-        // while the actual key window belongs to the previous app.
         activateFloatTabs(trace: trace)
 
         guard let webView = selectedPresentationWebView() else {
@@ -4022,9 +4102,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
-        // `homeURL` is stable Slot identity; only `currentURL` moves. Updating
-        // currentURL before load also makes Return to Home deterministic for a
-        // cold inactive Slot without clearing a warm WebView's history list.
         tabStore.updateCurrentURL(id: id, url: profile.homeURL)
         if webViewPool.contains(slotID: id) {
             webViewPool.navigate(
@@ -4126,7 +4203,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
-
     @discardableResult
     private func removeConfirmedSlot(slotID id: UUID) -> Bool {
         let wasUnread = unreadResponseCoordinator.unreadSlotIDs.contains(id)
@@ -4139,8 +4215,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         slotLifecycleCoordinator.remove(slotID: id)
         webViewPool.remove(slotID: id)
-        // Pool removal already routed the bridge's final runtimeReset;
-        // dropping the bookkeeping fully forgets the deleted Slot.
         attentionCoordinator.removeSlot(id)
         unreadResponseCoordinator.removeSlot(slotID: id)
         synchronizeDurableUnreadPresentation()
@@ -4153,6 +4227,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         unreadPruneDiagnosticSuppressionIDs.remove(id)
         return true
     }
+
     private func presentRemoveConfirmation(id: UUID) {
         guard Self.canRemoveSlotDuringFullscreen(
             slotID: id,
@@ -4206,10 +4281,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             return false
         }
 
-        // If a Slot was already cold/detached when its label changes to Cold,
-        // there will be no later lifecycle release callback. Apply the same
-        // safe fast-path immediately; the coordinator still revalidates the
-        // current aggregate residency for the shared Browser Profile.
         handleRuntimeReleased(updatedProfile)
 
         if tabStore.activeTabID == id {
@@ -4272,6 +4343,9 @@ final class PanelController: NSObject, NSWindowDelegate {
            let companionWebView = sourceHostController.companionContainer.currentWebView {
             return companionWebView
         }
+        guard !rootView.webPanelContainerView.isShowingRestoringState else {
+            return nil
+        }
         return rootView.webPanelContainerView.currentWebView
     }
 
@@ -4288,12 +4362,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         case shellWindow
     }
 
-    /// Select the window that owns an editor/confirmation sheet without
-    /// attaching normal-state modals to the transparent shell. During a
-    /// WebKit fullscreen transition the source window is intentionally hidden
-    /// and locked as WebKit's restore owner. Transitional states never expose
-    /// a modal host; only a visible shell that has explicitly entered the
-    /// fullscreen companion presentation may host one while fully fullscreen.
     static func modalPresentationHost(
         sessionState: FullscreenSourceSessionState,
         sourceWindowIsVisible: Bool,
@@ -4405,9 +4473,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func handleManualResizeEnded() {
-        // A live resize is a user intent, so this path is allowed to enforce
-        // the current display's visible bounds. Screen reconfiguration uses a
-        // separate size-preserving path below.
         clampPanelToConnectedScreens(preservingPreferredSize: false)
         let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
 
@@ -4419,16 +4484,11 @@ final class PanelController: NSObject, NSWindowDelegate {
                     id: active.id,
                     size: CGSize(width: viewport.width, height: viewport.height)
                 ) {
-                    // The configuration save was rejected and TabStore restored
-                    // its model. Restore the physical panel as part of the same
-                    // transaction so UI and durable preference cannot diverge.
                     applyViewportSize(previousViewport, animated: false)
                     return
                 }
             }
         case .fixed:
-            // Manual resizing updates only the shared Fixed viewport. Every Web
-            // App keeps its own hidden preferred size for Per Web App mode.
             preferencesStore.fixedViewportSize = viewport
         }
         preferredPanelSize = panel.frame.size
@@ -4486,13 +4546,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func activateFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
-        // Final diagnostics-only safety gate: every FloatTabs activation,
-        // including explicit focus activation while hidden, supersedes an
-        // older delayed previous-app observation before touching AppKit.
         invalidatePendingRestoreObservationForNewPresentation()
-        // This path only runs for an explicit user presentation. Current macOS
-        // treats activation as contextual, while older releases require the
-        // explicit override for an LSUIElement accessory application.
         diagnostics.record(
             event: "app.activation.requested",
             level: .info,
@@ -4572,9 +4626,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         presentationWebFocusTask?.cancel()
         presentationWebFocusTask = nil
 
-        // If activation/key-window delivery is already complete, finish in
-        // this run-loop turn. Otherwise the existing AppKit notifications call
-        // the same method when the handoff becomes observable.
         completePresentationFocusIfReady()
     }
 
@@ -4630,10 +4681,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                         "make_source_window_main": .bool(false)
                     ]
                 )
-                // Keep the native pending bit set. The source window's
-                // windowDidBecomeKey notification is the only completion
-                // that may consume it; repeated readiness callbacks merely
-                // observe the issued transfer and return.
                 focusActiveWebViewIfAvailable(makeSourceWindowMain: false)
                 return
             case .waitForSourceKey:
@@ -4645,8 +4692,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard nativeWindowReady else { return }
 
         if presentationNativeFocusPending {
-            // Mark consumed before handing control to AppKit/WebKit. A nested
-            // window notification must not enter the focus path twice.
             presentationNativeFocusPending = false
             focusActiveWebViewIfAvailable(
                 makeSourceWindowMain: PresentationNativeFocusPolicy.shouldMakeSourceWindowMain(
@@ -4720,10 +4765,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             defer { self.presentationFocusTask = nil }
             guard self.requestedVisibility, NSApp.isActive else { return }
 
-            // WindowServer may finish the source-window handoff one event-loop
-            // turn after the shell becomes key. Allow exactly one settle pass;
-            // unlike the former 30-iteration retry loop, this has a fixed and
-            // very small cost and cannot keep WebKit focus churn alive.
             if PresentationNativeFocusPolicy.shouldRefocusDuringSettle(
                 owner: self.presentationWebFocusOwner
             ),
@@ -4860,9 +4901,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 return
             }
 
-            // synchronizeSlotState normally establishes this reference. Keep
-            // the fallback for a presentation that races a slot rebuild, but
-            // avoid resetting recognition on every event when it is unchanged.
             if self.webFocusRouter.currentWebView !== webView {
                 self.webFocusRouter.setCurrentWebView(webView)
             }
@@ -4887,9 +4925,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             trace: presentationTrace,
             fields: ["app_active": .bool(NSApp.isActive)]
         )
-        // Activation can complete after the original show call. Finish through
-        // the same window-owning controller instead of searching NSApp.windows
-        // from a timer-driven retry state machine.
         RunLoop.main.perform(inModes: [.default]) { [weak self] in
             Task { @MainActor [weak self] in
                 self?.finishFocusAfterApplicationActivation()
@@ -4922,10 +4957,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             )
             completePresentationFocusIfReady()
         }
-        // Ready acknowledgement intentionally keeps the previous broad
-        // notification semantics. Only the focus handshake is restricted to
-        // FloatTabs' own windows; test and system notifications without an
-        // object must still be able to acknowledge an actually presented Slot.
         acknowledgeActiveAttentionIfActuallyPresented()
     }
 
@@ -4984,10 +5015,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Returns the first on-screen, layer-zero window for the process in the
-    /// front-to-back order supplied by the public CoreGraphics window API.
-    /// The result is explicitly a candidate: CoreGraphics does not expose the
-    /// target application's AppKit key-window identity without Accessibility.
     private func observeExternalWindow(
         for application: NSRunningApplication
     ) -> RuntimeDiagnosticExternalWindowObservation? {
@@ -5328,8 +5355,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 slotLifecycleCoordinator.beginFullscreenSourceVisibility(
                     profile: fullscreenProfile
                 )
-                // WebKit now owns the actual fullscreen presentation of this
-                // Slot, so a Ready result is genuinely being shown.
                 acknowledgeAttentionIfActuallyVisible(slotID: fullscreenProfile.id)
             }
             companionActiveProfile = nil
@@ -5368,12 +5393,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
         let shouldKeepShellVisible = requestedVisibility
         let shouldPauseCompanion = !shouldKeepShellVisible
-        // The companion collection behavior is tied to the fullscreen Space.
-        // Merely changing its flags while the panel remains ordered leaves the
-        // panel represented in the Space that macOS is destroying. Re-home it
-        // atomically only after WebKit has restored the real page: order out,
-        // rebuild the normal hierarchy, and order front again in this same main
-        // run-loop turn. The restored source page remains underneath throughout.
         if shouldKeepShellVisible {
             panel.orderOut(nil)
         }
@@ -5406,19 +5425,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeSourceHostFrame(display: false)
         slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
         synchronizeSlotState()
-        // The restore re-presents the shell from inside WebKit's Space
-        // teardown. Arm the same workspace auto-hide grace that an explicit
-        // show uses: activation notifications still describing the pre-exit
-        // frontmost application must not hide the just-restored shell, and the
-        // global mouse monitor can deliver clicks made on the exiting
-        // fullscreen presentation after the shell is back.
         let restoreUptime = ProcessInfo.processInfo.systemUptime
         lastPresentationUptime = restoreUptime
         workspaceAutoHideSuppression.arm(atUptime: restoreUptime)
-        // Re-establish the queued target display before returning Web focus.
         panel.makeKeyAndOrderFront(nil)
         focusActiveWebViewIfAvailable()
-        // The restored source presentation is physically visible again.
         acknowledgeActiveAttentionIfActuallyPresented()
         fullscreenExperimentLog(
             "RESTORE_PRESENTED shell=\(panel.windowNumber) "
@@ -5430,9 +5441,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
-    /// A last-resort recovery used only after WebKit has publicly left
-    /// fullscreen but failed to restore its source view for ten seconds. The
-    /// persisted Slot remains intact; only its transient WKWebView is rebuilt.
     private func rebuildFullscreenSourceAfterRestoreTimeout() {
         guard let sourceID = fullscreenProfile?.id else { return }
         slotLifecycleCoordinator.remove(slotID: sourceID)
@@ -5454,9 +5462,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         case .fullscreen:
             showFullscreenCompanionIfReady()
         case .exiting, .restoring:
-            // Keep the requested shell in place while WebKit returns the
-            // fullscreen WebView to its source hierarchy. Ordering it out here
-            // created a visible empty frame before the normal page was shown.
             if !requestedVisibility {
                 panel.orderOut(nil)
             }
@@ -5488,8 +5493,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         if let webView = sourceHostController.companionContainer.currentWebView {
             WebViewFocus.focus(webView, in: panel)
         }
-        // The companion shell has actually been ordered visible, so the
-        // presented companion Slot's Ready output can be acknowledged.
         if let companionSlotID = companionActiveProfile?.id {
             acknowledgeAttentionIfActuallyVisible(slotID: companionSlotID)
         }
@@ -5521,8 +5524,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             faviconURL(for: activeProfile)
         )
 
-        // Selecting the fullscreen Slot only selects its rail identity. Its
-        // WKWebView must remain exclusively owned by WebKit until restore.
         guard activeProfile.id != fullscreenProfile?.id else {
             deactivateCompanionProfile(pauseInactiveMedia: true)
             webFocusRouter.setCurrentWebView(nil)
@@ -5581,8 +5582,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard requestedVisibility,
               sourceHostController.sessionState == .fullscreen else { return }
         WebViewFocus.focus(webView, in: panel)
-        // Selecting a new companion Slot during an already-visible companion
-        // presentation acknowledges it once it is actually presented.
         acknowledgeAttentionIfActuallyVisible(slotID: activeProfile.id)
     }
 
