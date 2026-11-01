@@ -2,7 +2,7 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Title:** Runtime Lifecycle / Memory redesign — Phase 7 automatic lifecycle retirement  
-**Status:** `ACTIVE / PHASE 7 CONSTRUCTION AUTHORIZED`  
+**Status:** `ACTIVE / PHASE 7 CORRECTIVE`  
 **Mode:** `IMPLEMENTATION / VERIFY / SELF-AUDIT TO MERGE-READY`  
 **Task class:** `WEB RUNTIME / LIFECYCLE / MEMORY`  
 **JSC root cause:** `UNKNOWN`
@@ -32,6 +32,10 @@ Fresh implementation base:
 Implementation branch:
 
 `codex/ft-runtime-lifecycle-phase7-automatic-001`
+
+Current product head under corrective:
+
+`9118b79cfee7e7a1a065ba5e2e82dca9ad6e19fe`
 
 ## Final objective
 
@@ -72,6 +76,8 @@ warning target  = 1
 critical target = 0
 ```
 
+The historical 120-second hidden-active retention is not a second production grace. Once the shell is no longer actually presented, Automatic lifecycle handling begins and the canonical 30-second inactivity grace governs normal retention.
+
 ### Hard protection
 
 - active / actually presented;
@@ -96,8 +102,21 @@ Expected production owners:
 - `FloatTabs/UI/ExternalTabRail.swift`
 - `FloatTabs/UI/GlobalSettingsController.swift`
 - `FloatTabs/Persistence/AppPreferencesStore.swift`
+- `FloatTabs/Hotkeys/AppCommandController.swift` — retire current user-configurable Hot/Warm/Cold shortcut bindings; bounded legacy external IPC compatibility may remain as an adapter.
 
 Persistence/backup files may change only if deterministic compatibility evidence requires it.
+
+## Current corrective evidence
+
+First Phase 7 product implementation head `9118b79c...` completed the main model/lifecycle/UI transform but machine/static verification found bounded remaining work:
+
+1. QA DMG #639 Release compile failed because `PanelController.setResidency` still called the retired `handleRuntimeReleased(updatedProfile)` Cold-cache helper.
+2. `WebViewContainer` no longer uses Hot presentation for current paths but still retains dead `hotHostViews` / `showHot` / `retainHotSlots` architecture; contract requires removing it.
+3. Settings Shortcuts and `AppShortcutCatalog.residencyBindings` still expose Set Hot/Warm/Cold Mode as current user controls.
+4. production hidden-active grace remains the historical 120 seconds, which would delay the canonical Automatic 30-second grace after the shell is hidden.
+5. existing Phase 4 tests still assert superseded Hot/Warm/Cold policy and must be rewritten/retired rather than preserved through shims.
+
+These are corrective items inside the frozen Phase 7 objective; they do not reopen ownership or product design.
 
 ## Work packages
 
@@ -118,19 +137,21 @@ Persistence/backup files may change only if deterministic compatibility evidence
 - deterministic LRU reclaim;
 - Keep Loaded normal preference + critical fallback;
 - remove Hot-only hidden host retention;
+- remove the separate production 120s hidden-active retention boundary;
 - keep `SlotLifecycleCoordinator` sole lifecycle writer.
 
-### WP3 — current UI/settings retirement
+### WP3 — current UI/settings/shortcut retirement
 
 - replace Residency menu with Automatic / Keep Loaded;
 - remove active Warm/Cold retention controls/current product copy;
-- leave old preference values stored only for rollback compatibility;
+- remove current Set Hot/Warm/Cold Mode shortcut bindings/settings section;
+- leave old preference/protocol values only for bounded rollback/compatibility;
 - keep presentation Pin semantics separate.
 
 ### WP4 — recovery/cache integration
 
 - renderer termination recovery uses canonical retention preference;
-- remove legacy Cold-only website-cache cleanup coupling;
+- remove legacy Cold-only website-cache cleanup coupling and stale callback;
 - preserve Phase 6 restore, Attention, media, focus and fullscreen ownership.
 
 ### WP5 — verification / evidence
@@ -147,7 +168,7 @@ Persistence/backup files may change only if deterministic compatibility evidence
 
 Merge readiness requires:
 
-- no current Hot/Warm/Cold UI or active lifecycle decision path;
+- no current Hot/Warm/Cold UI, shortcut, or active lifecycle decision path;
 - new Slots default Automatic;
 - compatibility decode/encode is deterministic and data-safe;
 - 3 Automatic loaded Slots converge to one resident after grace when only one is active and no protection applies;
@@ -172,7 +193,7 @@ STOP/reconcile if implementation requires:
 - private WebKit memory attribution/API;
 - weakening hard protection semantics outside the contract;
 - an unplanned persistence schema/version bump;
-- material product scope outside the frozen Phase 7 paths;
+- material product scope outside the reconciled Phase 7 paths;
 - release/version work.
 
 ## Current execution state
@@ -180,9 +201,11 @@ STOP/reconcile if implementation requires:
 ```text
 PROGRAM_CONTRACT=V5_ACCEPTED_FROZEN
 PHASE6=MERGED
-PHASE7_CONTRACT=ACCEPTED_FROZEN
-PHASE7_IMPLEMENTATION=ACTIVE
+PHASE7_CONTRACT=ACCEPTED_FROZEN_RECONCILED
+PHASE7_IMPLEMENTATION=ACTIVE_CORRECTIVE
 PHASE7_BRANCH=codex/ft-runtime-lifecycle-phase7-automatic-001
-NEXT_REQUIRED_GATE=WP1 IMPLEMENTATION
+CURRENT_PRODUCT_HEAD=9118b79cfee7e7a1a065ba5e2e82dca9ad6e19fe
+CURRENT_MACHINE_GATE=QA_DMG_639_RELEASE_COMPILE_FAIL
+NEXT_REQUIRED_GATE=BOUNDED_CORRECTIVE
 PROGRAM_HUMAN_ACCEPTANCE=PENDING
 ```
