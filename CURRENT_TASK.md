@@ -2,30 +2,87 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Title:** Runtime Lifecycle / Memory redesign — Phase 1 Safe Hibernate + Restore  
-**Status:** `ACTIVE / PHASE 1 IMPLEMENTATION — V2 ACCEPTANCE`  
+**Status:** `ACTIVE / BLOCKING CI ROUTING CORRECTIVE`  
 **Mode:** `EXECUTE`  
-**Task class:** `HIGH-RISK WEB RUNTIME LIFECYCLE / MEMORY`  
+**Task class:** `HIGH-RISK WEB RUNTIME LIFECYCLE / MEMORY + BOUNDED CI INFRA CORRECTIVE`  
 **Current program contract:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`  
 **Current Phase 1 plan:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md`  
 **JSC root cause:** `UNKNOWN`
 
 ## Authorization
 
-Continue the existing Phase 1 implementation under the V2 architecture-first cadence.
+The Phase 1 product implementation is complete on PR #170, but required repository-host CI did not start. A bounded CI routing corrective is authorized under the same task because it blocks the current Phase 1 acceptance gate.
 
-The previously frozen V1 strict scale-benchmark gate is superseded for current execution. Phase 1 now finishes the structural Runtime primitive, proves bounded real-runtime correctness, and proceeds to independent audit/merge without waiting for the Phase 4 scale benchmark.
+Do not modify Phase 1 Web Runtime product behavior during this corrective.
 
-Preserve existing local uncommitted implementation work. Do not restart or discard it merely because the phase gate changed.
+Fresh diagnosis established:
 
-## Exact production scope
+- PR #170 head `b40bf1d63735700cb0c297d901bd284da1ac105a` is currently conflicting with `main`, so GitHub does not create `pull_request` workflow runs for it until the conflict is resolved;
+- `.github/workflows/macos-ci.yml` uses `runs-on: macos-26`, which selects a GitHub-hosted macOS runner instead of the intended local Apple Silicon self-hosted runner;
+- the established local runner labels are `[self-hosted, macOS, ARM64, mac-mini-ci]`;
+- FloatTabs is public, so self-hosted CI must not execute arbitrary fork PR code by default.
 
-Authorized:
+## CI corrective scope
+
+Authorized now:
+
+- `AGENTS.md` — durable local-runner and PR-conflict CI rule;
+- `CURRENT_STATUS.md` — factual corrective state;
+- `CURRENT_TASK.md` — this bounded authorization;
+- `.github/workflows/macos-ci.yml` — runner routing / same-repository PR guard only.
+
+Expected workflow change:
+
+```text
+runs-on: macos-26
+```
+
+becomes:
+
+```text
+runs-on: [self-hosted, macOS, ARM64, mac-mini-ci]
+```
+
+and PR jobs must be guarded so fork heads do not execute on the self-hosted runner by default.
+
+Do not rename the required job `Build & Test (Apple Silicon arm64)` because branch protection currently requires that exact check context.
+
+Do not alter build/test commands merely to make the runner switch pass unless fresh evidence proves a host-compatibility correction is required; in that case STOP and reconcile before broadening the CI corrective.
+
+## CI corrective verification
+
+Required evidence before merging the CI corrective:
+
+1. corrective diff contains no FloatTabs product source or product-test changes;
+2. workflow syntax remains valid;
+3. the corrective PR receives a `macOS CI` workflow run;
+4. the required job remains named `Build & Test (Apple Silicon arm64)`;
+5. observed job routing is to a matching self-hosted runner, not GitHub-hosted `macos-26`;
+6. runner architecture remains `arm64`;
+7. existing Debug build, Release build, native architecture verification and unit-test steps execute successfully;
+8. if the job remains queued because no matching runner is available, STOP with repository runner registration/access as the remaining infrastructure blocker; do not silently fall back to GitHub-hosted CI.
+
+## PR #170 reconciliation after CI corrective
+
+After the CI corrective is merged:
+
+1. refresh `main`;
+2. reconcile PR #170 onto current `main` while preserving its already-validated Phase 1 implementation;
+3. resolve control-file conflicts in favor of current Authority plus accurate PR #170 implementation evidence;
+4. do not discard/rewrite valid Web Runtime implementation merely to resolve history;
+5. confirm PR #170 becomes mergeable;
+6. required `Build & Test (Apple Silicon arm64)` must then run on the local self-hosted runner for the literal reconciled PR head;
+7. only after that required check succeeds may the independent web audit produce a merge-readiness verdict.
+
+## Phase 1 product scope — unchanged
+
+Authorized product files remain:
 
 - `FloatTabs/Web/WebViewPool.swift`
 - `FloatTabs/Web/SlotLifecycleCoordinator.swift`
 - `FloatTabs/Web/SlotNavigationObserver.swift`
 
-Expected behavior:
+Expected behavior remains:
 
 ```text
 hibernate(slotID:)
@@ -44,7 +101,7 @@ Only normal eligible inactive lifecycle reclamation / the already-existing eligi
 
 Destructive release/rebuild/reset/delete/Profile/cache/recovery paths remain destructive and clear pending restore state.
 
-## Restore contract
+## Restore contract — unchanged
 
 Use public `WKWebView.interactionState` only.
 
@@ -57,7 +114,7 @@ Use public `WKWebView.interactionState` only.
 - missing/incompatible state uses the existing safe currentURL/home fallback;
 - arbitrary timer/double-navigation/private-API workarounds are not authorized.
 
-## Deterministic teardown contract
+## Deterministic teardown contract — unchanged
 
 Before the old Runtime is considered released:
 
@@ -77,59 +134,38 @@ Before the old Runtime is considered released:
 
 Stale callbacks from the old Runtime must not mutate the new Runtime.
 
-## Authorized tests
+## Current Phase 1 evidence
 
-- `FloatTabsTests/WebViewPoolTests.swift`
-- `FloatTabsTests/WebAttentionLifecycleTests.swift`
-- `FloatTabsTests/WebFocusAdapterTests.swift` only if required for the narrow existing observer fixture
-
-Required coverage remains the V2 plan matrix, including:
-
-- compatible state capture/restore without duplicate initial load;
-- URL fallback;
-- destructive release clears state;
-- Profile/rendering mismatch invalidation;
-- same-Profile sibling isolation;
-- deterministic teardown and stale callback rejection;
-- fresh Runtime identity;
-- weak old-WebView deallocation where deterministic;
-- eligible lifecycle/critical-Warm hibernate;
-- unchanged active/fullscreen/supplemental/media/Attention protection;
-- unchanged Generating/Ready semantics.
-
-## Current verification evidence
-
-Local executor previously reported:
+PR #170 currently reports:
 
 ```text
-focused tests: 174/174 PASS
+focused tests: 146 executed / 0 failures
 full tests: 1073 executed / 3 skipped / 0 failures
 Debug build: PASS
 Release build: PASS
-strict 1/2/4/8 benchmark: NOT RUN
+bounded live smoke: 2 existing Slots; resident drop and interactionState restore observed
+strict 1/2/4/8 benchmark: NOT RUN / DEFERRED TO PHASE 4
+PR: #170 OPEN
+PR head: b40bf1d63735700cb0c297d901bd284da1ac105a
+required PR CI: NO RUN CREATED
+mergeability: CONFLICTING
 ```
 
-Treat this as prior evidence. Refresh verification as appropriate on the final committed diff before PR audit/merge.
+These remain implementation evidence but cannot satisfy the repository-host gate until PR #170 is reconciled with current `main` and the required check runs on the literal reconciled head.
 
-## Phase 1 verification gate — current
+## Phase 1 verification gate — unchanged
 
-Required before merge:
+Required before Phase 1 merge:
 
 1. focused lifecycle regression tests pass;
 2. full unit suite has no new Phase 1 failures;
 3. Debug build passes;
 4. Release build passes;
-5. bounded 1–2 existing-Slot live Runtime smoke passes:
-   - eligible inactive Runtime becomes non-resident;
-   - reselect creates exactly one fresh Runtime;
-   - Profile login/session remains intact;
-   - same page/conversation returns through interaction-state restore or defined fallback;
-   - no obvious competing double-load;
-   - no obvious focus/fullscreen regression in the exercised path;
+5. bounded 1–2 existing-Slot live Runtime smoke passes;
 6. required GitHub `Build & Test (Apple Silicon arm64)` passes on the literal PR head;
 7. independent web audit passes.
 
-## Deferred to Phase 4 — not Phase 1 blockers
+## Deferred to Phase 4 — unchanged
 
 Do not block Phase 1 on:
 
@@ -142,64 +178,31 @@ Do not block Phase 1 on:
 - final restore p50/p95 policy threshold;
 - Runtime budget/ranking selection.
 
-Do not create temporary production Slots merely to satisfy the superseded V1 benchmark requirement.
+## STOP conditions
 
-## Out of scope / STOP before touching
+STOP and reconcile if:
 
-Do not modify without task reconciliation:
+- the CI corrective requires changing product source/tests;
+- the required check name would change and no branch-protection reconciliation is authorized;
+- no self-hosted runner matching `[self-hosted, macOS, ARM64, mac-mini-ci]` is available to FloatTabs after the corrective workflow is triggered;
+- the self-hosted runner is not arm64;
+- CI failure establishes an environment/toolchain incompatibility requiring broader runner bootstrap changes;
+- PR #170 reconciliation would discard or rewrite unknown unique product work;
+- any existing Phase 1 V2 STOP condition fires.
 
-- `PanelController.swift` product semantics;
-- `FullscreenSourceHost.swift`;
-- `WebFocusRouter.swift`;
-- `WebViewContainer.swift`;
-- Browser Profile datastore behavior/schema;
-- Attention generating/ready semantics;
-- durable Unread semantics;
-- completion notifications;
-- Hot/Warm/Cold UI/timing values;
-- automatic Runtime Budget/ranking;
-- Website Cache policy/data types;
-- permanent process-pool topology;
-- server Push/service-worker behavior;
-- native conversation preview.
-
-STOP if:
-
-- old WebView remains strongly reachable after deterministic teardown;
-- Profile/session/user-data safety requires a behavior/schema change;
-- public interactionState requires arbitrary timer/double-navigation/private API behavior;
-- stale old-Runtime callbacks can mutate the restored Runtime;
-- destructive paths accidentally retain/replay hibernate state;
-- proven Download/Fullscreen/Focus/Panel ownership requires new cross-domain semantics;
-- overlapping unique work appears;
-- required focused/full tests, Debug/Release build or required CI fail because of the Phase 1 change.
-
-Do not STOP merely because the real configuration has fewer than nine Slots or because the scale memory curve is not yet quantified.
+Do not treat `workflow runs = 0` on a conflicting PR as proof that the self-hosted runner is offline.
 
 ## Required executor outcome
 
-The executor must:
+For the CI corrective:
 
-1. preserve and inspect the existing dirty Phase 1 implementation;
-2. refresh `origin/main` after the V2 refreeze merges and reread current Authority;
-3. reconcile the existing diff against V2; do not rewrite valid work;
-4. correct only actual scope/correctness mismatches;
-5. run focused tests, full tests, Debug build and Release build on the final diff;
-6. perform the bounded 1–2 Slot live Runtime smoke without mutating real Slot/Profile data beyond normal use;
-7. commit and push one Phase 1 implementation branch;
-8. create/update one Phase 1 PR;
-9. allow required CI to run;
-10. stop for independent web audit.
+1. change only the authorized control/workflow files;
+2. push one corrective branch/PR;
+3. observe actual workflow creation and runner assignment;
+4. if required check passes on the self-hosted runner, merge the CI corrective;
+5. reconcile PR #170 with the new `main`;
+6. allow required Phase 1 PR CI to run;
+7. stop for independent web audit;
+8. do not merge or release Phase 1 product code without that audit.
 
-Do not merge and do not publish/release from the local construction handoff.
-
-## Rollback
-
-Rollback remains data-safe:
-
-- hibernate callers can return to destructive release;
-- restore snapshot storage/application can be removed independently;
-- deterministic teardown improvements may remain if independently verified;
-- no migration or persisted user-data rewrite exists in Phase 1.
-
-Production release is not authorized.
+Production release remains unauthorized.
