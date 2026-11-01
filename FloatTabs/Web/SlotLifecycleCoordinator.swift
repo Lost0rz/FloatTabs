@@ -8,12 +8,68 @@ enum SlotMemoryPressureLevel {
     case critical
 }
 
+private struct RuntimeBudgetPolicy {
+    static let defaultManagedResidentTarget = 3
+
+    struct Candidate {
+        let slotID: UUID
+        let residencyPolicy: SlotResidencyPolicy
+        let lastUsedAt: Date
+        let isProtected: Bool
+    }
+
+    struct Decision {
+        let target: Int
+        let managedResidentCount: Int
+        let evictSlotIDs: [UUID]
+        let oversubscribedBy: Int
+    }
+
+    static func decide(candidates: [Candidate], target: Int) -> Decision {
+        let normalizedTarget = max(target, 0)
+        let managedResidentCount = candidates.count
+        let requiredEvictions = max(managedResidentCount - normalizedTarget, 0)
+
+        let eligible = candidates
+            .filter { !$0.isProtected && $0.residencyPolicy != .hot }
+            .sorted { lhs, rhs in
+                let lhsRank = evictionRank(lhs.residencyPolicy)
+                let rhsRank = evictionRank(rhs.residencyPolicy)
+                if lhsRank != rhsRank {
+                    return lhsRank < rhsRank
+                }
+                if lhs.lastUsedAt != rhs.lastUsedAt {
+                    return lhs.lastUsedAt < rhs.lastUsedAt
+                }
+                return lhs.slotID.uuidString < rhs.slotID.uuidString
+            }
+
+        let evictSlotIDs = Array(eligible.prefix(requiredEvictions).map(\.slotID))
+        let remainingManaged = managedResidentCount - evictSlotIDs.count
+        return Decision(
+            target: normalizedTarget,
+            managedResidentCount: managedResidentCount,
+            evictSlotIDs: evictSlotIDs,
+            oversubscribedBy: max(remainingManaged - normalizedTarget, 0)
+        )
+    }
+
+    private static func evictionRank(_ policy: SlotResidencyPolicy) -> Int {
+        switch policy {
+        case .cold: return 0
+        case .warm: return 1
+        case .hot: return 2
+        }
+    }
+}
+
 @MainActor
 final class SlotLifecycleCoordinator {
     nonisolated static let defaultColdReleaseDelay: TimeInterval = 30
     nonisolated static let defaultWarmReleaseDelay: TimeInterval = 120
     nonisolated static let defaultHiddenActiveGraceDelay: TimeInterval = 120
     nonisolated static let defaultMediaProtectionPollDelay: TimeInterval = 10
+    nonisolated static let defaultManagedResidentTarget = RuntimeBudgetPolicy.defaultManagedResidentTarget
 
     typealias MediaPlayingQuery = (UUID, @escaping (Bool) -> Void) -> Void
     typealias MediaPauseAction = (UUID) -> Void
@@ -21,8 +77,6 @@ final class SlotLifecycleCoordinator {
     typealias RuntimeReleasePreparation = @MainActor (UUID) -> Void
     typealias SlotBecameInactiveHandler = @MainActor (WebAppProfile) -> Void
     typealias AttentionProtectionQuery = @MainActor (UUID) -> Bool
-    /// This query covers source work that must finish before a WebView can be
-    /// released. A source lease or a paused source is not sufficient here.
 
     private struct InactivePlan {
         let token: UUID
@@ -42,6 +96,7 @@ final class SlotLifecycleCoordinator {
     private var warmReleaseDelay: TimeInterval
     private let hiddenActiveGraceDelay: TimeInterval
     private let mediaProtectionPollDelay: TimeInterval
+    private let managedResidentTarget: Int
     private let mediaPlayingQuery: MediaPlayingQuery
     private let mediaPauseAction: MediaPauseAction
     private let onRuntimeReleased: RuntimeReleasedHandler
@@ -51,6 +106,7 @@ final class SlotLifecycleCoordinator {
     private let diagnostics: any RuntimeDiagnosticRecording
 
     private var inactivePlans: [UUID: InactivePlan] = [:]
+    private var knownProfiles: [UUID: WebAppProfile] = [:]
     private var mediaProtectedSlotIDs = Set<UUID>()
     private var hiddenActiveToken: UUID?
     private var activeSlotID: UUID?
@@ -58,6 +114,7 @@ final class SlotLifecycleCoordinator {
     private var supplementalVisibleProfile: WebAppProfile?
     private var panelIsVisible = false
     private var memoryPressureSource: DispatchSourceMemoryPressure?
+    private var budgetEvaluationInProgress = false
 
     init(
         webViewPool: WebViewPool,
@@ -66,6 +123,7 @@ final class SlotLifecycleCoordinator {
         warmReleaseDelay: TimeInterval = SlotLifecycleCoordinator.defaultWarmReleaseDelay,
         hiddenActiveGraceDelay: TimeInterval = SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay,
         mediaProtectionPollDelay: TimeInterval = SlotLifecycleCoordinator.defaultMediaProtectionPollDelay,
+        managedResidentTarget: Int = SlotLifecycleCoordinator.defaultManagedResidentTarget,
         mediaPlayingQuery: MediaPlayingQuery? = nil,
         mediaPauseAction: MediaPauseAction? = nil,
         onRuntimeReleased: @escaping RuntimeReleasedHandler = { _ in },
@@ -81,6 +139,7 @@ final class SlotLifecycleCoordinator {
         self.warmReleaseDelay = max(warmReleaseDelay, 0)
         self.hiddenActiveGraceDelay = max(hiddenActiveGraceDelay, 0)
         self.mediaProtectionPollDelay = max(mediaProtectionPollDelay, 0.01)
+        self.managedResidentTarget = max(managedResidentTarget, 0)
         self.mediaPlayingQuery = mediaPlayingQuery ?? { [weak webViewPool] slotID, completion in
             guard let webViewPool else {
                 completion(false)
@@ -116,9 +175,6 @@ final class SlotLifecycleCoordinator {
         self.coldReleaseDelay = normalizedColdDelay
         self.warmReleaseDelay = normalizedWarmDelay
 
-        // Existing dispatch work cannot be cancelled independently. Recreate
-        // only inactive Warm/Cold plans so a preference change takes effect
-        // immediately and old deadlines cannot release a Slot early.
         let profiles = inactivePlans.values.map(\.profile)
         for profile in profiles {
             guard profile.residencyPolicy == .warm || profile.residencyPolicy == .cold,
@@ -133,9 +189,11 @@ final class SlotLifecycleCoordinator {
             )
             createInactivePlan(for: profile)
         }
+        enforceRuntimeBudget(reason: "retention_settings_changed")
     }
 
     func reconcile(profiles: [WebAppProfile]) {
+        knownProfiles = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
         let validIDs = Set(profiles.map(\.id))
         let hotIDs = Set(profiles.filter { $0.residencyPolicy == .hot }.map(\.id))
 
@@ -171,10 +229,15 @@ final class SlotLifecycleCoordinator {
                 ensureInactivePlan(for: profile)
             }
         }
+
+        enforceRuntimeBudget(reason: "reconcile")
     }
 
     func setPanelVisible(_ visible: Bool, activeProfile: WebAppProfile?) {
         panelIsVisible = visible
+        if let activeProfile {
+            knownProfiles[activeProfile.id] = activeProfile
+        }
         diagnostics.record(
             event: visible ? "slot_lifecycle.panel_visible" : "slot_lifecycle.panel_hidden",
             level: .debug,
@@ -187,22 +250,19 @@ final class SlotLifecycleCoordinator {
         if visible {
             activeSlotID = activeProfile.id
             cancelInactivePlan(slotID: activeProfile.id)
+            enforceRuntimeBudget(reason: "panel_visible")
         } else if activeSlotID == activeProfile.id {
-            // Element fullscreen remains foreground content even when the
-            // FloatTabs shell is hidden. Never pause it or start the hidden
-            // active eviction chain while WebKit owns the fullscreen source.
             guard fullscreenSourceProfile?.id != activeProfile.id else { return }
             if activeProfile.backgroundMediaPolicy == .pauseWhenInactive {
                 mediaPauseAction(activeProfile.id)
             }
-            // Match webpage media's immediate background boundary. The
-            // hidden-active grace still controls WebView eviction below.
             onSlotBecameInactive(activeProfile)
             scheduleHiddenActiveTransition(profile: activeProfile)
         }
     }
 
     func activate(profile: WebAppProfile) {
+        knownProfiles[profile.id] = profile
         diagnostics.record(
             event: "slot_lifecycle.activate",
             level: .debug,
@@ -216,9 +276,11 @@ final class SlotLifecycleCoordinator {
         if !panelIsVisible {
             scheduleHiddenActiveTransition(profile: profile)
         }
+        enforceRuntimeBudget(reason: "activate")
     }
 
     func deactivate(profile: WebAppProfile) {
+        knownProfiles[profile.id] = profile
         guard fullscreenSourceProfile?.id != profile.id else { return }
         diagnostics.record(
             event: "slot_lifecycle.deactivate",
@@ -233,14 +295,11 @@ final class SlotLifecycleCoordinator {
         hiddenActiveToken = nil
         container.deactivate(slotID: profile.id, residencyPolicy: profile.residencyPolicy)
         prepareInactive(profile: profile)
+        enforceRuntimeBudget(reason: "deactivate")
     }
 
-    /// Restarts normal Warm/Cold handling after an attention runtime
-    /// reset removed protection from an already lifecycle-inactive Slot. A
-    /// reset can arrive after the old release timer has fired and been
-    /// skipped, so this deliberately creates a new plan rather than reusing
-    /// the old deadline.
     func restartAfterProtectionEnded(profile: WebAppProfile) {
+        knownProfiles[profile.id] = profile
         let slotID = profile.id
         guard let existingPlan = inactivePlans[slotID],
               existingPlan.residencyPolicy == profile.residencyPolicy,
@@ -252,27 +311,21 @@ final class SlotLifecycleCoordinator {
             return
         }
 
-        // Keep the media authority intact while the fresh plan re-checks it.
-        // The new media result will either continue protection or start a full
-        // policy delay from that result's observation time.
         let preserveMediaProtection = mediaProtectedSlotIDs.contains(slotID)
         cancelInactivePlan(
             slotID: slotID,
             preservingMediaProtection: preserveMediaProtection
         )
         createInactivePlan(for: profile)
+        enforceRuntimeBudget(reason: "protection_ended")
     }
 
-    /// Keep the existing attention-specific entry point while sharing the
-    /// same lifecycle restart engine with the lifecycle coordinator.
     func restartAfterAttentionProtectionEnded(profile: WebAppProfile) {
         restartAfterProtectionEnded(profile: profile)
     }
 
-    /// Explicitly protects the WebView WebKit is presenting in element
-    /// fullscreen. This is independent from shell visibility and active Tab
-    /// selection so a hidden shell can never pause or evict visible content.
     func beginFullscreenSourceVisibility(profile: WebAppProfile) {
+        knownProfiles[profile.id] = profile
         fullscreenSourceProfile = profile
         diagnostics.record(
             event: "slot_lifecycle.fullscreen_protected",
@@ -295,13 +348,11 @@ final class SlotLifecycleCoordinator {
             subsystem: "lifecycle",
             fields: ["slot_id": .string(profile.id.uuidString)]
         )
+        enforceRuntimeBudget(reason: "fullscreen_released")
     }
 
-    /// Protects a second foreground WebView while WebKit exclusively owns the
-    /// normal active WebView for element fullscreen. This preserves the existing
-    /// one-active-Slot contract while preventing a visible companion from being
-    /// evicted by an older inactive timer or memory-pressure pass.
     func beginSupplementalVisibility(profile: WebAppProfile) {
+        knownProfiles[profile.id] = profile
         if let previous = supplementalVisibleProfile,
            previous.id != profile.id {
             endSupplementalVisibility(profile: previous, prepareAsInactive: true)
@@ -316,9 +367,13 @@ final class SlotLifecycleCoordinator {
     ) {
         guard supplementalVisibleProfile?.id == profile.id else { return }
         supplementalVisibleProfile = nil
-        guard prepareAsInactive, activeSlotID != profile.id else { return }
+        guard prepareAsInactive, activeSlotID != profile.id else {
+            enforceRuntimeBudget(reason: "supplemental_visibility_ended")
+            return
+        }
         onSlotBecameInactive(profile)
         prepareInactive(profile: profile)
+        enforceRuntimeBudget(reason: "supplemental_visibility_ended")
     }
 
     func remove(slotID: UUID) {
@@ -332,8 +387,10 @@ final class SlotLifecycleCoordinator {
         if supplementalVisibleProfile?.id == slotID {
             supplementalVisibleProfile = nil
         }
+        knownProfiles.removeValue(forKey: slotID)
         cancelInactivePlan(slotID: slotID)
         container.removeSlot(slotID)
+        enforceRuntimeBudget(reason: "slot_removed")
     }
 
     func reset(slotIDs: Set<UUID>) {
@@ -343,6 +400,7 @@ final class SlotLifecycleCoordinator {
         supplementalVisibleProfile = nil
         inactivePlans.removeAll()
         mediaProtectedSlotIDs.removeAll()
+        knownProfiles.removeAll()
         for slotID in slotIDs {
             prepareRuntimeForRelease(slotID)
             container.removeSlot(slotID)
@@ -371,22 +429,17 @@ final class SlotLifecycleCoordinator {
             subsystem: "lifecycle",
             fields: pressureFields
         )
+
         recordMemoryPressureEvaluations(
             level: level,
             incidentContext: incidentContext
         )
-        switch level {
-        case .warning:
-            // Warning pressure is an observation boundary only. Warm retention
-            // owns the existing plan and deadline; only critical pressure may
-            // shorten it for an eligible inactive runtime.
-            break
-        case .critical:
-            evictInactiveWarmForMemoryPressure(
-                protectionBoundary: "memory_pressure",
-                incidentContext: incidentContext
-            )
-        }
+        enforceRuntimeBudget(
+            reason: level == .critical ? "memory_pressure_critical" : "memory_pressure_warning",
+            pressure: level,
+            incidentContext: incidentContext
+        )
+
         var completionFields = incidentContext.fields(phase: .closure)
         completionFields["incident_outcome"] = .string("evaluation_complete")
         diagnostics.record(
@@ -422,14 +475,11 @@ final class SlotLifecycleCoordinator {
             "lifecycle_pending_release_class": .string(plan?.residencyPolicy.rawValue ?? "none"),
             "lifecycle_media_protected": .bool(protection.media),
             "lifecycle_attention_protected": .bool(protection.attention),
+            "lifecycle_managed_resident_target": .integer(Int64(managedResidentTarget))
         ]
     }
 
     #if DEBUG
-    /// Read-only diagnostic: the current inactive-plan identity for a Slot.
-    /// Exposes existing internal state only — no mutation, no second plan
-    /// authority. Lets cross-feature tests observe that a protection-ending
-    /// attention reset actually produced a fresh plan boundary.
     func debugInactivePlanToken(slotID: UUID) -> UUID? {
         inactivePlans[slotID]?.token
     }
@@ -454,6 +504,7 @@ final class SlotLifecycleCoordinator {
     }
 
     private func prepareInactive(profile: WebAppProfile) {
+        knownProfiles[profile.id] = profile
         guard webViewPool.contains(slotID: profile.id) else {
             cancelInactivePlan(slotID: profile.id)
             return
@@ -548,6 +599,7 @@ final class SlotLifecycleCoordinator {
                     return
                 }
                 self.scheduleRelease(for: profile, plan: plan)
+                self.enforceRuntimeBudget(reason: "media_protection_ended")
             }
         }
     }
@@ -591,8 +643,6 @@ final class SlotLifecycleCoordinator {
                 return
             }
 
-            // This callback may have been queued before generation began.
-            // Attention is a live protection condition, not a plan snapshot.
             guard !self.isProactivelyProtected(slotID: profile.id) else {
                 let protection = self.protectionState(slotID: profile.id)
                 self.recordProtectionObservations(
@@ -638,14 +688,16 @@ final class SlotLifecycleCoordinator {
                     } else {
                         self.releaseInactiveSlot(
                             slotID: profile.id,
-                            expectedPlan: plan
+                            expectedPlan: plan,
+                            releaseReason: "retention_timer"
                         )
                     }
                 }
             } else {
                 self.releaseInactiveSlot(
                     slotID: profile.id,
-                    expectedPlan: plan
+                    expectedPlan: plan,
+                    releaseReason: "retention_timer"
                 )
             }
         }
@@ -672,10 +724,6 @@ final class SlotLifecycleCoordinator {
                 return
             }
 
-            // The lifecycle Boolean is an intent signal, not proof that the
-            // Web surface is off-screen. WebKit fullscreen restoration can
-            // reorder the source window independently, so never detach the
-            // selected page while its real host window is still presented.
             guard self.container.window?.isVisible != true else {
                 self.hiddenActiveToken = nil
                 return
@@ -698,44 +746,68 @@ final class SlotLifecycleCoordinator {
                 residencyPolicy: profile.residencyPolicy
             )
             self.prepareInactive(profile: profile)
+            self.enforceRuntimeBudget(reason: "hidden_active_grace_expired")
         }
     }
 
-    private func evictInactiveWarmForMemoryPressure(
-        protectionBoundary: String? = nil,
+    private func budgetCandidates() -> [RuntimeBudgetPolicy.Candidate] {
+        webViewPool.residentSlotIDs.compactMap { slotID in
+            guard let profile = knownProfiles[slotID],
+                  profile.residencyPolicy == .warm || profile.residencyPolicy == .cold else {
+                return nil
+            }
+
+            let hasInactivePlan = inactivePlans[slotID] != nil
+            let protected = isVisibleSlot(slotID)
+                || isProactivelyProtected(slotID: slotID)
+                || !hasInactivePlan
+            return RuntimeBudgetPolicy.Candidate(
+                slotID: slotID,
+                residencyPolicy: profile.residencyPolicy,
+                lastUsedAt: profile.lastUsedAt,
+                isProtected: protected
+            )
+        }
+    }
+
+    private func budgetDecision(for pressure: SlotMemoryPressureLevel? = nil) -> RuntimeBudgetPolicy.Decision {
+        let target = pressure == .critical ? 0 : managedResidentTarget
+        return RuntimeBudgetPolicy.decide(
+            candidates: budgetCandidates(),
+            target: target
+        )
+    }
+
+    private func enforceRuntimeBudget(
+        reason: String,
+        pressure: SlotMemoryPressureLevel? = nil,
         incidentContext: RuntimeDiagnosticIncidentContext? = nil
     ) {
-        let candidates = inactivePlans.compactMap { slotID, plan -> (UUID, InactivePlan)? in
-            guard plan.residencyPolicy == .warm else {
-                return nil
-            }
-            guard !isVisibleSlot(slotID) else {
-                return nil
-            }
+        guard !budgetEvaluationInProgress else { return }
+        budgetEvaluationInProgress = true
+        defer { budgetEvaluationInProgress = false }
 
-            guard !isProactivelyProtected(slotID: slotID) else {
-                let protection = protectionState(slotID: slotID)
-                if let protectionBoundary {
-                    recordProtectionObservations(
-                        slotID: slotID,
-                        boundary: protectionBoundary,
-                        planToken: plan.token,
-                        protection: protection
-                    )
-                }
-                return nil
-            }
-            guard webViewPool.contains(slotID: slotID) else {
-                return nil
-            }
-            return (slotID, plan)
-        }
+        let decision = budgetDecision(for: pressure)
+        diagnostics.record(
+            event: "slot_lifecycle.runtime_budget",
+            level: decision.evictSlotIDs.isEmpty ? .info : .notice,
+            subsystem: "lifecycle",
+            fields: [
+                "reason": .string(reason),
+                "target": .integer(Int64(decision.target)),
+                "managed_resident_count": .integer(Int64(decision.managedResidentCount)),
+                "eviction_count": .integer(Int64(decision.evictSlotIDs.count)),
+                "oversubscribed_by": .integer(Int64(decision.oversubscribedBy))
+            ]
+        )
 
-        for (slotID, plan) in candidates {
+        for slotID in decision.evictSlotIDs {
+            guard let plan = inactivePlans[slotID] else { continue }
             releaseInactiveSlot(
                 slotID: slotID,
                 expectedPlan: plan,
-                memoryPressureIncident: incidentContext
+                memoryPressureIncident: incidentContext,
+                releaseReason: reason
             )
         }
     }
@@ -744,39 +816,19 @@ final class SlotLifecycleCoordinator {
         level: SlotMemoryPressureLevel,
         incidentContext: RuntimeDiagnosticIncidentContext
     ) {
+        let decision = budgetDecision(for: level)
+        let selected = Set(decision.evictSlotIDs)
+        let pressureLevel = level == .critical ? "critical" : "warning"
+
         for slotID in webViewPool.residentSlotIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
             let plan = inactivePlans[slotID]
             let protection = protectionState(slotID: slotID)
             let visible = isVisibleSlot(slotID)
-            let policy = plan?.residencyPolicy ?? webViewPool.residencyPolicy(for: slotID)
-            let pressureLevel = level == .critical ? "critical" : "warning"
-            let resident = webViewPool.contains(slotID: slotID)
-            let eligible = policy == .warm
-                && plan != nil
-                && resident
-                && !visible
-                && !protection.media
-                && !protection.attention
-            let candidateReason: String
-            if policy != .warm {
-                candidateReason = "not_warm"
-            } else if visible {
-                candidateReason = "visible"
-            } else if protection.media {
-                candidateReason = "media_protected"
-            } else if protection.attention {
-                candidateReason = "attention_protected"
-            } else if plan == nil {
-                candidateReason = "no_pending_release_plan"
-            } else if !resident {
-                candidateReason = "not_resident"
-            } else {
-                candidateReason = "\(pressureLevel)_pressure_eligible"
-            }
-            let diagnosticsOnly = level == .warning
-            let releaseEligible = diagnosticsOnly ? false : eligible
-            let decision = diagnosticsOnly ? "observe" : (eligible ? "hibernate" : "skip")
-            let reason = diagnosticsOnly ? "warning_diagnostics_only" : candidateReason
+            let policy = knownProfiles[slotID]?.residencyPolicy
+                ?? plan?.residencyPolicy
+                ?? webViewPool.residencyPolicy(for: slotID)
+            let managed = policy == .warm || policy == .cold
+            let selectedForRelease = selected.contains(slotID)
 
             var fields = incidentContext.fields(phase: .trigger)
             fields.merge([
@@ -790,14 +842,16 @@ final class SlotLifecycleCoordinator {
                 "pending_release_class": .string(plan?.residencyPolicy.rawValue ?? "none"),
                 "media_protected": .bool(protection.media),
                 "attention_protected": .bool(protection.attention),
-                "release_eligible": .bool(releaseEligible),
-                "decision": .string(decision),
-                "release_reason": .string(reason),
+                "managed_runtime": .bool(managed),
+                "release_eligible": .bool(selectedForRelease),
+                "decision": .string(selectedForRelease ? "hibernate" : "keep"),
+                "release_reason": .string(selectedForRelease ? "runtime_budget" : "protected_or_within_target"),
+                "budget_target": .integer(Int64(decision.target)),
                 "web_process_resource_attribution": .string("unavailable_public_api")
             ]) { _, new in new }
             diagnostics.record(
                 event: "slot_lifecycle.memory_pressure_slot",
-                level: releaseEligible ? .notice : .info,
+                level: selectedForRelease ? .notice : .info,
                 subsystem: "lifecycle",
                 fields: fields
             )
@@ -807,7 +861,8 @@ final class SlotLifecycleCoordinator {
     private func releaseInactiveSlot(
         slotID: UUID,
         expectedPlan: InactivePlan? = nil,
-        memoryPressureIncident: RuntimeDiagnosticIncidentContext? = nil
+        memoryPressureIncident: RuntimeDiagnosticIncidentContext? = nil,
+        releaseReason: String = "inactive_release"
     ) {
         guard let currentPlan = inactivePlans[slotID],
               expectedPlan.map({ $0.token == currentPlan.token }) ?? true,
@@ -833,7 +888,8 @@ final class SlotLifecycleCoordinator {
             subsystem: "lifecycle",
             fields: [
                 "slot_id": .string(slotID.uuidString),
-                "inactive_plan_id": .string(currentPlan.token.uuidString)
+                "inactive_plan_id": .string(currentPlan.token.uuidString),
+                "release_reason": .string(releaseReason)
             ]
         )
         prepareRuntimeForRelease(slotID)
@@ -842,14 +898,10 @@ final class SlotLifecycleCoordinator {
         cancelInactivePlan(slotID: slotID)
         onRuntimeReleased(currentPlan.profile)
         if let memoryPressureIncident {
-            let pressureLevel = memoryPressureIncident.trigger
-            let releaseReason = pressureLevel == "warning"
-                ? "warning_pressure_eligible"
-                : "critical_pressure_eligible"
             var fields = memoryPressureIncident.fields(phase: .recovery)
             fields.merge([
                 "slot_id": .string(slotID.uuidString),
-                "pressure_level": .string(pressureLevel),
+                "pressure_level": .string(memoryPressureIncident.trigger),
                 "release_eligible": .bool(true),
                 "decision": .string("hibernate"),
                 "action": .string("hibernate_completed"),
@@ -894,9 +946,6 @@ final class SlotLifecycleCoordinator {
             || supplementalVisibleProfile?.id == slotID
     }
 
-    /// Composes independent lifecycle authorities at the eviction boundary.
-    /// Attention state remains owned by WebAttentionCoordinator and media state
-    /// remains owned by this coordinator's existing media query/storage.
     private func isProactivelyProtected(slotID: UUID) -> Bool {
         mediaProtectedSlotIDs.contains(slotID)
             || attentionProtectionQuery(slotID)
