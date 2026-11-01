@@ -6065,6 +6065,374 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
         XCTAssertFalse(writer.events.contains { $0.event == "unread.removed" })
     }
+
+    // MARK: 4.9 Phase 3 native completion notification projection
+
+    /// Gate B1: a hidden valid completion whose durable unread result is
+    /// `.marked` emits exactly one notification projection callback, while the
+    /// existing generation-completed sound callback stays unchanged.
+    func testHiddenMarkedCompletionEmitsExactlyOneNotificationProjection() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        var notificationCount = 0
+        var soundCount = 0
+        controller.onChatGPTUnreadCompletionMarked = { _ in
+            notificationCount += 1
+        }
+        controller.onChatGPTGenerationCompleted = { _ in
+            soundCount += 1
+        }
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "phase3-hidden-completion"
+        )
+
+        XCTAssertEqual(notificationCount, 1)
+        XCTAssertEqual(soundCount, 1)
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    /// Gate B2: a visible completion emits no notification projection but
+    /// keeps the existing sound callback.
+    func testVisibleCompletionEmitsNoNotificationProjection() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        controller.debugSetPresentationFactOverride(
+            slotID: slot.id,
+            presentationFact: true
+        )
+        defer { controller.debugClearPresentationFactOverride(slotID: slot.id) }
+        var notificationCount = 0
+        var soundCount = 0
+        controller.onChatGPTUnreadCompletionMarked = { _ in
+            notificationCount += 1
+        }
+        controller.onChatGPTGenerationCompleted = { _ in
+            soundCount += 1
+        }
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "phase3-visible-completion"
+        )
+
+        XCTAssertEqual(notificationCount, 0)
+        XCTAssertEqual(soundCount, 1)
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    /// Gate B3: stray/invalid finishes and runtime resets never notify.
+    func testStrayFinishAndRuntimeResetEmitNoNotificationProjection() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        var notificationCount = 0
+        var soundCount = 0
+        controller.onChatGPTUnreadCompletionMarked = { _ in
+            notificationCount += 1
+        }
+        controller.onChatGPTGenerationCompleted = { _ in
+            soundCount += 1
+        }
+
+        // No generating baseline: this finish is stray/invalid.
+        pool.onAttentionObservation?(slot.id, .generationFinished)
+        pool.onAttentionObservation?(slot.id, .runtimeReset)
+
+        XCTAssertEqual(notificationCount, 0)
+        XCTAssertEqual(soundCount, 0)
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    /// Gate B4: an already-handled duplicate completion emits no new
+    /// notification; the sound callback still reports the valid completion.
+    func testAlreadyHandledDuplicateCompletionEmitsNoNewNotificationProjection() async throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:phase3-duplicate-identity")
+        )
+        var notificationCount = 0
+        var soundCount = 0
+        controller.onChatGPTUnreadCompletionMarked = { _ in
+            notificationCount += 1
+        }
+        controller.onChatGPTGenerationCompleted = { _ in
+            soundCount += 1
+        }
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "phase3-duplicate-token",
+            responseIdentity: identity
+        )
+        XCTAssertEqual(notificationCount, 1)
+
+        // The user processes the exact response through the existing
+        // presentation-aware acknowledgement.
+        XCTAssertTrue(
+            controller.debugInvokeRailSelection(slotID: slot.id, presentationFact: true)
+        )
+        let acknowledged = try await waitUntil {
+            !controller.unreadResponseSlotIDs.contains(slot.id)
+        }
+        XCTAssertTrue(acknowledged)
+
+        // A later cycle finishes with the exact same response identity.
+        acceptState(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "phase3-duplicate-token"
+        )
+        acceptState(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "phase3-duplicate-token",
+            responseIdentity: identity
+        )
+
+        XCTAssertEqual(notificationCount, 1)
+        XCTAssertEqual(soundCount, 2)
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    /// Gate B5: a later distinct hidden response in the same Slot emits a new
+    /// notification projection.
+    func testLaterDistinctHiddenResponseEmitsNewNotificationProjection() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        let firstIdentity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:phase3-distinct-first")
+        )
+        let secondIdentity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:phase3-distinct-second")
+        )
+        var notificationCount = 0
+        controller.onChatGPTUnreadCompletionMarked = { _ in
+            notificationCount += 1
+        }
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "phase3-distinct-token",
+            responseIdentity: firstIdentity
+        )
+        // A later distinct hidden response in the same Slot finishes with a
+        // new response identity on the same document.
+        acceptState(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "phase3-distinct-token"
+        )
+        acceptState(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "phase3-distinct-token",
+            responseIdentity: secondIdentity
+        )
+
+        XCTAssertEqual(notificationCount, 2)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    // MARK: 4.10 Phase 3 notification exact-Slot routing
+
+    /// Gate C1: the notification route selects the exact persistent Slot
+    /// BEFORE presenting FloatTabs, so the prior active Slot's runtime is not
+    /// re-materialized by the presentation path.
+    func testNotificationRouteSelectsExactSlotBeforePresentingIt() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
+            ]
+        )
+        let slotA = try profile(named: "ChatA", in: store)
+        let slotB = try profile(named: "ChatB", in: store)
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        XCTAssertEqual(store.activeTabID, slotA.id)
+        // ChatA's runtime is reclaimed first: if presentation ran before the
+        // exact-Slot selection, synchronizing the still-active ChatA would
+        // re-materialize its runtime.
+        pool.hibernate(slotID: slotA.id)
+        XCTAssertNil(pool.existingWebView(for: slotA.id))
+
+        let routed = controller.presentSlotFromCompletionNotification(slotB.id)
+
+        XCTAssertTrue(routed)
+        XCTAssertEqual(store.activeTabID, slotB.id)
+        XCTAssertNotNil(pool.existingWebView(for: slotB.id))
+        XCTAssertNil(
+            pool.existingWebView(for: slotA.id),
+            "Presentation must not re-materialize the previously active Slot"
+        )
+    }
+
+    /// Gate C2: a stale/deleted target routes unavailable with no fallback
+    /// selection, no runtime materialization, and no user-data mutation.
+    func testStaleNotificationTargetNeverFallsBackOrMaterializesRuntime() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
+            ]
+        )
+        let slotA = try profile(named: "ChatA", in: store)
+        let slotB = try profile(named: "ChatB", in: store)
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        XCTAssertEqual(store.activeTabID, slotA.id)
+
+        // Unknown random identifier.
+        XCTAssertFalse(
+            controller.presentSlotFromCompletionNotification(UUID())
+        )
+        XCTAssertEqual(store.activeTabID, slotA.id)
+
+        // The actual target Slot was deleted after the notification existed.
+        XCTAssertTrue(controller.debugRemoveConfirmedSlot(slotID: slotB.id))
+        XCTAssertNil(store.profiles.first { $0.id == slotB.id })
+
+        XCTAssertFalse(
+            controller.presentSlotFromCompletionNotification(slotB.id)
+        )
+        XCTAssertEqual(
+            store.activeTabID,
+            slotA.id,
+            "A stale target must never fall back to the current Slot"
+        )
+        XCTAssertNil(pool.existingWebView(for: slotB.id))
+    }
+
+    /// Gate C4: notification activation never pre-clears durable unread;
+    /// clearing still follows the existing presentation-aware acknowledgement
+    /// semantics.
+    func testNotificationTapDoesNotPreClearUnread() async throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
+            ]
+        )
+        let slotA = try profile(named: "ChatA", in: store)
+        let slotB = try profile(named: "ChatB", in: store)
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let (bProfile, bWebView) = try materializeRuntime(
+            pool: pool,
+            store: store,
+            slotName: "ChatB"
+        )
+        XCTAssertEqual(store.activeTabID, slotA.id)
+        let bridge = try attentionBridge(pool: pool, slot: bProfile)
+        completeGeneration(
+            bridge: bridge,
+            webView: bWebView,
+            token: "phase3-tap-acknowledgement"
+        )
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
+
+        // Presentation stays not visible: the tap itself must not clear the
+        // durable unread marker, including after the deferred re-check.
+        controller.debugSetPresentationFactOverride(
+            slotID: slotB.id,
+            presentationFact: false
+        )
+        defer { controller.debugClearPresentationFactOverride(slotID: slotB.id) }
+        XCTAssertTrue(
+            controller.presentSlotFromCompletionNotification(slotB.id)
+        )
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
+        try await wait(milliseconds: 50)
+        XCTAssertTrue(
+            controller.unreadResponseSlotIDs.contains(slotB.id),
+            "Notification activation must not pre-clear unread before presentation"
+        )
+
+        // Once the target is actually presented, the existing explicit
+        // selection acknowledgement clears it.
+        XCTAssertTrue(
+            controller.debugInvokeRailSelection(slotID: slotB.id, presentationFact: true)
+        )
+        let acknowledged = try await waitUntil {
+            !controller.unreadResponseSlotIDs.contains(slotB.id)
+        }
+        XCTAssertTrue(acknowledged)
+    }
+
+    /// Gate C3/C5/C6: a non-resident target is restored through the existing
+    /// lifecycle ownership into exactly one runtime, routing depends only on
+    /// the persistent Slot UUID, and Slot/Browser Profile configuration is
+    /// unchanged.
+    func testNonResidentNotificationTargetRestoresThroughExistingLifecyclePath() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
+            ]
+        )
+        let slotA = try profile(named: "ChatA", in: store)
+        let slotB = try profile(named: "ChatB", in: store)
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        XCTAssertEqual(store.activeTabID, slotA.id)
+        let (bProfile, bWebView) = try materializeRuntime(
+            pool: pool,
+            store: store,
+            slotName: "ChatB"
+        )
+        let bridge = try attentionBridge(pool: pool, slot: bProfile)
+        completeGeneration(
+            bridge: bridge,
+            webView: bWebView,
+            token: "phase3-nonresident-restore"
+        )
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
+
+        // The runtime is reclaimed while the durable unread persists.
+        pool.hibernate(slotID: slotB.id)
+        XCTAssertNil(pool.existingWebView(for: slotB.id))
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
+
+        let profilesBefore = store.profiles.map(\.id)
+        let browserProfilesBefore = store.browserProfiles
+
+        let routed = controller.presentSlotFromCompletionNotification(slotB.id)
+
+        XCTAssertTrue(routed)
+        XCTAssertEqual(store.activeTabID, slotB.id)
+        XCTAssertNotNil(
+            pool.existingWebView(for: slotB.id),
+            "The existing lifecycle path must restore the non-resident target runtime"
+        )
+        XCTAssertEqual(store.profiles.map(\.id), profilesBefore)
+        XCTAssertEqual(store.browserProfiles, browserProfilesBefore)
+    }
 }
 
 @MainActor

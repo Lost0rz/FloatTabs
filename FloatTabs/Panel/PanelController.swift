@@ -1106,6 +1106,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     var onSelectedSlotPresentationChange: ((String?, URL?) -> Void)?
     var onAttentionPresentationChange: ((Int, Bool) -> Void)?
     var onChatGPTGenerationCompleted: ((UUID) -> Void)?
+    /// One-shot projection callback for a durable unread `.marked` completion.
+    /// Distinct from `onChatGPTGenerationCompleted`: visible completions,
+    /// stray finishes, and already-handled duplicates never fire it.
+    var onChatGPTUnreadCompletionMarked: ((UUID) -> Void)?
     var onOpenGlobalSettings: (() -> Void)?
 
     init(
@@ -3428,6 +3432,12 @@ final class PanelController: NSObject, NSWindowDelegate {
                 source: .generationStarted
             )
         }
+        // Native completion notification is a projection of the durable
+        // unread `.marked` transition only — never of the generic completion
+        // callback below, which also fires for visible completions.
+        if case .marked = completionResult {
+            onChatGPTUnreadCompletionMarked?(slotID)
+        }
         if isValidGenerationCompletion {
             onChatGPTGenerationCompleted?(slotID)
         }
@@ -3551,6 +3561,40 @@ final class PanelController: NSObject, NSWindowDelegate {
     ) -> Bool {
         let trace = trace ?? diagnostics.beginTrace(root: "tab.selection")
         guard tabStore.select(id: slotID, trace: trace) else { return false }
+        acknowledgeUnreadAfterExplicitSelection(slotID: slotID, trace: trace)
+        return true
+    }
+
+    /// Phase 3 native-notification activation route. Selects the exact
+    /// persistent Slot through the canonical TabStore selector BEFORE
+    /// presenting FloatTabs, lets the existing synchronization/restoration
+    /// path supply any missing Runtime, and relies on the existing
+    /// presentation-aware explicit-selection unread acknowledgement. This
+    /// route never clears unread itself and never falls back to the current
+    /// Slot when the target is stale.
+    func presentSlotFromCompletionNotification(
+        _ slotID: UUID,
+        trace: RuntimeDiagnosticTrace? = nil
+    ) -> Bool {
+        let trace = trace ?? diagnostics.beginTrace(root: "notification.route")
+        diagnostics.record(
+            event: "notification.route.received",
+            level: .info,
+            subsystem: "notification",
+            trace: trace,
+            fields: ["slot_id": .string(slotID.uuidString)]
+        )
+        guard tabStore.select(id: slotID, trace: trace) else {
+            diagnostics.record(
+                event: "notification.route.unavailable",
+                level: .warning,
+                subsystem: "notification",
+                trace: trace,
+                fields: ["slot_id": .string(slotID.uuidString)]
+            )
+            return false
+        }
+        presentFloatTabs(trace: trace)
         acknowledgeUnreadAfterExplicitSelection(slotID: slotID, trace: trace)
         return true
     }

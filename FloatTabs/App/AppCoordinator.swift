@@ -33,6 +33,7 @@ final class AppCoordinator {
     private let panelController: PanelController
     private let diagnostics: RuntimeDiagnostics
     private let diagnosticExporter: RuntimeDiagnosticExporter
+    private let completionNotificationCoordinator: ChatGPTCompletionNotificationCoordinator
     private var statusItemController: StatusItemController?
     private var globalHotkeyController: GlobalHotkeyController?
     private var appCommandController: AppCommandController?
@@ -91,6 +92,9 @@ final class AppCoordinator {
         self.preferencesStore = resolvedPreferencesStore
         self.diagnostics = diagnostics
         self.diagnosticExporter = RuntimeDiagnosticExporter(diagnostics: diagnostics)
+        self.completionNotificationCoordinator = ChatGPTCompletionNotificationCoordinator(
+            diagnostics: diagnostics
+        )
         self.backupService = backupService
         self.attentionSoundAssetStore = resolvedAttentionSoundAssetStore
         self.attentionSoundPlayer = attentionSoundPlayer
@@ -146,6 +150,19 @@ final class AppCoordinator {
             trace: trace,
             fields: diagnostics.environmentFields()
         )
+        // Install the native-notification delegate during normal startup,
+        // before any completion notification can be delivered, and wire the
+        // Phase 3 projection: durable unread `.marked` → native notification;
+        // notification default action → exact persistent Slot presentation.
+        // The existing onChatGPTGenerationCompleted sound route stays
+        // unchanged and independent.
+        completionNotificationCoordinator.installAtStartup()
+        completionNotificationCoordinator.onRouteSlot = { [weak self] slotID in
+            _ = self?.panelController.presentSlotFromCompletionNotification(slotID)
+        }
+        panelController.onChatGPTUnreadCompletionMarked = { [weak completionNotificationCoordinator] slotID in
+            completionNotificationCoordinator?.notify(slotID: slotID)
+        }
         resolveStartupConfigurationRecoveryIfNeeded()
 
         let websiteCacheCoordinator = panelController.websiteCacheCleanupCoordinator(
