@@ -18,12 +18,12 @@ For source/Authority routing, use:
 For `FT-RUNTIME-LIFECYCLE-MEMORY-001`, current architecture authority is:
 
 - [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md) — **ACCEPTED / FROZEN** current program-level contract;
-- [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md) — **ACCEPTED / FROZEN** current Phase 1 implementation plan;
+- [`FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md) — **ACCEPTED / FROZEN** current Phase 2 implementation plan;
 - `CURRENT_STATUS.md` — current program/phase/evidence state;
 - `CURRENT_TASK.md` — the only active execution authorization;
 - production code/tests/fresh runtime evidence.
 
-The V2 program contract preserves the accepted target architecture — persistent Slot/Profile/product state with disposable `WKWebView` Runtime cache — and refreezes the program cadence as architecture-first:
+The V2 program contract preserves the accepted target architecture — persistent Slot/Profile/product state with disposable `WKWebView` Runtime cache — and the architecture-first cadence:
 
 ```text
 structural correctness
@@ -33,27 +33,41 @@ structural correctness
 → scale benchmark / policy tuning when Phase 4 needs it
 ```
 
-Phase 1 no longer requires the strict 1/2/4/8 scale benchmark as a merge blocker. That matrix, control-drift study, heavy 4/8 repeated runs, restore distribution and final Runtime-budget decision belong to Phase 4 Runtime Budget / Policy.
+Phase 1 Safe Hibernate + Restore is complete. Its accepted V2 plan remains historical Phase 1 evidence, not current Phase 2 authorization.
 
-Phase 1 still requires deterministic teardown, restore correctness, stale-callback safety, Browser Profile/session safety, focused/full tests, Debug/Release builds, bounded 1–2 Slot live Runtime smoke, required PR CI and independent web audit.
+Phase 2 now freezes the next ownership split:
 
-## Superseded Runtime Lifecycle documents
+```text
+Runtime Attention
+  generating -> may protect Runtime
+  ready      -> transient only; does not protect Runtime
 
+Durable Unread
+  ChatGPTUnreadResponseCoordinator + UnreadResponseStore
+  -> survives Runtime reclamation
+  -> owns persistent unread presentation
+```
+
+The current Phase 2 plan defines exact production/test scope, completion-handoff ordering, verification gates and STOP conditions.
+
+## Completed / superseded Runtime Lifecycle documents
+
+- [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md) — accepted/frozen delivered Phase 1 plan; Phase 1 is complete.
 - [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md) — historical program-contract evidence. Its strict Phase 1 scale-benchmark/STOP gate is superseded by V2.
-- [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md) — historical Phase 1 audit/plan evidence. Its 1/2/4/8 benchmark acceptance gate is superseded by the V2 plan.
+- [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md) — historical Phase 1 audit/plan evidence. Its 1/2/4/8 benchmark acceptance gate is superseded by the V2 cadence.
 
-Their audit facts and rationale remain useful historical evidence where they do not conflict with current V2 Authority.
+Their audit facts and rationale remain useful historical evidence where they do not conflict with current V2/Phase 2 Authority.
 
 ## Current behavior
 
 For shell interaction, rail geometry, movement, resize and fullscreen coordination, use:
 
 - [`../design/FloatTabs_UI_Design_System_v1.3.md`](../design/FloatTabs_UI_Design_System_v1.3.md) for unaffected shell/rail behavior;
-- [`../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md`](../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md) for the accepted active-Tab and unread-Attention refinement merged in PR #146;
+- [`../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md`](../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md) for the accepted active-Tab and unread-Attention visual refinement merged in PR #146;
 - production code and regression tests on `main`;
 - the current release record under `../release/` only as version-specific historical evidence.
 
-Where the Attention/active-Tab refinement contract disagrees with the older Attention subsection in UI Design System v1.3, the refinement contract is the current accepted behavior for that bounded surface.
+Where the Attention/active-Tab refinement contract disagrees with the older Attention subsection in UI Design System v1.3, the refinement contract is the current accepted behavior for that bounded surface. Phase 2 changes the durable state source for persistent unread projection; it does not redesign these visual treatments.
 
 The supported runtime and release architecture is Apple Silicon arm64 only.
 
@@ -64,9 +78,11 @@ Runtime Diagnostics is an evidence plane, not a product-state owner. The canonic
 Current boundaries:
 
 - `SlotNavigationObserver` owns navigation/runtime observations and emits liveness, stall, termination, recovery-progress and healthy-closure evidence;
-- `WebViewPool` / `SlotLifecycleCoordinator` own runtime/recovery/residency decisions and expose dispositions as evidence;
-- `ChatGPTAttentionBridge` owns Attention runtime behavior and emits typed abnormal-path evidence without transferring Attention business-state ownership to Diagnostics;
-- `PanelController` can contribute bounded presentation/focus facts without making Diagnostics a window authority;
+- `WebViewPool` / `SlotLifecycleCoordinator` own runtime/recovery/residency execution decisions and expose dispositions as evidence;
+- `ChatGPTAttentionBridge` owns Attention runtime sensing and emits typed abnormal-path evidence without becoming durable unread authority;
+- `WebAttentionCoordinator` owns transient Attention state;
+- `ChatGPTUnreadResponseCoordinator` / `UnreadResponseStore` own durable unread semantics;
+- `PanelController` composes the completion handoff and bounded presentation/focus facts without becoming a second persistence owner;
 - `RuntimeDiagnostics` persists/correlates privacy-filtered evidence but never defines root cause from event presence alone.
 
 Public WebKit APIs do not provide reliable exact per-WebContent-process-to-Slot memory attribution. Diagnostics must preserve that limitation.
