@@ -180,6 +180,8 @@ Real macOS interaction/runtime changes require relevant runtime acceptance befor
 
 For the active Runtime Lifecycle / Memory program, timing-sensitive real-product interaction acceptance is program-final unless a phase contract explicitly requires earlier evidence for a safety or architecture decision. Local AI/Computer Use may assist debugging or evidence collection when explicitly needed, but should not impersonate the final human acceptance operator or block construction solely because an AI-driven UI smoke is awkward to reproduce.
 
+When the user explicitly chooses a reference-derived default for a performance policy, empirical tuning benchmarks may be deferred to a later tuning pass. That deferral does **not** waive code correctness, data-safety boundaries, or repository-required CI unless the user separately changes those gates. Record the chosen default as a product assumption rather than as measured truth.
+
 Before merge/release, separately confirm current PR base/head, exact diff, required CI, reviews/mergeability, task scope, Authority integrity, and the acceptance gates applicable **at that boundary**. Repository-host gates apply to the literal identity GitHub governs and cannot be inferred from older semantic evidence.
 
 ## CI execution
