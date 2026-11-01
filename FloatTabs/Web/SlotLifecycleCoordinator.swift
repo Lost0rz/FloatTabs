@@ -108,6 +108,7 @@ final class SlotLifecycleCoordinator {
     private var inactivePlans: [UUID: InactivePlan] = [:]
     private var knownProfiles: [UUID: WebAppProfile] = [:]
     private var mediaProtectedSlotIDs = Set<UUID>()
+    private var mediaProtectionPendingSlotIDs = Set<UUID>()
     private var hiddenActiveToken: UUID?
     private var activeSlotID: UUID?
     private var fullscreenSourceProfile: WebAppProfile?
@@ -400,6 +401,7 @@ final class SlotLifecycleCoordinator {
         supplementalVisibleProfile = nil
         inactivePlans.removeAll()
         mediaProtectedSlotIDs.removeAll()
+        mediaProtectionPendingSlotIDs.removeAll()
         knownProfiles.removeAll()
         for slotID in slotIDs {
             prepareRuntimeForRelease(slotID)
@@ -554,6 +556,7 @@ final class SlotLifecycleCoordinator {
         )
 
         if profile.backgroundMediaPolicy == .allowBackgroundAudio {
+            mediaProtectionPendingSlotIDs.insert(profile.id)
             evaluateMediaProtection(for: profile, plan: plan)
         } else {
             scheduleRelease(for: profile, plan: plan)
@@ -572,6 +575,7 @@ final class SlotLifecycleCoordinator {
                 return
             }
 
+            self.mediaProtectionPendingSlotIDs.remove(profile.id)
             if isPlaying {
                 let wasProtected = self.mediaProtectedSlotIDs.insert(profile.id).inserted
                 if wasProtected {
@@ -953,6 +957,7 @@ final class SlotLifecycleCoordinator {
                 ]
             )
         }
+        mediaProtectionPendingSlotIDs.remove(slotID)
         if !preservingMediaProtection {
             mediaProtectedSlotIDs.remove(slotID)
         }
@@ -970,12 +975,14 @@ final class SlotLifecycleCoordinator {
 
     private func isProactivelyProtected(slotID: UUID) -> Bool {
         mediaProtectedSlotIDs.contains(slotID)
+            || mediaProtectionPendingSlotIDs.contains(slotID)
             || attentionProtectionQuery(slotID)
     }
 
     private func protectionState(slotID: UUID) -> ProtectionState {
         ProtectionState(
-            media: mediaProtectedSlotIDs.contains(slotID),
+            media: mediaProtectedSlotIDs.contains(slotID)
+                || mediaProtectionPendingSlotIDs.contains(slotID),
             attention: attentionProtectionQuery(slotID)
         )
     }
