@@ -24,7 +24,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         attentionProtected = false
     }
 
-    func testRuntimeReleasePreparationRunsBeforeWebViewRelease() async throws {
+    func testRuntimeReleasePreparationRunsBeforeWebViewHibernate() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "ReleaseOrder", policy: .cold)
         _ = try pool.webView(for: profile)
@@ -50,7 +50,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(wasResidentDuringPreparation)
         XCTAssertEqual(releasedProfile?.id, profile.id)
         XCTAssertFalse(pool.contains(slotID: profile.id))
-        let release = try XCTUnwrap(writer.events.first { $0.event == "slot_lifecycle.release" })
+        let release = try XCTUnwrap(writer.events.first { $0.event == "slot_lifecycle.hibernate" })
         let cancelled = try XCTUnwrap(
             writer.events.first { $0.event == "slot_lifecycle.inactive_plan.cancelled" }
         )
@@ -384,7 +384,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         })
     }
 
-    func testMemoryCriticalDiagnosticReportsTruthfulReleaseCompletion() throws {
+    func testMemoryCriticalDiagnosticReportsTruthfulHibernateCompletion() throws {
         let pool = makePool()
         let profile = makeProfile(name: "CriticalDiagnostic", policy: .warm)
         _ = try pool.webView(for: profile)
@@ -398,15 +398,23 @@ final class WebAttentionLifecycleTests: XCTestCase {
         makeInactive(lifecycle, profile: profile)
         lifecycle.handleMemoryPressure(.critical)
 
+        let evaluation = try XCTUnwrap(
+            writer.events.first {
+                $0.event == "slot_lifecycle.memory_pressure_slot"
+                    && $0.fields["action"] == nil
+            }
+        )
+        XCTAssertEqual(evaluation.fields["decision"], .string("hibernate"))
+
         let completion = try XCTUnwrap(
             writer.events.first {
                 $0.event == "slot_lifecycle.memory_pressure_slot"
-                    && $0.fields["action"] == .string("release_completed")
+                    && $0.fields["action"] == .string("hibernate_completed")
             }
         )
         XCTAssertEqual(completion.fields["pressure_level"], .string("critical"))
         XCTAssertEqual(completion.fields["release_eligible"], .bool(true))
-        XCTAssertEqual(completion.fields["decision"], .string("release"))
+        XCTAssertEqual(completion.fields["decision"], .string("hibernate"))
         XCTAssertEqual(
             completion.fields["release_reason"],
             .string("critical_pressure_eligible")

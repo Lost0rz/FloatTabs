@@ -6,19 +6,18 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 1 CI ROUTING CORRECTIVE**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 1 IMPLEMENTATION PR CI**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `ACTIVE / BLOCKING CI ROUTING CORRECTIVE BEFORE PHASE 1 INDEPENDENT AUDIT`.
+Current execution state: `WAITING / REQUIRED PR CI ON RECONCILED PHASE 1 IMPLEMENTATION`.
 
-The Phase 1 product implementation is complete on PR #170 and remains unmerged. Its required PR CI did not start. Fresh diagnosis established two independent CI facts: PR #170 currently conflicts with `main`, and GitHub does not create `pull_request` workflow runs while that conflict exists; additionally, FloatTabs macOS CI currently targets GitHub-hosted `macos-26` rather than the intended local Apple Silicon self-hosted runner.
+The Phase 1 cadence remains architecture-first: finish the structural Runtime hibernate/restore primitive, prove bounded real-runtime correctness, merge the structural primitive, and defer strict multi-Slot scale/performance tuning to Phase 4 Runtime Budget / Policy.
 
 ## Canonical / current state
 
 ```text
-MAIN_BEFORE_CI_CORRECTIVE=766487bf9a94837e714f5da9637f353c9d8a01ae
-PRE_PROGRAM_PRODUCT_BASELINE=26d1669198a6f94faa769fb27d2cd00d0fcd1184
+MAIN_AFTER_CI_RUNNER_CORRECTIVE=ce92f99777507dd03a2e7267c33607fe5aea4c56
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 JSC_ROOT_CAUSE=UNKNOWN
@@ -33,12 +32,10 @@ PHASE_1_V2_CONTRACT=ACCEPTED_FROZEN
 PHASE_1_V2_PLAN=ACCEPTED_FROZEN
 CURRENT_PHASE=PHASE_1_SAFE_HIBERNATE_RESTORE_IMPLEMENTATION
 PHASE_1_IMPLEMENTATION_PR=#170 OPEN / UNMERGED
-PHASE_1_PR_HEAD=b40bf1d63735700cb0c297d901bd284da1ac105a
-PHASE_1_PR_MERGEABLE=NO / CONFLICTING
-PHASE_1_REQUIRED_PR_CI=NO_RUN_CREATED
-CI_RUNNER_CURRENT=GITHUB_HOSTED macos-26
-CI_RUNNER_TARGET=SELF_HOSTED macOS ARM64 mac-mini-ci
-PRODUCT_MUTATION=NO NEW PRODUCT MUTATION IN CI CORRECTIVE
+CI_RUNNER_CORRECTIVE_PR=#171 MERGED
+CI_RUNNER=macmini-floattabs-01 / self-hosted / macOS / ARM64 / mac-mini-ci
+CI_RUNNER_CORRECTIVE_RUN=41255270977 PASS
+PHASE_1_REQUIRED_PR_CI=PENDING_ON_RECONCILED_LITERAL_HEAD
 STRICT_SCALE_BENCHMARK=DEFERRED_TO_PHASE_4
 ```
 
@@ -57,38 +54,9 @@ AGENTS.md
 → current source/tests/fresh evidence
 ```
 
-V1 lifecycle contract/Phase 1 plan remain historical evidence for the original audit and benchmark rationale. They do not override V2's current phase gate.
-
-## Blocking CI corrective
-
-Verified fault boundary:
-
-1. PR #170 has merge conflicts against current `main`; `pull_request` workflow execution is therefore not created until the conflict is resolved.
-2. `.github/workflows/macos-ci.yml` currently uses `runs-on: macos-26`, which routes to GitHub-hosted macOS runners rather than the intended local self-hosted Mac mini.
-3. The established local Apple Silicon CI routing convention is `[self-hosted, macOS, ARM64, mac-mini-ci]`.
-4. Because FloatTabs is public, self-hosted jobs must reject fork PR code by default.
-
-The corrective is bounded to CI/control infrastructure. No Phase 1 Web Runtime product source may change in this corrective.
-
-Required corrective sequence:
-
-```text
-reconcile Authority
-→ switch required macOS job to [self-hosted, macOS, ARM64, mac-mini-ci]
-→ same-repository PR guard
-→ verify corrective PR generates/queues a workflow
-→ confirm observed runner identity is self-hosted/local when matched
-→ merge CI corrective after required check
-→ reconcile PR #170 onto fresh main
-→ required Phase 1 PR CI
-→ independent web audit
-```
-
-If the corrective workflow queues indefinitely with no matching runner, stop and treat repository runner registration/access as the remaining infrastructure blocker; do not switch back to GitHub-hosted CI as an implicit workaround.
+V1 lifecycle contract/Phase 1 plan remain historical evidence only and do not override V2.
 
 ## Phase 1 target
-
-Implement and finish the structural split:
 
 ```text
 hibernate(slotID:)
@@ -103,9 +71,7 @@ release(slotID:)
   → Runtime becomes non-resident
 ```
 
-Only normal eligible inactive lifecycle reclamation, including the already-existing eligible critical-Warm path, uses hibernate.
-
-All destructive callers remain destructive.
+Only normal eligible inactive lifecycle reclamation, including the already-existing eligible critical-Warm path, uses hibernate. All destructive callers remain destructive.
 
 ## Authorized production scope
 
@@ -119,11 +85,9 @@ All destructive callers remain destructive.
 - `FloatTabsTests/WebAttentionLifecycleTests.swift`
 - `FloatTabsTests/WebFocusAdapterTests.swift` only if needed for the narrow observer-invalidation fixture
 
-Existing benchmark tooling may be preserved, but strict benchmark expansion is not required for Phase 1 completion.
-
 ## Current implementation evidence
 
-PR #170 implementation evidence reported and verified locally before CI:
+PR #170 implementation evidence before repository-host CI:
 
 ```text
 FOCUSED_TESTS=146 executed / 0 failures
@@ -131,15 +95,19 @@ FULL_TESTS=1073 executed / 3 skipped / 0 failures
 DEBUG_BUILD=PASS
 RELEASE_BUILD=PASS
 STRICT_1_2_4_8_BENCHMARK=NOT_RUN / DEFERRED_TO_PHASE_4
-LIVE_SMOKE=bounded 2 existing Slots; resident drop, fresh restore, interactionState restore observed
-PR=#170 OPEN
-PR_HEAD=b40bf1d63735700cb0c297d901bd284da1ac105a
-REQUIRED_PR_CI=NO_RUN_CREATED
+LIVE_SMOKE=bounded 2 existing Slots; resident drop, fresh Runtime identity, interactionState restore observed
+PROFILE_IDENTITY=default preserved
+SESSION_STORE_MUTATION=NONE OBSERVED
+DOUBLE_LOAD=NO COMPETING ORDINARY LOAD OBSERVED
 ```
+
+The earlier PR #170 no-run condition was infrastructure, not a product test failure: the PR conflicted with `main`, so GitHub did not create a pull-request workflow run. PR #171 corrected FloatTabs CI to the dedicated local self-hosted runner and proved that route with run `41255270977`, job `124696994671`, runner `macmini-floattabs-01`, arm64, all steps passing.
+
+PR #170 has now been reconciled onto current `main` while preserving the validated Phase 1 production/test blobs. The next gate is required GitHub `Build & Test (Apple Silicon arm64)` on the literal reconciled PR head.
 
 ## Phase 1 validation gate — current
 
-Phase 1 merge readiness still requires:
+Required before merge:
 
 1. exact hibernate vs destructive-release semantics remain correct;
 2. deterministic teardown and stale-callback rejection remain correct;
@@ -147,54 +115,45 @@ Phase 1 merge readiness still requires:
 4. focused regression tests pass;
 5. full unit suite has no new Phase 1 failures;
 6. Debug and Release builds pass;
-7. bounded live 1–2 Slot Runtime smoke proves resident-count drop, fresh single Runtime restore, intact login/session/page/conversation, and no obvious competing double-load;
-8. required GitHub `Build & Test (Apple Silicon arm64)` passes on the literal PR head after the branch is reconciled with current `main`;
+7. bounded live 1–2 Slot Runtime smoke proves resident-count drop, fresh single Runtime restore, intact page/conversation/session behavior to the extent observable, and no obvious competing double-load;
+8. required GitHub `Build & Test (Apple Silicon arm64)` passes on the literal reconciled PR head using the dedicated self-hosted runner;
 9. independent web audit passes before merge.
 
-The following are deferred to Phase 4 and are **not** Phase 1 merge blockers:
+Deferred to Phase 4 and not Phase 1 blockers:
 
 - strict `1 / 2 / 4 / 8` matrix;
 - >=9 configured-Slot fixture;
-- 4/8 heavy repeated runs;
-- `median reclaimed > 2× control drift`;
-- final memory curve / Runtime budget / ranking;
-- scale restore p50/p95 policy thresholds.
+- heavy 4/8 repeated runs;
+- no-op/control drift study;
+- `median reclaimed > 2× drift` threshold;
+- final process-tree memory curve;
+- final restore p50/p95 policy threshold;
+- Runtime budget/ranking selection.
 
 ## Key invariants
 
 - Browser Profile / `WKWebsiteDataStore` identity and persistent session data remain independent from Runtime lifetime.
 - `WKWebView.interactionState` remains opaque and memory-local; never persist or log contents.
 - compatible interaction-state restore must not also issue a competing ordinary URL load.
-- missing/incompatible state uses the existing currentURL/home fallback.
-- deterministic teardown explicitly invalidates bridges/popup/navigation observer, clears delegates, calls `stopLoading()`, clears transient Pool state including pending termination incident context, and removes the old Runtime identity.
+- missing/incompatible state uses the existing safe currentURL/home fallback.
+- deterministic teardown invalidates bridges/popup/navigation observer, clears delegates, calls `stopLoading()`, clears transient Pool state including pending termination incident context, and removes the old Runtime identity.
 - restored Runtime receives a fresh Runtime generation/WebView instance identity.
 - current active/fullscreen/supplemental-visible/media/Attention protection remains unchanged.
 - current Generating/Ready protection remains unchanged in Phase 1.
 - Cold website-cache cleanup semantics remain separate and unchanged.
 
-## Explicit non-scope
-
-Do not modify without STOP/reconciliation:
-
-- Panel/Fullscreen/Focus product semantics;
-- Browser Profile datastore behavior/schema;
-- Attention Generating/Ready semantics;
-- durable Unread semantics;
-- completion notifications;
-- Hot/Warm/Cold UI or timer values;
-- automatic Runtime Budget/ranking;
-- Website Cache policy/data types;
-- process-pool topology;
-- server Push/service-worker behavior;
-- native conversation preview.
-
 ## Execution / handoff state
 
-The immediate action is the bounded CI routing corrective. Do not alter the Phase 1 product implementation while correcting CI infrastructure.
+Current action:
 
-After the CI corrective merges, reconcile PR #170 with fresh `main` without discarding its validated product implementation, allow the required local self-hosted CI to run, then stop for independent web audit.
+```text
+PR #170 reconciled with current main
+→ required self-hosted PR CI
+→ independent web audit
+→ merge decision
+```
 
-Merge/release of Phase 1 product code remains unauthorized until those gates pass.
+Do not merge or release Phase 1 product code before the required CI and independent web audit pass.
 
 ## Non-claims
 
@@ -202,5 +161,4 @@ Merge/release of Phase 1 product code remains unauthorized until those gates pas
 - No final Runtime Budget number is accepted yet.
 - No large-scale memory curve is accepted yet.
 - No claim is made that ChatGPT generation survives WebView destruction.
-- No claim is made yet that the FloatTabs repository can successfully dispatch to the local self-hosted runner until a matching workflow job is observed.
 - No newer public release is authorized.

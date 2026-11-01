@@ -83,6 +83,21 @@ final class WebViewPool {
         UUID,
         RuntimeDiagnosticIncidentContext
     ) -> Void
+    typealias InteractionStateProvider = @MainActor (WKWebView) -> Any?
+    typealias InteractionStateApplier = @MainActor (WKWebView, Any) -> Void
+
+    private struct WebRuntimeRestoreSnapshot {
+        let interactionState: Any
+        let capturedURL: URL
+        let browserProfileIdentity: BrowserProfileIdentity
+        let runtimeRendering: WebRenderingProfile
+    }
+
+    private enum RuntimeTeardownDisposition {
+        case hibernate
+        case release
+        case rebuild
+    }
 
     private var webViews: [UUID: WKWebView] = [:]
     private var runtimeDiagnosticIdentities: [UUID: WebRuntimeDiagnosticIdentity] = [:]
@@ -95,6 +110,7 @@ final class WebViewPool {
     private var lastKnownURLs: [UUID: URL] = [:]
     private var deferredReloadSlotIDs = Set<UUID>()
     private var pendingTerminationIncidentContexts: [UUID: RuntimeDiagnosticIncidentContext] = [:]
+    private var restoreSnapshots: [UUID: WebRuntimeRestoreSnapshot] = [:]
 
     var onResidentSetChange: (() -> Void)?
 
@@ -137,6 +153,8 @@ final class WebViewPool {
     private let incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator?
     private let incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator?
     private let incidentHealthProbeTimeout: TimeInterval
+    private let interactionStateProvider: InteractionStateProvider
+    private let interactionStateApplier: InteractionStateApplier
     // Production leaves this nil and reads WKWebView history directly. The
     // optional seam lets tests model a committed history item without network
     // or WebKit process timing.
@@ -153,6 +171,12 @@ final class WebViewPool {
         residencyPolicyProvider: @escaping ResidencyPolicyProvider = { _ in nil },
         downloadCoordinator: DownloadCoordinator? = nil,
         committedURLProvider: CommittedURLProvider? = nil,
+        interactionStateProvider: @escaping InteractionStateProvider = { webView in
+            webView.interactionState
+        },
+        interactionStateApplier: @escaping InteractionStateApplier = { webView, interactionState in
+            webView.interactionState = interactionState
+        },
         browserProfileDataStoreProvider: BrowserProfileDataStoreProvider = BrowserProfileDataStoreProvider(),
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         navigationStallTimeout: TimeInterval = 120,
@@ -172,6 +196,8 @@ final class WebViewPool {
         self.residencyPolicyProvider = residencyPolicyProvider
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         self.committedURLProvider = committedURLProvider
+        self.interactionStateProvider = interactionStateProvider
+        self.interactionStateApplier = interactionStateApplier
         self.browserProfileDataStoreProvider = browserProfileDataStoreProvider
         self.diagnostics = diagnostics
         self.navigationStallTimeout = max(0, navigationStallTimeout)
@@ -250,10 +276,16 @@ final class WebViewPool {
             )
         }
 
+        let navigationURL = profile.currentURL ?? profile.homeURL
+        let restoreSnapshot = compatibleRestoreSnapshot(
+            for: profile,
+            navigationURL: navigationURL
+        )
         return try createWebView(
             for: profile,
-            navigationURL: profile.currentURL ?? profile.homeURL,
-            cachePolicy: .useProtocolCachePolicy
+            navigationURL: navigationURL,
+            cachePolicy: .useProtocolCachePolicy,
+            restoreSnapshot: restoreSnapshot
         )
     }
 
@@ -500,37 +532,27 @@ final class WebViewPool {
         release(slotID: slotID)
     }
 
+    /// Captures one opaque, memory-local interaction state before tearing down
+    /// an otherwise eligible runtime. The snapshot never enters persistence or
+    /// diagnostics and is consumed only by the next compatible recreation of
+    /// the same Slot.
+    func hibernate(slotID: UUID) {
+        guard let webView = webViews[slotID] else { return }
+
+        if let snapshot = captureRestoreSnapshot(slotID: slotID, webView: webView) {
+            restoreSnapshots[slotID] = snapshot
+        } else {
+            restoreSnapshots.removeValue(forKey: slotID)
+        }
+        teardownRuntime(slotID: slotID, disposition: .hibernate)
+    }
+
     /// Releases only the transient live WebView/runtime state for a Slot. The
     /// persisted WebAppProfile, currentURL, cookies and shared website data stay
     /// outside this pool and therefore survive Cold eviction.
     func release(slotID: UUID) {
-        // The bridge dies with its WKWebView: invalidate it first so no stale
-        // callback can arrive after the runtime is dropped.
-        invalidateAttentionBridge(slotID: slotID)
-        invalidateResponseBridge(slotID: slotID)
-        discardPopupCoordinator(slotID: slotID)
-        let priorNavigationFields = navigationObservers[slotID]?.currentNavigationDiagnosticFields ?? [:]
-        navigationObservers[slotID]?.invalidateDiagnosticNavigation()
-        navigationObservers.removeValue(forKey: slotID)
-        appliedRenderingProfiles.removeValue(forKey: slotID)
-        appliedBrowserProfileIdentities.removeValue(forKey: slotID)
-        lastKnownURLs.removeValue(forKey: slotID)
-        deferredReloadSlotIDs.remove(slotID)
-        let removed = webViews.removeValue(forKey: slotID)
-        removed?.removeFromSuperview()
-        if removed != nil {
-            var fields = ["slot_id": RuntimeDiagnosticValue.string(slotID.uuidString)]
-            fields.merge(runtimeDiagnosticIdentities[slotID]?.fields ?? [:]) { current, _ in current }
-            fields.merge(priorNavigationFields) { current, _ in current }
-            diagnostics.record(
-                event: "web_runtime.released",
-                level: .notice,
-                subsystem: "web",
-                fields: fields
-            )
-            runtimeDiagnosticIdentities.removeValue(forKey: slotID)
-            onResidentSetChange?()
-        }
+        restoreSnapshots.removeValue(forKey: slotID)
+        teardownRuntime(slotID: slotID, disposition: .release)
     }
 
     /// Pauses currently playing media without putting the page into WebKit's
@@ -781,18 +803,7 @@ final class WebViewPool {
             subsystem: "web",
             fields: rebuildFields
         )
-        invalidateAttentionBridge(slotID: profile.id)
-        invalidateResponseBridge(slotID: profile.id)
-        discardPopupCoordinator(slotID: profile.id)
-        navigationObservers[profile.id]?.invalidateDiagnosticNavigation()
-        navigationObservers.removeValue(forKey: profile.id)
-        appliedRenderingProfiles.removeValue(forKey: profile.id)
-        appliedBrowserProfileIdentities.removeValue(forKey: profile.id)
-        lastKnownURLs.removeValue(forKey: profile.id)
-        deferredReloadSlotIDs.remove(profile.id)
-        let replaced = webViews.removeValue(forKey: profile.id)
-        runtimeDiagnosticIdentities.removeValue(forKey: profile.id)
-        replaced?.removeFromSuperview()
+        let replaced = teardownRuntime(slotID: profile.id, disposition: .rebuild)
 
         // A rendering-profile rebuild replaces the transient runtime for the same
         // resident Slot. Do not emit a resident-set change merely because the
@@ -845,6 +856,7 @@ final class WebViewPool {
         for profile: WebAppProfile,
         navigationURL: URL,
         cachePolicy: URLRequest.CachePolicy,
+        restoreSnapshot: WebRuntimeRestoreSnapshot? = nil,
         notifyResidentSetChange: Bool = true
     ) throws -> WKWebView {
         let fields = [
@@ -865,6 +877,7 @@ final class WebViewPool {
                 for: profile,
                 navigationURL: navigationURL,
                 cachePolicy: cachePolicy,
+                restoreSnapshot: restoreSnapshot,
                 notifyResidentSetChange: notifyResidentSetChange
             )
         } catch {
@@ -884,6 +897,7 @@ final class WebViewPool {
         for profile: WebAppProfile,
         navigationURL: URL,
         cachePolicy: URLRequest.CachePolicy,
+        restoreSnapshot: WebRuntimeRestoreSnapshot? = nil,
         notifyResidentSetChange: Bool = true
     ) throws -> WKWebView {
         let rendering = profile.renderingProfile.normalized()
@@ -1062,7 +1076,21 @@ final class WebViewPool {
         createdFields["initial_frame_width"] = .double(Double(webView.frame.width))
         createdFields["initial_frame_height"] = .double(Double(webView.frame.height))
         createdFields["initial_attached_to_window"] = .bool(webView.window != nil)
-        load(webView, request)
+        if let restoreSnapshot {
+            interactionStateApplier(webView, restoreSnapshot.interactionState)
+            restoreSnapshots.removeValue(forKey: profile.id)
+            createdFields["restore_source"] = .string("interaction_state")
+            diagnostics.record(
+                event: "web_runtime.restore.completed",
+                level: .notice,
+                subsystem: "web",
+                fields: createdFields.merging([
+                    "restore_source": .string("interaction_state")
+                ]) { _, new in new }
+            )
+        } else {
+            load(webView, request)
+        }
         diagnostics.record(
             event: "web_runtime.created",
             level: .notice,
@@ -1070,6 +1098,145 @@ final class WebViewPool {
             fields: createdFields
         )
         return webView
+    }
+
+    private func captureRestoreSnapshot(
+        slotID: UUID,
+        webView: WKWebView
+    ) -> WebRuntimeRestoreSnapshot? {
+        guard let interactionState = interactionStateProvider(webView),
+              let capturedURL = restoreURL(slotID: slotID, webView: webView),
+              let browserProfileIdentity = appliedBrowserProfileIdentities[slotID],
+              let runtimeRendering = appliedRenderingProfiles[slotID] else {
+            return nil
+        }
+
+        return WebRuntimeRestoreSnapshot(
+            interactionState: interactionState,
+            capturedURL: capturedURL,
+            browserProfileIdentity: browserProfileIdentity,
+            runtimeRendering: runtimeRendering
+        )
+    }
+
+    private func compatibleRestoreSnapshot(
+        for profile: WebAppProfile,
+        navigationURL: URL
+    ) -> WebRuntimeRestoreSnapshot? {
+        guard let snapshot = restoreSnapshots[profile.id] else { return nil }
+
+        let desiredRendering = SiteCompatibilityPolicy.runtimeRendering(
+            for: profile.renderingProfile.normalized(),
+            navigationURL: navigationURL
+        )
+        let compatible = snapshot.browserProfileIdentity == BrowserProfileIdentity(
+            browserProfileID: profile.browserProfileID
+        )
+            && snapshot.runtimeRendering == desiredRendering
+            && snapshot.capturedURL.absoluteString == navigationURL.absoluteString
+
+        guard compatible else {
+            restoreSnapshots.removeValue(forKey: profile.id)
+            diagnostics.record(
+                event: "web_runtime.restore.invalidated",
+                level: .info,
+                subsystem: "web",
+                fields: [
+                    "slot_id": .string(profile.id.uuidString),
+                    "reason": .string(
+                        snapshot.browserProfileIdentity != BrowserProfileIdentity(
+                            browserProfileID: profile.browserProfileID
+                        ) ? "browser_profile_mismatch" :
+                            snapshot.runtimeRendering != desiredRendering ? "rendering_mismatch" :
+                                "url_mismatch"
+                    ),
+                    "restore_source": .string("url_fallback")
+                ]
+            )
+            return nil
+        }
+
+        diagnostics.record(
+            event: "web_runtime.restore.begin",
+            level: .info,
+            subsystem: "web",
+            fields: [
+                "slot_id": .string(profile.id.uuidString),
+                "restore_source": .string("interaction_state")
+            ]
+        )
+        return snapshot
+    }
+
+    private func restoreURL(slotID: UUID, webView: WKWebView) -> URL? {
+        [
+            webView.url,
+            webView.backForwardList.currentItem?.url,
+            lastKnownURLs[slotID]
+        ].compactMap { candidate in
+            guard let candidate, WebAppURL.isSafe(candidate) else { return nil }
+            return candidate
+        }.first
+    }
+
+    @discardableResult
+    private func teardownRuntime(
+        slotID: UUID,
+        disposition: RuntimeTeardownDisposition
+    ) -> WKWebView? {
+        let priorNavigationFields = navigationObservers[slotID]?.currentNavigationDiagnosticFields ?? [:]
+        let priorRuntimeIdentity = runtimeDiagnosticIdentities[slotID]
+        let removed = webViews[slotID]
+
+        invalidateAttentionBridge(slotID: slotID)
+        invalidateResponseBridge(slotID: slotID)
+        discardPopupCoordinator(slotID: slotID)
+        navigationObservers[slotID]?.invalidate()
+        removed?.navigationDelegate = nil
+        removed?.uiDelegate = nil
+        removed?.stopLoading()
+
+        navigationObservers.removeValue(forKey: slotID)
+        appliedRenderingProfiles.removeValue(forKey: slotID)
+        appliedBrowserProfileIdentities.removeValue(forKey: slotID)
+        lastKnownURLs.removeValue(forKey: slotID)
+        deferredReloadSlotIDs.remove(slotID)
+        pendingTerminationIncidentContexts.removeValue(forKey: slotID)
+        if disposition == .rebuild {
+            restoreSnapshots.removeValue(forKey: slotID)
+        }
+        _ = webViews.removeValue(forKey: slotID)
+        removed?.removeFromSuperview()
+        runtimeDiagnosticIdentities.removeValue(forKey: slotID)
+
+        guard removed != nil else { return nil }
+
+        var fields = ["slot_id": RuntimeDiagnosticValue.string(slotID.uuidString)]
+        fields.merge(priorRuntimeIdentity?.fields ?? [:]) { current, _ in current }
+        fields.merge(priorNavigationFields) { current, _ in current }
+
+        switch disposition {
+        case .hibernate:
+            fields["interaction_state_present"] = .bool(restoreSnapshots[slotID] != nil)
+            diagnostics.record(
+                event: "web_runtime.hibernate.completed",
+                level: .notice,
+                subsystem: "web",
+                fields: fields
+            )
+            onResidentSetChange?()
+        case .release:
+            diagnostics.record(
+                event: "web_runtime.released",
+                level: .notice,
+                subsystem: "web",
+                fields: fields
+            )
+            onResidentSetChange?()
+        case .rebuild:
+            break
+        }
+        return removed
     }
 
     private func renderingDiagnosticFields(

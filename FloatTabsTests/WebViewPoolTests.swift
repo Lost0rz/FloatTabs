@@ -776,6 +776,179 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(pool.count, 1)
     }
 
+    func testHibernateCapturesOpaqueStateAndRestoresWithoutDuplicateInitialLoad() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let state = NSObject()
+        var loadedRequests: [URLRequest] = []
+        var restoredState: Any?
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) },
+            interactionStateProvider: { _ in state },
+            interactionStateApplier: { _, value in restoredState = value },
+            diagnostics: diagnostics
+        )
+        let profile = makeProfile(name: "HibernateRestore")
+
+        let original = try pool.webView(for: profile)
+        let originalIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        let originalObserver = try XCTUnwrap(original.navigationDelegate as? SlotNavigationObserver)
+
+        pool.hibernate(slotID: profile.id)
+
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+        XCTAssertNil(original.navigationDelegate)
+        XCTAssertNil(original.uiDelegate)
+        XCTAssertTrue(originalObserver.isInvalidated)
+        XCTAssertEqual(loadedRequests.count, 1)
+
+        let restored = try pool.webView(for: profile)
+
+        XCTAssertFalse(restored === original)
+        XCTAssertEqual(loadedRequests.count, 1, "interaction-state restore must not issue a competing URL load")
+        XCTAssertTrue((restoredState as AnyObject?) === state)
+        let restoredIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        XCTAssertGreaterThan(restoredIdentity.runtimeGeneration, originalIdentity.runtimeGeneration)
+        XCTAssertNotEqual(restoredIdentity.webViewInstanceID, originalIdentity.webViewInstanceID)
+        XCTAssertNotNil(writer.events.first { $0.event == "web_runtime.hibernate.completed" })
+        XCTAssertNotNil(writer.events.first { $0.event == "web_runtime.restore.begin" })
+        XCTAssertNotNil(writer.events.first { $0.event == "web_runtime.restore.completed" })
+    }
+
+    func testHibernateWithoutInteractionStateUsesURLFallback() throws {
+        var loadedURLs: [URL] = []
+        var restored = false
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedURLs.append(request.url!) },
+            interactionStateProvider: { _ in nil },
+            interactionStateApplier: { _, _ in restored = true }
+        )
+        let profile = makeProfile(name: "HibernateURLFallback")
+
+        _ = try pool.webView(for: profile)
+        pool.hibernate(slotID: profile.id)
+        _ = try pool.webView(for: profile)
+
+        XCTAssertEqual(loadedURLs, [profile.homeURL, profile.homeURL])
+        XCTAssertFalse(restored)
+    }
+
+    func testDestructiveReleaseClearsPendingHibernateState() throws {
+        let state = NSObject()
+        var restored = false
+        var loadedCount = 0
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in loadedCount += 1 },
+            interactionStateProvider: { _ in state },
+            interactionStateApplier: { _, _ in restored = true }
+        )
+        let profile = makeProfile(name: "ReleaseClearsRestore")
+
+        _ = try pool.webView(for: profile)
+        pool.hibernate(slotID: profile.id)
+        pool.release(slotID: profile.id)
+        _ = try pool.webView(for: profile)
+
+        XCTAssertEqual(loadedCount, 2)
+        XCTAssertFalse(restored)
+    }
+
+    func testBrowserProfileMismatchInvalidatesPendingHibernateState() throws {
+        let customID = UUID()
+        let customStore = WKWebsiteDataStore.nonPersistent()
+        var loadedCount = 0
+        var restored = false
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { _ in customStore }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in loadedCount += 1 },
+            interactionStateProvider: { _ in NSObject() },
+            interactionStateApplier: { _, _ in restored = true },
+            browserProfileDataStoreProvider: provider
+        )
+        var profile = makeProfile(name: "ProfileMismatch")
+
+        _ = try pool.webView(for: profile)
+        pool.hibernate(slotID: profile.id)
+        profile.browserProfileID = customID
+        _ = try pool.webView(for: profile)
+
+        XCTAssertEqual(loadedCount, 2)
+        XCTAssertFalse(restored)
+        XCTAssertEqual(pool.browserProfileIdentity(for: profile.id), .custom(customID))
+    }
+
+    func testRenderingMismatchInvalidatesPendingHibernateState() throws {
+        var loadedCount = 0
+        var restored = false
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in loadedCount += 1 },
+            interactionStateProvider: { _ in NSObject() },
+            interactionStateApplier: { _, _ in restored = true }
+        )
+        var profile = makeProfile(name: "RenderingMismatch")
+
+        _ = try pool.webView(for: profile)
+        pool.hibernate(slotID: profile.id)
+        profile.renderingProfile = profile.renderingProfile.settingBrowserIdentity(.windowsChrome)
+        _ = try pool.webView(for: profile)
+
+        XCTAssertEqual(loadedCount, 2)
+        XCTAssertFalse(restored)
+    }
+
+    func testSameProfileSiblingRestoreIsIsolated() throws {
+        let sharedProfileID = UUID()
+        let sharedStore = WKWebsiteDataStore.nonPersistent()
+        let stateA = NSObject()
+        let stateB = NSObject()
+        var stateByWebView: [ObjectIdentifier: NSObject] = [:]
+        var restoredStates: [NSObject] = []
+        var loadedCount = 0
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { _ in sharedStore }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in loadedCount += 1 },
+            interactionStateProvider: { webView in
+                stateByWebView[ObjectIdentifier(webView)]
+            },
+            interactionStateApplier: { _, value in
+                if let value = value as? NSObject {
+                    restoredStates.append(value)
+                }
+            },
+            browserProfileDataStoreProvider: provider
+        )
+        let first = makeProfile(name: "SharedA", browserProfileID: sharedProfileID)
+        let second = makeProfile(name: "SharedB", browserProfileID: sharedProfileID)
+
+        let firstView = try pool.webView(for: first)
+        let secondView = try pool.webView(for: second)
+        stateByWebView[ObjectIdentifier(firstView)] = stateA
+        stateByWebView[ObjectIdentifier(secondView)] = stateB
+
+        pool.hibernate(slotID: first.id)
+        let secondAgain = try pool.webView(for: second)
+        let firstAgain = try pool.webView(for: first)
+
+        XCTAssertTrue(secondAgain === secondView)
+        XCTAssertFalse(firstAgain === firstView)
+        XCTAssertEqual(loadedCount, 2)
+        XCTAssertEqual(restoredStates.count, 1)
+        XCTAssertTrue(restoredStates[0] === stateA)
+        XCTAssertEqual(pool.residentSlotIDs, [first.id, second.id])
+    }
+
     func testZoomOrViewportChangeAppliesWithoutRebuildingSlotWebView() throws {
         let pool = makePool()
         var profile = makeProfile(name: "A")

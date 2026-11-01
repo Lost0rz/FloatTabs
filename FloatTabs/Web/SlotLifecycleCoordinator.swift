@@ -775,7 +775,7 @@ final class SlotLifecycleCoordinator {
             }
             let diagnosticsOnly = level == .warning
             let releaseEligible = diagnosticsOnly ? false : eligible
-            let decision = diagnosticsOnly ? "observe" : (eligible ? "release" : "skip")
+            let decision = diagnosticsOnly ? "observe" : (eligible ? "hibernate" : "skip")
             let reason = diagnosticsOnly ? "warning_diagnostics_only" : candidateReason
 
             var fields = incidentContext.fields(phase: .trigger)
@@ -828,7 +828,7 @@ final class SlotLifecycleCoordinator {
             return
         }
         diagnostics.record(
-            event: "slot_lifecycle.release",
+            event: "slot_lifecycle.hibernate",
             level: .notice,
             subsystem: "lifecycle",
             fields: [
@@ -838,7 +838,7 @@ final class SlotLifecycleCoordinator {
         )
         prepareRuntimeForRelease(slotID)
         container.removeSlot(slotID)
-        webViewPool.release(slotID: slotID)
+        webViewPool.hibernate(slotID: slotID)
         cancelInactivePlan(slotID: slotID)
         onRuntimeReleased(currentPlan.profile)
         if let memoryPressureIncident {
@@ -851,8 +851,8 @@ final class SlotLifecycleCoordinator {
                 "slot_id": .string(slotID.uuidString),
                 "pressure_level": .string(pressureLevel),
                 "release_eligible": .bool(true),
-                "decision": .string("release"),
-                "action": .string("release_completed"),
+                "decision": .string("hibernate"),
+                "action": .string("hibernate_completed"),
                 "release_reason": .string(releaseReason)
             ]) { _, new in new }
             diagnostics.record(
