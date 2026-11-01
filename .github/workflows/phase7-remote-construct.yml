@@ -23,13 +23,14 @@ jobs:
           test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
           test "${GITHUB_REF_NAME}" = "codex/ft-runtime-lifecycle-phase7-automatic-001"
       - name: Apply bounded Phase 7 transform
-        run: python3 tools/phase7_remote_construct.py
+        run: python3 tools/phase7_remote_construct_fix.py
       - name: Verify patch hygiene
         run: git diff --check
       - name: Remove temporary construction machinery
         shell: bash
         run: |
           rm -f tools/phase7_remote_construct.py
+          rm -f tools/phase7_remote_construct_fix.py
           rm -f .github/workflows/phase7-remote-construct.yml
       - name: Commit and push construction result
         shell: bash
