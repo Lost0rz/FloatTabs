@@ -10,7 +10,7 @@
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `PHASE_6_EXECUTION_ACTIVE / WP0_GATE0_OUTCOME_A_COMPLETE / PRODUCT_MUTATION_RELEASED / WP1_ACTIVE`.
+Current execution state: `PHASE_6_WP1_WP3_IMPLEMENTED / WP4_EXACT_DIFF_AUDIT_CHANGES_REQUIRED / MERGE_BLOCKED_PENDING_BOUNDED_CORRECTIVE`.
 
 ## Canonical state
 
@@ -34,12 +34,24 @@ PHASE_6_AUDIT=COMPLETE
 PHASE_6_AUDIT_RECORD=FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md
 PHASE_6_CONTRACT=ACCEPTED / FROZEN
 PHASE_6_CONTRACT_RECORD=FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md
-PHASE_6_RECOMMENDATION=TWO-STAGE NATIVE RESTORE SHELL
+PHASE_6_RECOMMENDATION=TWO_STAGE NATIVE RESTORE SHELL
 PHASE_6_EXECUTION_START=AUTHORIZED BY USER / 2026-11-01
 PHASE_6_GATE0=COMPLETE / OUTCOME_A / NAVIGATION_BACKED_READINESS
 PHASE_6_GATE0_CORROBORATION=BOUNDED_CURRENT_RUNTIME_LIVENESS_SUCCESS
-PHASE_6_IMPLEMENTATION=WP1 ACTIVE
-PHASE_6_PRODUCT_MUTATION=RELEASED BY GATE0 OUTCOME_A
+PHASE_6_IMPLEMENTATION=WP1-WP3 COMPLETE / PUSHED
+PHASE_6_IMPLEMENTATION_HEAD=0ad45bff7869cdf66ac26994396ff013c89b0fbe
+PHASE_6_LOCAL_FOCUSED_TESTS=PASS
+PHASE_6_LOCAL_FULL_XCTEST=PASS / ~1379 / 0 FAILURES
+PHASE_6_LOCAL_DEBUG_BUILD=PASS
+PHASE_6_LOCAL_RELEASE_BUILD=PASS
+PHASE_6_LOCAL_NATIVE_ARM64=PASS
+PHASE_6_REQUIRED_CI=PASS / RUN 1302 / HEAD 0ad45bff7869cdf66ac26994396ff013c89b0fbe
+PHASE_6_QA_DMG=PASS / RUN 627
+PHASE_6_WP4_EXACT_DIFF_AUDIT=CHANGES_REQUIRED
+PHASE_6_WP4_REVIEW_RECORD=PR #187 REVIEW 5728444391
+PHASE_6_REAL_MAC_SMOKE=PENDING AFTER CORRECTIVE
+PHASE_6_MERGE=BLOCKED PENDING CORRECTIVE + FRESH WP4 VERIFICATION
+PHASE_6_PRODUCT_MUTATION=AUTHORIZED WITHIN FROZEN SCOPE
 PHASE_6_NEXT_USER_START_REQUIRED=NO
 TASK_RECONCILIATION_REQUIRED=NO
 PROGRAM_HUMAN_ACCEPTANCE=PENDING
@@ -81,13 +93,35 @@ Therefore the frozen Gate 0 classification is **Outcome A — navigation-backed 
 
 `web_runtime.restore.completed` remains state-handoff evidence only; Phase 6 completion must use exact-current-Runtime navigation-backed readiness and current request/runtime revalidation.
 
+## WP1–WP3 implementation result
+
+PR #187 head `0ad45bff7869cdf66ac26994396ff013c89b0fbe` implements the authorized Phase 6 paths only:
+
+- native restoring surface in `WebPanelContainerView`;
+- deferred two-stage Runtime materialization and generation-scoped stale rejection in `PanelController`;
+- exact-current Runtime navigation finish/failure projection through the existing `SlotNavigationObserver` → `WebViewPool` ownership boundary;
+- focused regression coverage in `ExternalShellTests` and `WebViewPoolTests`.
+
+The local focused/full test suites, Debug/Release builds and arm64 verification passed. Literal-head required macOS CI run 1302 and QA DMG run 627 also passed.
+
+## WP4 independent exact-diff audit — CHANGES REQUIRED
+
+Machine verification is green, but the independent exact-diff audit found four bounded correctness issues. No architecture redesign is required.
+
+1. **Focus/input resumes before approved readiness.** The deferred attach path currently makes the restoring WebView current for focus and can call native `orderFrontAndFocus` before `navigation.finished`; the existing commit path can also schedule DOM input focus before finish. Frozen Phase 6 ordering requires readiness first, then restoring-state removal, then existing focus/input flow resumes.
+2. **Attention physical visibility is over-claimed during restoring.** The attached WebView can be treated as actually presented while an opaque restoring overlay still covers it, and the attach path explicitly attempts acknowledgement. Keep Attention authority/semantics unchanged, but the physical presentation fact must remain false until the restoring surface is removed.
+3. **Hidden restoring spinner can remain animated.** The overlay remains attached when hidden, while animation is currently stopped only when removed from its superview. Show/hide must explicitly start/stop the indicator.
+4. **Recoverable provisional failure is projected as terminal before HTTP fallback classification.** If the existing safe HTTP-entry fallback starts, the pending Phase 6 transaction must remain alive for the fallback navigation's own finish/failure instead of clearing the restoring state early.
+
+These findings are recorded in PR #187 review `5728444391`.
+
 ## Frozen ownership / safety boundaries
 
 - `WebViewPool` remains live Runtime creation/hibernate/restore owner;
 - `SlotLifecycleCoordinator` remains sole Runtime lifecycle/budget executor;
 - `PanelController` remains presentation authority and owns Phase 6 materialization orchestration;
 - `WebPanelContainerView` may own only lightweight native restoring presentation;
-- `SlotNavigationObserver` may expose only the narrow Outcome-A readiness seam needed by the current owner;
+- `SlotNavigationObserver` may expose only the narrow Outcome-A readiness/terminal seam needed by the current owner;
 - `WebAttentionCoordinator` remains Attention authority;
 - Browser Profile/session/persistent user data remain unchanged;
 - Phase 4 Runtime budget remains unchanged;
@@ -109,11 +143,6 @@ The implementation contract owns Phase 6 execution scope; the audit remains evid
 
 ## Next action
 
-Continue the same task and PR directly through:
+Apply one bounded corrective on the existing branch/PR for the four WP4 findings only. Then rerun focused/full tests, Debug/Release arm64, required literal-head CI, bounded Real-Mac restore smoke, and a fresh independent exact-diff audit.
 
-1. WP1 — native restoring presentation in `WebPanelContainerView`;
-2. WP2 — two-stage `PanelController` materialization with stale-request generation and AppKit run-loop yield;
-3. WP3 — Outcome-A exact-current-Runtime navigation readiness completion;
-4. WP4 — focused/full tests, Debug/Release arm64, literal-head required CI, bounded Real-Mac smoke and independent exact-diff audit.
-
-The program-final human UI/runtime acceptance remains pending and is intentionally deferred until the integrated Phase 6 implementation and final independent audit are complete.
+Do not merge or release before that fresh WP4 audit passes. The program-final human UI/runtime acceptance remains pending and user-owned.
