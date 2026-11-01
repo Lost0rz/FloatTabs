@@ -109,6 +109,8 @@ Before each implementation phase:
 
 After implementation, run focused verification and independent audit before merge/closeout. A chat plan or execution card never overrides the accepted repository contract or `CURRENT_TASK.md`.
 
+Use phase-local verification. A structural phase should prove the ownership/lifecycle primitive, data safety, regressions and bounded real-runtime behavior needed for that phase. Do not make later policy/tuning-scale benchmarks blocking merely because they are measurable; defer them to the phase that actually uses those measurements unless the current accepted contract says the earlier decision depends on them.
+
 ### During
 
 Do not expand the task for adjacent issues. Record material non-blocking items as Follow-ups in `CURRENT_STATUS.md`; they become executable only through a future task authorization.
@@ -175,6 +177,18 @@ Use focused tests first. Increase verification for changes involving:
 Real macOS interaction/runtime changes require relevant runtime acceptance; static review alone is insufficient.
 
 Before merge/release, separately confirm current PR base/head, exact diff, required CI, reviews/mergeability, task scope, Authority integrity, and applicable runtime acceptance. Repository-host gates apply to the literal identity GitHub governs and cannot be inferred from older semantic evidence.
+
+## CI execution
+
+FloatTabs macOS CI is intended to execute on the user's local Apple Silicon self-hosted runner while GitHub Actions provides scheduling and status. Required macOS jobs should target the established labels:
+
+`[self-hosted, macOS, ARM64, mac-mini-ci]`
+
+Do not silently switch required CI back to a GitHub-hosted `macos-*` runner unless the active task explicitly authorizes that fallback.
+
+Because `pull_request` workflows do not run while the PR has a merge conflict, a task waiting on required PR CI must first ensure the PR is mergeable against the current base. Treat `workflow runs = 0` together with a conflicting PR as a trigger-layer problem, not as evidence that the self-hosted runner is offline.
+
+For this public repository, self-hosted CI must not execute untrusted fork PR code by default. Gate self-hosted PR jobs to same-repository heads unless a separately reviewed security policy authorizes broader execution.
 
 ## Product-data safety
 

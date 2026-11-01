@@ -13,21 +13,36 @@ For source/Authority routing, use:
 
 `DOMAIN_MAP.md` is navigation only. It does not override product/design contracts or `CURRENT_TASK.md`.
 
-## Current runtime lifecycle / memory contract
+## Current Runtime Lifecycle / Memory authority
 
-For the accepted Runtime Lifecycle / Memory redesign, use:
+For `FT-RUNTIME-LIFECYCLE-MEMORY-001`, current architecture authority is:
 
-- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md) — **ACCEPTED / FROZEN** program-level architecture contract for `FT-RUNTIME-LIFECYCLE-MEMORY-001`;
-- [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md) — **ACCEPTED / FROZEN** concrete implementation plan for Phase 1 after its audit-freeze PR merges;
-- `CURRENT_STATUS.md` — current phase/progress and verified repository state;
+- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md) — **ACCEPTED / FROZEN** current program-level contract;
+- [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md) — **ACCEPTED / FROZEN** current Phase 1 implementation plan;
+- `CURRENT_STATUS.md` — current program/phase/evidence state;
 - `CURRENT_TASK.md` — the only active execution authorization;
-- production code and regression tests on the current Delivery / Semantic HEAD.
+- production code/tests/fresh runtime evidence.
 
-The program contract freezes ownership, phase order, data-safety invariants, Attention/unread handoff direction, native completion-notification direction, automatic Runtime Budget direction, benchmark/STOP gates, and prohibited shortcuts. It does **not** claim that unimplemented phases are current production behavior.
+The V2 program contract preserves the accepted target architecture — persistent Slot/Profile/product state with disposable `WKWebView` Runtime cache — and refreezes the program cadence as architecture-first:
 
-The Phase 1 plan freezes the exact Safe Hibernate + Restore implementation boundary, semantic split between hibernate and destructive release, deterministic teardown order, opaque in-memory `WKWebView.interactionState` restore contract, tests, benchmark acceptance and STOP conditions. It does not authorize Phase 2+ behavior.
+```text
+structural correctness
+→ bounded live Runtime validation
+→ merge
+→ dependent architecture phases
+→ scale benchmark / policy tuning when Phase 4 needs it
+```
 
-Each implementation phase must first pass its focused pre-implementation audit and repository task reconciliation before product mutation. Execution cards are bounded handoffs only; they do not replace the repository contract.
+Phase 1 no longer requires the strict 1/2/4/8 scale benchmark as a merge blocker. That matrix, control-drift study, heavy 4/8 repeated runs, restore distribution and final Runtime-budget decision belong to Phase 4 Runtime Budget / Policy.
+
+Phase 1 still requires deterministic teardown, restore correctness, stale-callback safety, Browser Profile/session safety, focused/full tests, Debug/Release builds, bounded 1–2 Slot live Runtime smoke, required PR CI and independent web audit.
+
+## Superseded Runtime Lifecycle documents
+
+- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md) — historical program-contract evidence. Its strict Phase 1 scale-benchmark/STOP gate is superseded by V2.
+- [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md) — historical Phase 1 audit/plan evidence. Its 1/2/4/8 benchmark acceptance gate is superseded by the V2 plan.
+
+Their audit facts and rationale remain useful historical evidence where they do not conflict with current V2 Authority.
 
 ## Current behavior
 
@@ -46,27 +61,23 @@ The supported runtime and release architecture is Apple Silicon arm64 only.
 
 Runtime Diagnostics is an evidence plane, not a product-state owner. The canonical runtime, navigation, lifecycle, focus, Attention and persistence authorities remain in their owning domains.
 
-The current incident-oriented diagnostics path can correlate a bounded incident identity across emitters in Web, Panel and Attention while `FloatTabs/Diagnostics/` owns the shared diagnostic event vocabulary, privacy filtering, persistence/export and bounded snapshot representation.
-
-Important boundaries:
+Current boundaries:
 
 - `SlotNavigationObserver` owns navigation/runtime observations and emits liveness, stall, termination, recovery-progress and healthy-closure evidence;
-- `WebViewPool` / `SlotLifecycleCoordinator` own runtime/recovery/residency decisions and expose their dispositions as evidence;
+- `WebViewPool` / `SlotLifecycleCoordinator` own runtime/recovery/residency decisions and expose dispositions as evidence;
 - `ChatGPTAttentionBridge` owns Attention runtime behavior and emits typed abnormal-path evidence without transferring Attention business-state ownership to Diagnostics;
-- `PanelController` can contribute bounded presentation/focus snapshot facts without making Diagnostics a window authority;
-- `RuntimeDiagnostics` and related Diagnostics types correlate and persist privacy-filtered evidence but never define root cause from event presence alone.
+- `PanelController` can contribute bounded presentation/focus facts without making Diagnostics a window authority;
+- `RuntimeDiagnostics` persists/correlates privacy-filtered evidence but never defines root cause from event presence alone.
 
-Public WebKit APIs do not provide reliable per-WebContent-process memory attribution. Current diagnostics therefore record that limitation explicitly rather than assigning host RSS or memory-pressure evidence to a WebContent child process without proof.
+Public WebKit APIs do not provide reliable exact per-WebContent-process-to-Slot memory attribution. Diagnostics must preserve that limitation.
 
-The historical WebContent stall/termination root cause remains `UNKNOWN`. Recovery by reload/reset/restart is evidence about the recovery boundary, not causal proof.
+The historical WebContent stall/termination root cause remains `UNKNOWN`. Reload/reset/restart/hibernate recovery proves only a recovery boundary unless causal evidence establishes more.
 
 ## Historical architecture references
 
 ### `FloatTabs_Technical_Architecture_v1.2.md`
 
-**Historical architecture baseline only.** It contains several deliberately preserved old assumptions, including the earlier Hot/Warm/Cold residency model, pre-custom-Profile website-data model, and older UI routing. Those statements must not be used as current Runtime/Profile/UI authority.
-
-Use it only for historical rationale that remains consistent with current source/contracts. The original body is preserved through its historical wrapper/archive path.
+Historical architecture baseline only. It contains deliberately preserved old assumptions, including the earlier Hot/Warm/Cold residency model, pre-custom-Profile website-data model and older UI routing. Do not use those statements as current Runtime/Profile/UI authority.
 
 ### `Stage_1_Interaction_Baseline.md`
 
@@ -74,8 +85,8 @@ Historical pointer only. The complete original pre-Slot baseline is retained at 
 
 ## Historical design / Stage references
 
-- `../design/FloatTabs_UI_Design_System_v1.2.md` is explicitly superseded by v1.3 for current shell interaction/geometry.
-- `../design/Stage_3_Rendering_Profile_V2.md` and `V3.md` are historical Stage records. Verify current rendering behavior in source/tests instead of trusting their old `current`/`accepted` wording.
+- `../design/FloatTabs_UI_Design_System_v1.2.md` is superseded by v1.3 for current shell interaction/geometry.
+- `../design/Stage_3_Rendering_Profile_V2.md` and `V3.md` are historical Stage records. Verify current rendering behavior in source/tests instead of trusting old `current`/`accepted` wording.
 - old Stage 5 Residency/Resource Lifecycle documents under `../product/` are historical inputs only for the active Runtime Lifecycle / Memory program.
 
 ## Rule

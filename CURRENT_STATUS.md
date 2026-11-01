@@ -1,24 +1,23 @@
 # FloatTabs Current Status
 
-**Status date:** `2026-10-31`
-**Repository:** `Lost0rz/FloatTabs`
+**Status date:** `2026-11-01`  
+**Repository:** `Lost0rz/FloatTabs`  
 **Default branch:** `main`
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 1 ARCHITECTURE-FIRST IMPLEMENTATION**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 1 IMPLEMENTATION PR CI**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `WAITING / REQUIRED PR CI ON PHASE 1 IMPLEMENTATION`.
+Current execution state: `WAITING / REQUIRED PR CI ON RECONCILED PHASE 1 IMPLEMENTATION`.
 
-The program cadence has been intentionally refrozen: establish the Runtime lifecycle architecture first, prove bounded live correctness, merge the structural primitive, and defer strict multi-Slot scale/performance tuning to Phase 4 Runtime Budget / Policy.
+The Phase 1 cadence remains architecture-first: finish the structural Runtime hibernate/restore primitive, prove bounded real-runtime correctness, merge the structural primitive, and defer strict multi-Slot scale/performance tuning to Phase 4 Runtime Budget / Policy.
 
 ## Canonical / current state
 
 ```text
-MAIN_BEFORE_V2_REFREEZE=e5b1a14b45277ff2eb8d109bac606a536e7938cd
-PRE_PROGRAM_PRODUCT_BASELINE=26d1669198a6f94faa769fb27d2cd00d0fcd1184
+MAIN_AFTER_CI_RUNNER_CORRECTIVE=ce92f99777507dd03a2e7267c33607fe5aea4c56
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 JSC_ROOT_CAUSE=UNKNOWN
@@ -32,7 +31,11 @@ PHASE_1_V1_PLAN=SUPERSEDED_FOR_CURRENT_EXECUTION
 PHASE_1_V2_CONTRACT=ACCEPTED_FROZEN
 PHASE_1_V2_PLAN=ACCEPTED_FROZEN
 CURRENT_PHASE=PHASE_1_SAFE_HIBERNATE_RESTORE_IMPLEMENTATION
-PRODUCT_MUTATION=AUTHORIZED_WITHIN_PHASE1_V2_SCOPE
+PHASE_1_IMPLEMENTATION_PR=#170 OPEN / UNMERGED
+CI_RUNNER_CORRECTIVE_PR=#171 MERGED
+CI_RUNNER=macmini-floattabs-01 / self-hosted / macOS / ARM64 / mac-mini-ci
+CI_RUNNER_CORRECTIVE_RUN=41255270977 PASS
+PHASE_1_REQUIRED_PR_CI=PENDING_ON_RECONCILED_LITERAL_HEAD
 STRICT_SCALE_BENCHMARK=DEFERRED_TO_PHASE_4
 ```
 
@@ -51,11 +54,9 @@ AGENTS.md
 → current source/tests/fresh evidence
 ```
 
-V1 lifecycle contract/Phase 1 plan remain historical evidence for the original audit and benchmark rationale. They do not override V2's current phase gate.
+V1 lifecycle contract/Phase 1 plan remain historical evidence only and do not override V2.
 
 ## Phase 1 target
-
-Implement and finish the structural split:
 
 ```text
 hibernate(slotID:)
@@ -70,9 +71,7 @@ release(slotID:)
   → Runtime becomes non-resident
 ```
 
-Only normal eligible inactive lifecycle reclamation, including the already-existing eligible critical-Warm path, uses hibernate.
-
-All destructive callers remain destructive.
+Only normal eligible inactive lifecycle reclamation, including the already-existing eligible critical-Warm path, uses hibernate. All destructive callers remain destructive.
 
 ## Authorized production scope
 
@@ -86,11 +85,9 @@ All destructive callers remain destructive.
 - `FloatTabsTests/WebAttentionLifecycleTests.swift`
 - `FloatTabsTests/WebFocusAdapterTests.swift` only if needed for the narrow observer-invalidation fixture
 
-Existing benchmark tooling may be preserved, but strict benchmark expansion is not required for Phase 1 completion.
-
 ## Current implementation evidence
 
-The existing dirty implementation was audited against the V2 Authority without a destructive sync, then committed and pushed. Fresh local verification on that final diff is:
+PR #170 implementation evidence before repository-host CI:
 
 ```text
 FOCUSED_TESTS=146 executed / 0 failures
@@ -98,19 +95,19 @@ FULL_TESTS=1073 executed / 3 skipped / 0 failures
 DEBUG_BUILD=PASS
 RELEASE_BUILD=PASS
 STRICT_1_2_4_8_BENCHMARK=NOT_RUN / DEFERRED_TO_PHASE_4
-LIVE_SMOKE=bounded 2 existing Slots; resident drop, fresh restore, interactionState restore observed
-LOCAL_IMPLEMENTATION=COMMITTED
-LOCAL_COMMIT=dd12ba89dc3ef11758c5f3d7bb04207b0307fafc
-REMOTE_REF=origin/codex/ft-runtime-lifecycle-memory-001-phase1-implement-001
-REMOTE_COMMIT=dd12ba89dc3ef11758c5f3d7bb04207b0307fafc
-PR=#170 OPEN
-PR_HEAD=dd12ba89dc3ef11758c5f3d7bb04207b0307fafc
-REQUIRED_PR_CI=NO_RUN_OBSERVED
+LIVE_SMOKE=bounded 2 existing Slots; resident drop, fresh Runtime identity, interactionState restore observed
+PROFILE_IDENTITY=default preserved
+SESSION_STORE_MUTATION=NONE OBSERVED
+DOUBLE_LOAD=NO COMPETING ORDINARY LOAD OBSERVED
 ```
+
+The earlier PR #170 no-run condition was infrastructure, not a product test failure: the PR conflicted with `main`, so GitHub did not create a pull-request workflow run. PR #171 corrected FloatTabs CI to the dedicated local self-hosted runner and proved that route with run `41255270977`, job `124696994671`, runner `macmini-floattabs-01`, arm64, all steps passing.
+
+PR #170 has now been reconciled onto current `main` while preserving the validated Phase 1 production/test blobs. The next gate is required GitHub `Build & Test (Apple Silicon arm64)` on the literal reconciled PR head.
 
 ## Phase 1 validation gate — current
 
-Phase 1 merge readiness now requires:
+Required before merge:
 
 1. exact hibernate vs destructive-release semantics remain correct;
 2. deterministic teardown and stale-callback rejection remain correct;
@@ -118,65 +115,45 @@ Phase 1 merge readiness now requires:
 4. focused regression tests pass;
 5. full unit suite has no new Phase 1 failures;
 6. Debug and Release builds pass;
-7. bounded live 1–2 Slot Runtime smoke proves resident-count drop, fresh single Runtime restore, intact login/session/page/conversation, and no obvious competing double-load;
-8. required GitHub `Build & Test (Apple Silicon arm64)` passes on the PR head;
+7. bounded live 1–2 Slot Runtime smoke proves resident-count drop, fresh single Runtime restore, intact page/conversation/session behavior to the extent observable, and no obvious competing double-load;
+8. required GitHub `Build & Test (Apple Silicon arm64)` passes on the literal reconciled PR head using the dedicated self-hosted runner;
 9. independent web audit passes before merge.
 
-The following are deferred to Phase 4 and are **not** Phase 1 merge blockers:
+Deferred to Phase 4 and not Phase 1 blockers:
 
 - strict `1 / 2 / 4 / 8` matrix;
 - >=9 configured-Slot fixture;
-- 4/8 heavy repeated runs;
-- `median reclaimed > 2× control drift`;
-- final memory curve / Runtime budget / ranking;
-- scale restore p50/p95 policy thresholds.
+- heavy 4/8 repeated runs;
+- no-op/control drift study;
+- `median reclaimed > 2× drift` threshold;
+- final process-tree memory curve;
+- final restore p50/p95 policy threshold;
+- Runtime budget/ranking selection.
 
 ## Key invariants
 
 - Browser Profile / `WKWebsiteDataStore` identity and persistent session data remain independent from Runtime lifetime.
-- `WKWebView.interactionState` remains opaque and memory-local; never persist or log its contents.
+- `WKWebView.interactionState` remains opaque and memory-local; never persist or log contents.
 - compatible interaction-state restore must not also issue a competing ordinary URL load.
-- missing/incompatible state uses the existing currentURL/home fallback.
-- deterministic teardown explicitly invalidates bridges/popup/navigation observer, clears delegates, calls `stopLoading()`, clears transient Pool state including pending termination incident context, and removes the old Runtime identity.
+- missing/incompatible state uses the existing safe currentURL/home fallback.
+- deterministic teardown invalidates bridges/popup/navigation observer, clears delegates, calls `stopLoading()`, clears transient Pool state including pending termination incident context, and removes the old Runtime identity.
 - restored Runtime receives a fresh Runtime generation/WebView instance identity.
 - current active/fullscreen/supplemental-visible/media/Attention protection remains unchanged.
 - current Generating/Ready protection remains unchanged in Phase 1.
 - Cold website-cache cleanup semantics remain separate and unchanged.
 
-## Explicit non-scope
-
-Do not modify without STOP/reconciliation:
-
-- Panel/Fullscreen/Focus product semantics;
-- Browser Profile datastore behavior/schema;
-- Attention Generating/Ready semantics;
-- durable Unread semantics;
-- completion notifications;
-- Hot/Warm/Cold UI or timer values;
-- automatic Runtime Budget/ranking;
-- Website Cache policy/data types;
-- process-pool topology;
-- server Push/service-worker behavior;
-- native conversation preview.
-
 ## Execution / handoff state
 
-The next action is to continue the existing local Phase 1 implementation, not restart it.
+Current action:
 
-The local executor must:
+```text
+PR #170 reconciled with current main
+→ required self-hosted PR CI
+→ independent web audit
+→ merge decision
+```
 
-- preserve the current dirty implementation and unknown local work;
-- refresh and read V2 Authority;
-- inspect the existing diff against the V2 boundary;
-- correct only real mismatches;
-- rerun focused/full verification and Debug/Release builds on the final diff;
-- perform the bounded 1–2 Slot live Runtime smoke;
-- commit + push one Phase 1 implementation branch and open/update one PR;
-- stop for independent web audit.
-
-Do not create temporary production Slots solely to satisfy the former V1 benchmark matrix.
-
-Merge and release are not authorized by the construction handoff.
+Do not merge or release Phase 1 product code before the required CI and independent web audit pass.
 
 ## Non-claims
 
