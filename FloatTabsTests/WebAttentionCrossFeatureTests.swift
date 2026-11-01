@@ -1468,6 +1468,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
             diagnostics: diagnostics
         )
+        var menuUnreadCounts: [Int] = []
+        controller.onAttentionPresentationChange = { unreadCount, _ in
+            menuUnreadCounts.append(unreadCount)
+        }
         let slot = try profile(named: "ChatA", in: store)
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         let bridge = try attentionBridge(pool: pool, slot: slot)
@@ -1482,6 +1486,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertEqual(coordinator.readySlotIDs, [slot.id])
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+        XCTAssertEqual(menuUnreadCounts.last, 1)
 
         // A new generation supersedes the transient Ready state, but the
         // independent unread response remains until explicit acknowledgement.
@@ -1489,6 +1494,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .generating)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertEqual(controller.unreadResponseCount, 1)
+        XCTAssertEqual(menuUnreadCounts.last, 1)
 
         // A later completion while still unseen must create a fresh Ready
         // cycle rather than any historical notification count.
@@ -1496,6 +1502,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertEqual(controller.unreadResponseCount, 1)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+        XCTAssertEqual(menuUnreadCounts.last, 1)
         XCTAssertEqual(
             writer.events.last { $0.event == "unread.mark_skipped" }?
                 .fields["reason"],
@@ -1890,6 +1897,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
                 spec(name: "OrdinaryB", url: "https://example.com/ordinary-b")
             ]
         )
+        var menuUnreadCounts: [Int] = []
+        controller.onAttentionPresentationChange = { unreadCount, _ in
+            menuUnreadCounts.append(unreadCount)
+        }
         let chat = try profile(named: "ChatReady", in: store)
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatReady")
         let bridge = try attentionBridge(pool: pool, slot: chat)
@@ -1915,6 +1926,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: chat.id), .ready)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: chat.id))
+        XCTAssertEqual(menuUnreadCounts.last, 1)
 
         makeInactive(lifecycle, profile: ordinaryA)
         makeInactive(lifecycle, profile: ordinaryB)
@@ -1932,6 +1944,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: chat.id))
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: chat.id))
         XCTAssertEqual(coordinator.state(for: chat.id), .idle)
+        XCTAssertEqual(menuUnreadCounts.last, 1)
     }
 
     // MARK: 4.2 Runtime reset → fresh lifecycle boundary
@@ -4022,6 +4035,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
             diagnostics: diagnostics
         )
+        var menuUnreadCounts: [Int] = []
+        controller.onAttentionPresentationChange = { unreadCount, _ in
+            menuUnreadCounts.append(unreadCount)
+        }
         let slot = try profile(named: "ChatA", in: store)
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         let bridge = try attentionBridge(pool: pool, slot: slot)
@@ -4032,6 +4049,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             token: "active-rail-reclick"
         )
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertEqual(menuUnreadCounts.last, 1)
 
         // The selection callback remains the real production rail callback.
         // Only the presentation fact is deterministic here, so this test does
@@ -4044,6 +4062,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
         XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
         XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+        XCTAssertEqual(menuUnreadCounts.last, 0)
         XCTAssertEqual(
             writer.events.last { $0.event == "unread.acknowledged" }?.fields["source"],
             .string("explicit_selection")
@@ -4973,6 +4992,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             ChatGPTResponseIdentity(rawValue: "message:async-race-r1")
         )
         let fixture = try makeAsyncSnapshotFixture(identity: identity)
+        var menuUnreadCounts: [Int] = []
+        fixture.controller.onAttentionPresentationChange = { unreadCount, _ in
+            menuUnreadCounts.append(unreadCount)
+        }
 
         fixture.controller.debugSetPresentationFactOverride(
             slotID: fixture.slot.id,
@@ -5028,6 +5051,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
                     && $0.fields["unread_after"] == .bool(false)
             }
         )
+        XCTAssertTrue(menuUnreadCounts.contains(1))
+        XCTAssertEqual(menuUnreadCounts.last, 0)
     }
 
     func testSNAPSHOT_PENDING_COMPLETION_FIRST_RECONCILES() async throws {

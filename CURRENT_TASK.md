@@ -2,7 +2,7 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Title:** Runtime Lifecycle / Memory redesign — Phase 2 Ready / Unread Decoupling  
-**Status:** `ACTIVE / PHASE 2 IMPLEMENTATION — WAITING FOR INDEPENDENT WEB AUDIT`
+**Status:** `ACTIVE / PHASE 2 CORRECTIVE — REQUIRED CI THEN INDEPENDENT WEB AUDIT`
 **Mode:** `EXECUTE`  
 **Task class:** `HIGH-RISK ATTENTION / DURABLE UNREAD / RUNTIME LIFECYCLE HANDOFF`  
 **Program contract:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`  
@@ -71,12 +71,13 @@ The preserved local workspace reports:
 BrowserProfileDuplicate corrective: 1 / 0 failures
 focused Phase 2: 241 executed / 3 skipped / 0 failures
 full XCTest: 1073 executed / 3 skipped / 0 failures
+targeted menu/unread projection regression: 4 executed / 0 failures
 Debug arm64: PASS
 Release arm64: PASS
 first CUA smoke: visible_completion; durable unread correctly skipped
 fresh origin/main: 36d5850a9a5bad01b24cffa9a4bd1e1fbf628d4d; control/docs-only delta reconciled non-destructively
 exact implementation/test scope: 9 authorized dirty files; PASS
-required CI: `Build & Test (Apple Silicon arm64)` on the final literal PR head, runner `macmini-floattabs-01`, PASS
+required CI: `Build & Test (Apple Silicon arm64)` on the current corrective literal PR head, runner `macmini-floattabs-01`, PENDING
 ```
 
 The first smoke result is not a Phase 2 failure and is not a STOP condition under V2.
@@ -107,7 +108,7 @@ The local construction executor is responsible for:
 - exactly one Phase 2 implementation PR;
 - literal-head `Build & Test (Apple Silicon arm64)` PASS on `macmini-floattabs-01`.
 
-Local tests, builds, exact scope, and required literal-head CI are complete. The next owner is the independent web audit; HUMAN_UI_ACCEPTANCE remains user-owned and PENDING.
+Local targeted/focused/full tests, builds, and exact scope/data-safety audit are complete. The corrective is ready for the required literal-head CI on existing PR #176; HUMAN_UI_ACCEPTANCE remains user-owned and PENDING.
 
 After required CI, stop for independent web audit.
 

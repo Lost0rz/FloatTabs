@@ -3167,7 +3167,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 "reason": .string("invalid_slot_identity")
             ])
         }
-        synchronizeUnreadIndicators()
+        synchronizeDurableUnreadPresentation()
         guard !sourceHostController.isSessionLocked else {
             pendingSlotSynchronization = true
             synchronizeFullscreenCompanionSlotState()
@@ -3179,8 +3179,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             profiles: orderedProfiles,
             activeTabID: tabStore.activeTabID
         )
-        synchronizeAttentionPresentation()
-        synchronizeUnreadIndicators()
+        synchronizeDurableUnreadPresentation()
         synchronizeResidentIndicators()
         slotLifecycleCoordinator.reconcile(profiles: orderedProfiles)
 
@@ -3319,6 +3318,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
+    private func synchronizeDurableUnreadPresentation() {
+        synchronizeAttentionPresentation()
+        synchronizeUnreadIndicators()
+    }
+
     private func updateRequestedVisibility(_ visible: Bool) {
         requestedVisibility = visible
         onAttentionPresentationChange?(
@@ -3374,8 +3378,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             isValidGenerationCompletion: isValidGenerationCompletion,
             userVisible: userVisibleAtCompletion
         )
-        synchronizeAttentionPresentation()
-        synchronizeUnreadIndicators()
+        synchronizeDurableUnreadPresentation()
 
         if observation == .generationFinished {
             let unreadAfter = unreadResponseCoordinator.unreadSlotIDs.contains(slotID)
@@ -3647,7 +3650,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 return
             }
             unreadResponseCoordinator.acknowledge(slotID: slotID)
-            synchronizeUnreadIndicators()
+            synchronizeDurableUnreadPresentation()
             finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
         }
         requestLatestResponseHandledSnapshot(slotID: slotID, source: source)
@@ -3714,7 +3717,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             // deliberately not added to handled history.
             unreadResponseCoordinator.acknowledge(slotID: slotID)
         }
-        synchronizeUnreadIndicators()
+        synchronizeDurableUnreadPresentation()
         finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
     }
 
@@ -3767,7 +3770,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         } else {
             unreadResponseCoordinator.acknowledge(slotID: slotID)
         }
-        synchronizeUnreadIndicators()
+        synchronizeDurableUnreadPresentation()
         finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
     }
 
@@ -3840,7 +3843,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 responseIdentity: responseIdentity
             )
             guard reconciliation == .cleared else { return }
-            self.synchronizeUnreadIndicators()
+            self.synchronizeDurableUnreadPresentation()
             self.recordUnreadDiagnostic(
                 event: "unread.late_completion_reconciled",
                 fields: [
@@ -4096,6 +4099,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         // dropping the bookkeeping fully forgets the deleted Slot.
         attentionCoordinator.removeSlot(id)
         unreadResponseCoordinator.removeSlot(slotID: id)
+        synchronizeDurableUnreadPresentation()
         if wasUnread {
             recordUnreadDiagnostic(event: "unread.removed", fields: [
                 "slot_id": .string(id.uuidString),
@@ -5453,8 +5457,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             profiles: orderedProfiles,
             activeTabID: tabStore.activeTabID
         )
-        synchronizeAttentionPresentation()
-        synchronizeUnreadIndicators()
+        synchronizeDurableUnreadPresentation()
         synchronizeResidentIndicators()
 
         guard let activeProfile = tabStore.activeProfile else {

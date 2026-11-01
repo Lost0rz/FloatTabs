@@ -10,7 +10,7 @@
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `ACTIVE / PHASE 2 IMPLEMENTATION — WAITING FOR INDEPENDENT WEB AUDIT`.
+Current execution state: `ACTIVE / PHASE 2 CORRECTIVE — REQUIRED CI THEN INDEPENDENT WEB AUDIT`.
 
 Phase 1 Safe Hibernate + Restore is complete. Phase 2 decouples transient Runtime `ready` state from durable unread truth so completed unseen work can remain unread after its `WKWebView` Runtime is reclaimed.
 
@@ -27,7 +27,8 @@ PHASE_2_PLAN_V1=SUPERSEDED_FOR_CURRENT_EXECUTION
 PHASE_2_PLAN_V2=ACCEPTED_FROZEN
 PHASE_2_IMPLEMENTATION=ACTIVE
 PHASE_2_SCOPE_RECONCILIATION_001=ACCEPTED_TEST_ONLY
-PHASE_2_MACHINE_VERIFICATION=LOCAL_TESTS/BUILDS/SCOPE PASS; REQUIRED_CI PASS
+PHASE_2_MACHINE_VERIFICATION=LOCAL_TESTS/BUILDS/SCOPE PASS; CORRECTIVE_REQUIRED_CI PENDING ON CURRENT LITERAL PR HEAD
+PHASE_2_MENU_UNREAD_PROJECTION_CORRECTIVE=IMPLEMENTED / TARGETED REGRESSION PASS
 PHASE_2_REAL_UI_RUNTIME_ACCEPTANCE=USER_OWNED / DEFERRED UNTIL MACHINE WORK + AUDIT COMPLETE
 PHASE_3=NOT_STARTED / NOT_AUTHORIZED
 PHASE_4=NOT_STARTED / NOT_AUTHORIZED
@@ -108,6 +109,7 @@ AUTHORIZED_DIRTY_FILES=9
 AFFECTED_BROWSER_PROFILE_TEST=1 executed / 0 failures
 FOCUSED_TESTS=241 executed / 3 skipped / 0 failures
 FULL_XCTEST=1073 executed / 3 skipped / 0 failures
+TARGETED_MENU_UNREAD_REGRESSION=4 executed / 0 failures
 DEBUG_BUILD=PASS
 RELEASE_BUILD=PASS
 LIVE_SMOKE_FIRST_ATTEMPT=VISIBLE_COMPLETION / NOT A PRODUCT FAILURE
@@ -116,7 +118,7 @@ IMPLEMENTATION_BRANCH=codex/ft-runtime-lifecycle-memory-001-phase2-implement-001
 IMPLEMENTATION_SCOPE_AUDIT=PASS / 9 AUTHORIZED IMPLEMENTATION-TEST FILES
 REQUIRED_CI_JOB=Build & Test (Apple Silicon arm64)
 REQUIRED_CI_RUNNER=macmini-floattabs-01
-REQUIRED_CI=PASS ON FINAL LITERAL PR HEAD
+REQUIRED_CI=REQUIRED ON CURRENT LITERAL PR HEAD
 ```
 
 The previous CUA-driven smoke completed while the ChatGPT Slot was still visible, so durable unread was correctly skipped. Under Phase 2 V2 this is not a construction STOP and is not retried by the local executor. Timing-sensitive runtime/UI acceptance remains user-owned.
@@ -162,4 +164,4 @@ Do not modify without STOP/reconciliation:
 
 ## Next action
 
-The nine authorized local implementation/test changes are aligned with fresh Authority, committed, pushed, and covered by required CI run `41261953797` on `macmini-floattabs-01` at literal head `3c15c3555ca5c25bc88f0d592b9cbec89693993a`. Do not retry CUA/live-smoke automation. Stop for independent web audit; after the audit, hand the build to the user for concentrated human acceptance.
+The existing nine-file Phase 2 implementation remains aligned with fresh Authority. This corrective adds one private `PanelController` durable-unread presentation boundary so completion, acknowledgement, late reconciliation, prune, and Slot-removal mutations refresh both the persistent rail and menu/status count projection. Targeted, focused, full XCTest, Debug arm64, Release arm64, and exact scope/data-safety checks pass locally. Push the corrective on the existing PR #176 and wait for its required literal-head CI; do not retry CUA/live-smoke automation. After required CI and independent web audit, hand the build to the user for concentrated human acceptance.
