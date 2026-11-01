@@ -10,7 +10,7 @@
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `ACTIVE / PHASE 2 IMPLEMENTATION — MACHINE VERIFICATION THEN HUMAN ACCEPTANCE`.
+Current execution state: `ACTIVE / PHASE 2 IMPLEMENTATION — REQUIRED CI THEN INDEPENDENT WEB AUDIT`.
 
 Phase 1 Safe Hibernate + Restore is complete. Phase 2 decouples transient Runtime `ready` state from durable unread truth so completed unseen work can remain unread after its `WKWebView` Runtime is reclaimed.
 
@@ -27,7 +27,7 @@ PHASE_2_PLAN_V1=SUPERSEDED_FOR_CURRENT_EXECUTION
 PHASE_2_PLAN_V2=ACCEPTED_FROZEN
 PHASE_2_IMPLEMENTATION=ACTIVE
 PHASE_2_SCOPE_RECONCILIATION_001=ACCEPTED_TEST_ONLY
-PHASE_2_MACHINE_VERIFICATION=LOCAL_TESTS/BUILDS PASS ON CURRENT DIRTY IMPLEMENTATION
+PHASE_2_MACHINE_VERIFICATION=LOCAL_TESTS/BUILDS/SCOPE PASS; REQUIRED_CI DELIVERY GATE
 PHASE_2_REAL_UI_RUNTIME_ACCEPTANCE=USER_OWNED / DEFERRED UNTIL MACHINE WORK + AUDIT COMPLETE
 PHASE_3=NOT_STARTED / NOT_AUTHORIZED
 PHASE_4=NOT_STARTED / NOT_AUTHORIZED
@@ -111,9 +111,12 @@ FULL_XCTEST=1073 executed / 3 skipped / 0 failures
 DEBUG_BUILD=PASS
 RELEASE_BUILD=PASS
 LIVE_SMOKE_FIRST_ATTEMPT=VISIBLE_COMPLETION / NOT A PRODUCT FAILURE
+FRESH_ORIGIN_MAIN=36d5850a9a5bad01b24cffa9a4bd1e1fbf628d4d
+IMPLEMENTATION_BRANCH=codex/ft-runtime-lifecycle-memory-001-phase2-implement-001
+IMPLEMENTATION_SCOPE_AUDIT=PASS / 9 AUTHORIZED IMPLEMENTATION-TEST FILES
 ```
 
-The previous CUA-driven smoke completed while the ChatGPT Slot was still visible, so durable unread was correctly skipped. Under Phase 2 V2 this is not a construction STOP and is not retried by the local executor.
+The previous CUA-driven smoke completed while the ChatGPT Slot was still visible, so durable unread was correctly skipped. Under Phase 2 V2 this is not a construction STOP and is not retried by the local executor. Timing-sensitive runtime/UI acceptance remains user-owned.
 
 ## Verification / acceptance cadence
 
@@ -152,4 +155,4 @@ Do not modify without STOP/reconciliation:
 
 ## Next action
 
-Preserve the current nine authorized local implementation/test changes. Do not retry CUA/live-smoke automation. Finish repository delivery: align with fresh Authority non-destructively, commit, push, create exactly one Phase 2 implementation PR, run required CI, then independent web audit. After those machine gates pass, hand the build to the user for concentrated human acceptance.
+The nine authorized local implementation/test changes are aligned with fresh Authority and ready for repository delivery. Do not retry CUA/live-smoke automation. Commit, push, create exactly one Phase 2 implementation PR, run required CI on `macmini-floattabs-01`, then stop for independent web audit. After the audit, hand the build to the user for concentrated human acceptance.

@@ -227,7 +227,7 @@ final class BrowserProfileDuplicateTests: XCTestCase {
         XCTAssertTrue(pool.attentionBridge(for: source.id) === sourceBridge)
         XCTAssertEqual(pool.browserProfileIdentity(for: source.id), .default)
         XCTAssertEqual(attention.readySlotIDs, [source.id])
-        XCTAssertTrue(attention.isAttentionProtected(source.id))
+        XCTAssertFalse(attention.isAttentionProtected(source.id))
         XCTAssertFalse(attention.readySlotIDs.contains(duplicate.id))
         XCTAssertFalse(attention.isAttentionProtected(duplicate.id))
         XCTAssertTrue(pool.residentSlotIDs.contains(source.id))

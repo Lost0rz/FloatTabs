@@ -616,8 +616,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         return faviconURL(for: activeProfile)
     }
 
-    var attentionReadyCount: Int {
-        attentionCoordinator.readySlotIDs.count
+    var unreadResponseCount: Int {
+        unreadResponseCoordinator.unreadSlotIDs.count
     }
 
     /// Captures one QA-only, read-only snapshot of the currently selected
@@ -1095,9 +1095,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         return [
             "resident_attention_generating_count": .integer(Int64(generatingCount)),
             "resident_attention_ready_count": .integer(Int64(readyCount)),
-            "resident_attention_protected_count": .integer(
-                Int64(generatingCount + readyCount)
-            )
+            "resident_attention_protected_count": .integer(Int64(generatingCount))
         ]
     }
 
@@ -3309,8 +3307,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeAttentionPresentation() {
-        let readySlotIDs = attentionCoordinator.readySlotIDs
-        onAttentionPresentationChange?(readySlotIDs.count, requestedVisibility)
+        onAttentionPresentationChange?(
+            unreadResponseCoordinator.unreadSlotIDs.count,
+            requestedVisibility
+        )
     }
 
     private func synchronizeUnreadIndicators() {
@@ -3322,7 +3322,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func updateRequestedVisibility(_ visible: Bool) {
         requestedVisibility = visible
         onAttentionPresentationChange?(
-            attentionCoordinator.readySlotIDs.count,
+            unreadResponseCoordinator.unreadSlotIDs.count,
             requestedVisibility
         )
     }

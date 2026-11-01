@@ -47,7 +47,7 @@ final class WebAttentionPresentationTests: XCTestCase {
         router.handle(.generationFinished, for: slotA)
 
         let menu = StatusItemController.attentionPresentation(
-            readyCount: coordinator.readySlotIDs.count,
+            unreadCount: coordinator.readySlotIDs.count,
             floatTabsVisible: false
         )
 
@@ -63,11 +63,11 @@ final class WebAttentionPresentationTests: XCTestCase {
         router.handle(.generationFinished, for: slotB)
 
         let visible = StatusItemController.attentionPresentation(
-            readyCount: coordinator.readySlotIDs.count,
+            unreadCount: coordinator.readySlotIDs.count,
             floatTabsVisible: true
         )
         let hidden = StatusItemController.attentionPresentation(
-            readyCount: coordinator.readySlotIDs.count,
+            unreadCount: coordinator.readySlotIDs.count,
             floatTabsVisible: false
         )
 
@@ -482,7 +482,7 @@ final class WebAttentionPresentationTests: XCTestCase {
         )
 
         let hiddenMenu = StatusItemController.attentionPresentation(
-            readyCount: coordinator.readySlotIDs.count,
+            unreadCount: coordinator.readySlotIDs.count,
             floatTabsVisible: false
         )
 

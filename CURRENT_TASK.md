@@ -2,7 +2,7 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Title:** Runtime Lifecycle / Memory redesign — Phase 2 Ready / Unread Decoupling  
-**Status:** `ACTIVE / PHASE 2 IMPLEMENTATION — MACHINE VERIFICATION`  
+**Status:** `ACTIVE / PHASE 2 IMPLEMENTATION — REQUIRED CI THEN INDEPENDENT WEB AUDIT`
 **Mode:** `EXECUTE`  
 **Task class:** `HIGH-RISK ATTENTION / DURABLE UNREAD / RUNTIME LIFECYCLE HANDOFF`  
 **Program contract:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`  
@@ -74,6 +74,8 @@ full XCTest: 1073 executed / 3 skipped / 0 failures
 Debug arm64: PASS
 Release arm64: PASS
 first CUA smoke: visible_completion; durable unread correctly skipped
+fresh origin/main: 36d5850a9a5bad01b24cffa9a4bd1e1fbf628d4d; control/docs-only delta reconciled non-destructively
+exact implementation/test scope: 9 authorized dirty files; PASS
 ```
 
 The first smoke result is not a Phase 2 failure and is not a STOP condition under V2.
@@ -103,6 +105,8 @@ The local construction executor is responsible for:
 - commit + push;
 - exactly one Phase 2 implementation PR;
 - literal-head `Build & Test (Apple Silicon arm64)` PASS on `macmini-floattabs-01`.
+
+Current local evidence is complete for tests, builds, and exact scope. Required literal-head CI remains the next repository-host gate.
 
 After required CI, stop for independent web audit.
 

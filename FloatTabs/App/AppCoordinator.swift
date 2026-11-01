@@ -249,15 +249,15 @@ final class AppCoordinator {
                 player: self.attentionSoundPlayer
             )
         }
-        panelController.onAttentionPresentationChange = { [weak self] readyCount, floatTabsVisible in
+        panelController.onAttentionPresentationChange = { [weak self] unreadCount, floatTabsVisible in
             guard let self else { return }
             self.statusItemController?.setAttentionPresentation(
-                readyCount: readyCount,
+                unreadCount: unreadCount,
                 floatTabsVisible: floatTabsVisible
             )
         }
         statusItemController?.setAttentionPresentation(
-            readyCount: panelController.attentionReadyCount,
+            unreadCount: panelController.unreadResponseCount,
             floatTabsVisible: panelController.isVisible
         )
 

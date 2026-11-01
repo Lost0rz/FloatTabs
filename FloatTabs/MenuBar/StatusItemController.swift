@@ -13,15 +13,15 @@ enum StatusItemAttentionBadge: Equatable {
 }
 
 struct StatusItemAttentionPresentation: Equatable {
-    let readyCount: Int
+    let unreadCount: Int
     let floatTabsVisible: Bool
     let badge: StatusItemAttentionBadge
 
     static func resolve(
-        readyCount: Int,
+        unreadCount: Int,
         floatTabsVisible: Bool
     ) -> StatusItemAttentionPresentation {
-        let normalizedCount = max(0, readyCount)
+        let normalizedCount = max(0, unreadCount)
         let badge: StatusItemAttentionBadge
 
         if floatTabsVisible || normalizedCount == 0 {
@@ -35,10 +35,23 @@ struct StatusItemAttentionPresentation: Equatable {
         }
 
         return StatusItemAttentionPresentation(
-            readyCount: normalizedCount,
+            unreadCount: normalizedCount,
             floatTabsVisible: floatTabsVisible,
             badge: badge
         )
+    }
+
+    /// Compatibility projection for existing non-Phase-2 presentation tests.
+    /// Production wiring uses `unreadCount`; this alias does not own state.
+    @available(*, deprecated, message: "Use unreadCount for durable unread presentation")
+    var readyCount: Int { unreadCount }
+
+    @available(*, deprecated, message: "Use resolve(unreadCount:floatTabsVisible:)")
+    static func resolve(
+        readyCount: Int,
+        floatTabsVisible: Bool
+    ) -> StatusItemAttentionPresentation {
+        resolve(unreadCount: readyCount, floatTabsVisible: floatTabsVisible)
     }
 }
 
@@ -76,7 +89,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var selectedFaviconImage: NSImage?
     private var latestActiveWebAppName: String?
     private(set) var attentionPresentation = StatusItemAttentionPresentation.resolve(
-        readyCount: 0,
+        unreadCount: 0,
         floatTabsVisible: false
     )
 
@@ -230,20 +243,39 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    func setAttentionPresentation(readyCount: Int, floatTabsVisible: Bool) {
+    func setAttentionPresentation(unreadCount: Int, floatTabsVisible: Bool) {
         attentionPresentation = Self.attentionPresentation(
-            readyCount: readyCount,
+            unreadCount: unreadCount,
             floatTabsVisible: floatTabsVisible
         )
         redrawStatusImage()
     }
 
+    @available(*, deprecated, message: "Use setAttentionPresentation(unreadCount:floatTabsVisible:)")
+    func setAttentionPresentation(readyCount: Int, floatTabsVisible: Bool) {
+        setAttentionPresentation(
+            unreadCount: readyCount,
+            floatTabsVisible: floatTabsVisible
+        )
+    }
+
+    static func attentionPresentation(
+        unreadCount: Int,
+        floatTabsVisible: Bool
+    ) -> StatusItemAttentionPresentation {
+        StatusItemAttentionPresentation.resolve(
+            unreadCount: unreadCount,
+            floatTabsVisible: floatTabsVisible
+        )
+    }
+
+    @available(*, deprecated, message: "Use attentionPresentation(unreadCount:floatTabsVisible:)")
     static func attentionPresentation(
         readyCount: Int,
         floatTabsVisible: Bool
     ) -> StatusItemAttentionPresentation {
-        StatusItemAttentionPresentation.resolve(
-            readyCount: readyCount,
+        attentionPresentation(
+            unreadCount: readyCount,
             floatTabsVisible: floatTabsVisible
         )
     }
