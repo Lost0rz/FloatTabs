@@ -2,8 +2,8 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Title:** Runtime Lifecycle / Memory redesign — Phase 4 reference-derived automatic Runtime management  
-**Status:** `ACTIVE / PHASE 4 IMPLEMENTATION AUTHORIZED — RECONCILED`  
-**Mode:** `EXECUTE`  
+**Status:** `WAITING_FOR_PHASE_4_MERGE_GATE`  
+**Mode:** `VERIFY / MERGE GATE`  
 **Task class:** `RUNTIME LIFECYCLE POLICY / REFERENCE-DERIVED DEFAULT`  
 **JSC root cause:** `UNKNOWN`
 
@@ -23,105 +23,74 @@ Do not require the prior `1 / 2 / 4 / 8` benchmark, drift calculation, candidate
 
 Required CI/data-safety gates remain in force.
 
-## Reference-derived mechanism
+## Delivered implementation
 
-Use mature Chromium lifecycle principles as mechanism reference, adapted to FloatTabs ownership:
+Phase 4 implementation is complete on PR #181.
 
-1. protect foreground/selected work;
-2. protect explicit pinning and active media/work;
-3. rank inactive discard candidates by importance/recency;
-4. reclaim proactively before the system becomes unusable;
-5. react more aggressively to critical memory pressure;
-6. restore/materialize discarded content on activation;
-7. do not make persistence/session deletion part of Runtime reclamation.
+Implementation semantic head:
 
-Do not copy Chromium renderer/process architecture or private APIs.
+`ce0231628a976ad41afba1e78ef1b0726212f95e`
 
-## Required FloatTabs semantics
-
-### Ownership
+Delivered mechanism:
 
 ```text
-read-only resident/protection/recency facts
-→ pure deterministic budget decision
+resident/protection/recency facts
+→ deterministic runtime-budget decision
+→ Cold before Warm
+→ LRU lastUsedAt
+→ UUID deterministic tie-break
 → SlotLifecycleCoordinator sole executor
-→ existing WebViewPool hibernate boundary
+→ existing WebViewPool hibernate/restore boundary
 ```
 
-No second Runtime lifecycle writer.
+Normal/warning managed target is **3 resident Warm/Cold runtimes** as an explicitly reference-derived initial product assumption. Critical pressure targets `0` eligible inactive Warm/Cold runtimes.
 
-### Managed target
+Hard protection covers active/presented, fullscreen, supplemental-visible, media-playing or media-query-pending, Attention `generating`, and Hot. Ready/unread/native notification do not protect Runtime.
 
-Initial normal managed target: **3 resident Warm/Cold runtimes**.
+No Browser Profile/session/schema/reset/delete semantics changed.
 
-This value is a conservative product default for the current Web App switcher and is explicitly **not empirical truth**. It may be tuned later without changing the ownership model.
+## Verification evidence
 
-- normal: target 3;
-- warning memory pressure: enforce/evaluate target 3, no invented tighter threshold;
-- critical memory pressure: target 0 for eligible inactive Warm/Cold runtimes.
+Implementation semantic head passed:
 
-### Ranking
+- Debug arm64 build;
+- Release arm64 build;
+- native arm64 architecture verification;
+- full existing XCTest suite;
+- required `Build & Test (Apple Silicon arm64)` run `1282` on `macmini-floattabs-01`;
+- QA DMG run `621`.
 
-When managed resident count exceeds the target, evict eligible inactive candidates in this exact order:
+Initial CI found two stale memory-pressure diagnostic assertions; the correction preserved backward-compatible diagnostic naming while retaining the new unified budget behavior. Full XCTest then passed.
 
-```text
-Cold before Warm
-→ older lastUsedAt before newer
-→ UUID lexical tie-break
-```
+A final code audit also caught an async background-media protection race. The implementation now treats the playback-query window as protected, including the timer revalidation path, preventing budget eviction before media state is known.
 
-### Hard protection
+## Deferred tuning
 
-Never budget-evict:
+Not required for this merge:
 
-- active / actually presented Slot;
-- fullscreen source;
-- supplemental visible surface;
-- media-protected Runtime;
-- Attention `generating` Runtime;
-- Hot residency policy.
+- Real-Mac `1 / 2 / 4 / 8` matrix;
+- no-op drift baseline;
+- candidate `4 → 3 → 2` tournament;
+- restore/materialization median/p95;
+- human performance tuning.
 
-These do not protect Runtime:
+These remain future tuning work and must not be retroactively reported as completed evidence.
 
-- Attention `ready`;
-- durable unread;
-- native notification presence.
+## Merge gate
 
-If protected/Hot runtimes exceed the managed target, report oversubscription and keep them resident.
+Before merge, confirm against the **literal current PR head**:
 
-### Timers
+1. PR #181 remains open, ready and mergeable;
+2. required `Build & Test (Apple Silicon arm64)` is green for the literal head;
+3. changed paths remain inside the reconciled Phase 4 scope;
+4. no Browser Profile/session/persistence or `WebViewPool` contract mutation was introduced;
+5. no release/version/Phase 5 work is present.
 
-Existing Warm/Cold timers remain maximum normal retention boundaries. Automatic budget enforcement may reclaim eligible inactive Warm/Cold earlier.
-
-### Data safety
-
-Do not modify Browser Profile datastore/session semantics, cookies, website data, Slot/Profile persistence schema, or use reset/delete as ordinary reclamation.
-
-## Authorized source scope
-
-Preferred minimal implementation:
-
-- `FloatTabs/Web/SlotLifecycleCoordinator.swift`;
-- `FloatTabs/Tabs/WebAppProfile.swift` for truthful user-facing residency copy if needed;
-- adjacent composition/UI copy only when required to keep behavior truthful.
-
-A separate policy file may be added only if it materially improves ownership clarity. `WebViewPool.swift` hibernate/restore semantics are not authorized to change unless implementation proves the current mechanism insufficient, in which case STOP/reconcile.
-
-## Verification / merge gate
-
-The user has deferred Phase 4 empirical tuning tests. Do not create the previous benchmark harness as a blocker.
-
-Before merge still require:
-
-- static/diff review for ownership and data safety;
-- existing repository-required `Build & Test (Apple Silicon arm64)` on `macmini-floattabs-01` for the literal PR head;
-- PR mergeable / no required host blocker.
-
-No additional Phase 4 tuning benchmark, human UI acceptance, release, or version bump is required in this task.
+This control-alignment commit is control-only drift after the verified implementation semantic head. Branch protection still governs the literal PR head; do not infer the final host gate from the older semantic-head CI.
 
 ## STOP conditions
 
-STOP/reconcile if implementation would require:
+STOP/reconcile if the final merge gate reveals:
 
 - a second Runtime lifecycle writer;
 - automatic Hot eviction;
@@ -130,12 +99,13 @@ STOP/reconcile if implementation would require:
 - persistence/session/schema changes;
 - private WebKit API;
 - user-data deletion/reset;
+- required literal-head CI failure;
 - Phase 5/6 work.
 
 ## Delivery boundary
 
-Implement on one branch, push one Phase 4 implementation PR, let required repository CI run, and stop at:
+The construction phase is complete. Current terminal state is:
 
 `WAITING_FOR_PHASE_4_MERGE_GATE`
 
-Do not merge, release, bump version or begin Phase 5.
+Do not merge, release, bump version or begin Phase 5 without the next authorized merge decision.
