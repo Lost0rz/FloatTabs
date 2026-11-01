@@ -44,40 +44,38 @@ jobs:
           -resolvePackageDependencies
           -onlyUsePackageVersionsFromResolvedFile
 
-      - name: Debug build
-        run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          -derivedDataPath "$RUNNER_TEMP/FloatTabsPhase7Corrective"
-          CODE_SIGNING_ALLOWED=NO
-          build
-
-      - name: Release build
-        run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Release
-          -destination 'platform=macOS,arch=arm64'
-          -derivedDataPath "$RUNNER_TEMP/FloatTabsPhase7Corrective"
-          CODE_SIGNING_ALLOWED=NO
-          build
-
       - name: Full XCTest
+        id: xctest
+        continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
+          rm -rf "$RUNNER_TEMP/FloatTabsPhase7Corrective.xcresult"
           xcodebuild \
             -project FloatTabs.xcodeproj \
             -scheme FloatTabs \
             -configuration Debug \
             -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath "$RUNNER_TEMP/FloatTabsPhase7Corrective" \
+            -resultBundlePath "$RUNNER_TEMP/FloatTabsPhase7Corrective.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
-            test
+            test 2>&1 | tee "$RUNNER_TEMP/phase7-xctest.log"
+
+      - name: Upload XCTest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Phase7-Test-Corrective-XCTest-Diagnostics
+          path: |
+            ${{ runner.temp }}/phase7-xctest.log
+            ${{ runner.temp }}/FloatTabsPhase7Corrective.xcresult
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Require full XCTest pass
+        if: steps.xctest.outcome != 'success'
+        shell: bash
+        run: exit 1
 
       - name: Remove temporary corrective machinery
         shell: bash
