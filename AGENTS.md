@@ -178,6 +178,18 @@ Real macOS interaction/runtime changes require relevant runtime acceptance; stat
 
 Before merge/release, separately confirm current PR base/head, exact diff, required CI, reviews/mergeability, task scope, Authority integrity, and applicable runtime acceptance. Repository-host gates apply to the literal identity GitHub governs and cannot be inferred from older semantic evidence.
 
+## CI execution
+
+FloatTabs macOS CI is intended to execute on the user's local Apple Silicon self-hosted runner while GitHub Actions provides scheduling and status. Required macOS jobs should target the established labels:
+
+`[self-hosted, macOS, ARM64, mac-mini-ci]`
+
+Do not silently switch required CI back to a GitHub-hosted `macos-*` runner unless the active task explicitly authorizes that fallback.
+
+Because `pull_request` workflows do not run while the PR has a merge conflict, a task waiting on required PR CI must first ensure the PR is mergeable against the current base. Treat `workflow runs = 0` together with a conflicting PR as a trigger-layer problem, not as evidence that the self-hosted runner is offline.
+
+For this public repository, self-hosted CI must not execute untrusted fork PR code by default. Gate self-hosted PR jobs to same-repository heads unless a separately reviewed security policy authorizes broader execution.
+
 ## Product-data safety
 
 Browser Profiles, Web App Slot configuration, persisted website/session data, preferences, backups, and recovery material are user/product data.
