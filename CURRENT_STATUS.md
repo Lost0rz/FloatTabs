@@ -10,7 +10,7 @@
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `ACTIVE / PHASE 2 IMPLEMENTATION AUTHORIZED`.
+Current execution state: `ACTIVE / PHASE 2 IMPLEMENTATION — TEST-SCOPE CORRECTIVE AUTHORIZED`.
 
 Phase 1 Safe Hibernate + Restore is complete. Phase 2 now decouples transient Runtime `ready` state from durable unread truth so a completed unseen response can remain unread after its `WKWebView` Runtime is reclaimed.
 
@@ -31,6 +31,7 @@ PHASE_1_MERGE_COMMIT=188c524fd02e1c31b8a152b2bec224c947526610
 PHASE_2_FOCUSED_READ_ONLY_AUDIT=COMPLETE
 PHASE_2_PLAN=ACCEPTED_FROZEN
 PHASE_2_IMPLEMENTATION=AUTHORIZED
+PHASE_2_SCOPE_RECONCILIATION_001=ACCEPTED_TEST_ONLY
 PHASE_3=NOT_STARTED / NOT_AUTHORIZED
 PHASE_4=NOT_STARTED / NOT_AUTHORIZED
 STRICT_SCALE_BENCHMARK=DEFERRED_TO_PHASE_4
@@ -48,6 +49,7 @@ AGENTS.md
 → docs/README.md
 → docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md
 → docs/architecture/FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md
+→ docs/architecture/FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md
 → docs/architecture/DOMAIN_MAP.md
 → current source/tests/fresh evidence
 ```
@@ -113,8 +115,22 @@ Expected test scope:
 - `FloatTabsTests/WebAttentionCrossFeatureTests.swift`
 - `FloatTabsTests/WebAttentionPresentationTests.swift`
 - `FloatTabsTests/UnreadResponseTests.swift` only for narrowly necessary durable-survival regression coverage
+- `FloatTabsTests/BrowserProfileDuplicateTests.swift` only for the reconciled stale Ready-protection cross-domain regression assertion described in `FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md`
 
-The exact contract, test matrix and STOP conditions are frozen in the Phase 2 plan.
+The exact contract, test matrix and STOP conditions are frozen in the Phase 2 plan plus the accepted test-only scope reconciliation.
+
+## Phase 2 scope reconciliation 001
+
+The first construction attempt remained inside the original frozen scope and passed focused Phase 2 coverage (`241 executed / 3 skipped / 0 failures`). Full XCTest then stopped on one assertion in `BrowserProfileDuplicateTests.swift` that still encoded the historical expectation that transient Ready is Runtime-protected.
+
+Read-only reconciliation confirmed:
+
+- Browser Profile duplication production behavior is not implicated;
+- the affected test still correctly verifies that duplication leaves the source WebView, Attention bridge, Browser Profile identity, transient Ready state and residency untouched;
+- only the assertion that Ready is Attention-protected conflicts with the already-frozen Phase 2 semantic;
+- the adjacent protected-source duplication case uses `Generating`, whose protection remains required.
+
+Therefore only `FloatTabsTests/BrowserProfileDuplicateTests.swift` is added to the authorized test scope. No Browser Profile production file, persistence/schema, lifecycle timer, WebViewPool, detector/bridge or unread-store expansion is authorized.
 
 ## Explicit non-scope
 
@@ -124,7 +140,7 @@ Do not modify without STOP/reconciliation:
 - `ChatGPTUnreadResponseCoordinator` or `UnreadResponseStore` persistence schema/behavior;
 - `SlotLifecycleCoordinator` timing/policy;
 - `WebViewPool` hibernate/restore semantics;
-- Browser Profile/session/configuration persistence;
+- Browser Profile/session/configuration production behavior or persistence;
 - Attention visual renderer/styles;
 - native completion notifications (Phase 3);
 - Runtime Budget/ranking or strict scale benchmark (Phase 4);
@@ -154,11 +170,11 @@ Automated UI evidence cannot replace the human acceptance gate.
 
 ## STOP conditions
 
-Stop and reconcile if durable unread can be lost by Runtime reclamation, reclaim can begin before durable unread commit, Generating becomes reclaimable, implementation requires detector/persistence/lifecycle/WebView scope expansion, Browser Profile/session data must change, Phase 3/4 work leaks in, required tests/build/CI fail, human acceptance fails, or overlapping unique work appears.
+Stop and reconcile if durable unread can be lost by Runtime reclamation, reclaim can begin before durable unread commit, Generating becomes reclaimable, implementation requires detector/persistence/lifecycle/WebView scope expansion, Browser Profile/session production behavior or data must change, Phase 3/4 work leaks in, required tests/build/CI fail after authorized stale-test reconciliation, human acceptance fails, or overlapping unique work appears.
 
 ## Next action
 
-Execute the frozen Phase 2 implementation in one bounded implementation branch/PR. Do not merge or release from the construction step. Stop after machine verification at `WAITING_FOR_INDEPENDENT_WEB_AUDIT` (or `WAITING_FOR_HUMAN_UI_ACCEPTANCE` when that is the only remaining gate).
+Resume the same Phase 2 implementation branch/workspace. Make only the authorized test-only correction in `BrowserProfileDuplicateTests.swift`, then continue the existing verification sequence. Do not discard the eight already-authorized uncommitted implementation files. Do not merge or release from the construction step. Stop after machine verification at `WAITING_FOR_INDEPENDENT_WEB_AUDIT` (or `WAITING_FOR_HUMAN_UI_ACCEPTANCE` when that is the only remaining gate).
 
 ## Non-claims
 
