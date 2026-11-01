@@ -2,14 +2,14 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Title:** Runtime Lifecycle / Memory redesign — Phase 6 perceived-fast restore  
-**Status:** `FROZEN / IMPLEMENTATION NOT STARTED / WAITING FOR FUTURE USER START`  
-**Mode:** `IMPLEMENTATION CONTRACT READY / CURRENT SESSION NO PRODUCT MUTATION`  
+**Status:** `ACTIVE / WP0 GATE0 REAL-MAC EVIDENCE`  
+**Mode:** `EXECUTION STARTED / PRODUCT MUTATION HELD PENDING GATE0`  
 **Task class:** `WEB RUNTIME / RESTORE RESPONSIVENESS`  
 **JSC root cause:** `UNKNOWN`
 
 ## Authorization state
 
-Phase 6 audit/design is complete and the implementation contract is now frozen.
+Phase 6 audit/design is complete and the implementation contract is frozen.
 
 Durable audit/rationale record:
 
@@ -19,9 +19,9 @@ Frozen implementation contract:
 
 `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`
 
-The user explicitly requested that this session **only freeze/update contracts and documentation**. Therefore no product source or test mutation is authorized in the current session.
+The user explicitly instructed FloatTabs to start remote Phase 6 construction on `2026-11-01`. That instruction releases the prior future-session execution hold. This remains the same task and same frozen contract; no successor task or redesign is required.
 
-A future explicit user instruction to start/continue Phase 6 construction releases the execution hold. The executor must then follow the frozen implementation contract, beginning with Gate 0. No new design cycle or duplicate task contract is required merely because execution occurs in another conversation.
+The first executable work package is still mandatory WP0 / Gate 0. Until Gate 0 proves Outcome A or Outcome B, product source/test mutation is not authorized.
 
 ## Frozen objective
 
@@ -43,7 +43,7 @@ Resident Slot switching keeps the current direct fast path.
 
 ## Frozen ownership
 
-- `PanelController` — Phase 6 presentation/materialization orchestration and stale-request generation;
+- `PanelController` — Phase 6 presentation/materialization orchestration and stale request generation after Gate 0 passes;
 - `WebPanelContainerView` — native restoring presentation only;
 - `WebViewPool` — existing Runtime creation/restore mechanism;
 - `SlotLifecycleCoordinator` — sole lifecycle/budget executor;
@@ -54,7 +54,7 @@ Resident Slot switching keeps the current direct fast path.
 
 No second Runtime lifecycle or presentation truth owner is authorized.
 
-## Gate 0 — mandatory before product mutation
+## WP0 / Gate 0 — current active gate
 
 On a Real Mac, use an existing Slot that has actually been hibernated and record only content-free public facts:
 
@@ -71,15 +71,26 @@ selection / summon request
 
 Do not record page text, screenshots, DOM content, cookies, session values or opaque interaction state.
 
+### Existing execution path
+
+Use current production/debug evidence plumbing first. The repository already provides:
+
+- the Debug loopback benchmark control channel for existing Slot `configure`, `activate`, `show` and `hide` operations;
+- `tools/benchmark/floattabs_lifecycle_benchmark.py`, which can drive Cold inactive Slots beyond the product grace window until they are actually hibernated/reclaimed and then re-activate them;
+- Runtime diagnostics for `web_runtime.hibernate.completed`, `web_runtime.restore.begin`, `web_runtime.restore.completed`, fresh Runtime identity and `navigation.provisional_started` / `navigation.commit` / `navigation.finished` callbacks;
+- bounded renderer/liveness probes that are evidence-only and must remain current-Runtime guarded.
+
+Do not add new product Runtime instrumentation merely to make Gate 0 easier unless the existing public evidence is genuinely insufficient; that insufficiency is a STOP/reconciliation condition under this frozen task.
+
 ### Gate 0 allowed outcomes
 
 **Outcome A — navigation-backed readiness**
 
-A compatible interaction-state restore exposes usable current-Runtime navigation/loading callbacks. Reuse those validated callbacks as the trigger for the final bounded readiness check.
+A compatible `interactionState` restore exposes usable current-Runtime navigation/loading callbacks. Reuse only the exact-current-Runtime validated callback path as the trigger for the final bounded readiness check.
 
 **Outcome B — non-navigation readiness**
 
-A compatible interaction-state restore does not reliably expose the same navigation sequence, but readiness can be established through a bounded public current-Runtime renderer/page observation without ownership drift or unbounded polling.
+A compatible `interactionState` restore does not reliably expose the same navigation sequence, but readiness can be established through a bounded public current-Runtime renderer/page observation without ownership drift or unbounded polling.
 
 **STOP outcome**
 
@@ -89,7 +100,7 @@ The restoring presentation may be removed only after the current materialization
 
 `web_runtime.restore.completed` alone is not readiness truth.
 
-## Authorized implementation scope after future user start + Gate 0 PASS
+## Authorized implementation scope after Gate 0 PASS
 
 Expected production files:
 
@@ -124,7 +135,7 @@ Any additional production file with material semantic responsibility requires ST
 
 ## Work packages
 
-### WP0 — Gate 0 evidence
+### WP0 — Gate 0 evidence — ACTIVE
 
 Real-Mac readiness classification. Evidence/control only; no product source mutation.
 
@@ -132,13 +143,19 @@ Real-Mac readiness classification. Evidence/control only; no product source muta
 
 Add the bounded native restoring surface to `WebPanelContainerView` with focused deterministic tests.
 
+Dependency: WP0 PASS.
+
 ### WP2 — two-stage orchestration
 
 Update `PanelController` so the native shell/restoring state is presented before reclaimed Runtime materialization and stale request generations are rejected.
 
+Dependency: WP0 PASS + WP1.
+
 ### WP3 — readiness completion
 
 Wire the Gate 0 Outcome A/B fact into current-Runtime restore completion using the smallest existing owner/seam.
+
+Dependency: WP0 classification + WP1/WP2.
 
 ### WP4 — verification and merge readiness
 
@@ -155,6 +172,7 @@ This work-package structure is not a mandated Sub Agent topology.
 5. **Required PR CI:** literal head `Build & Test (Apple Silicon arm64)` PASS on the established self-hosted runner.
 6. **Bounded Real-Mac smoke:** resident switch, compatible reclaimed restore, safe fallback if reproducible, rapid switch-away, dismiss during pending restore.
 7. **Independent exact-diff audit:** ownership/scope/data-safety/lifecycle verification before merge.
+8. **Program-final human acceptance:** one user-owned integrated UI/runtime acceptance pass after Phase 6 implementation and final independent audit; machine checks do not replace it.
 
 No absolute latency target is frozen in V1; Phase 6 proves immediate native response ordering and correctness first.
 
@@ -173,6 +191,8 @@ Merge readiness requires all of the following:
 - focused/full tests and builds pass;
 - required literal-head CI passes;
 - bounded Real-Mac restore smoke passes.
+
+Program closeout additionally requires the user-owned integrated human UI/runtime acceptance pass.
 
 ## Explicit non-scope
 
@@ -204,19 +224,23 @@ STOP/reconcile if execution requires:
 - Attention semantics change;
 - unresolved fullscreen source ownership outside the current session-lock boundary;
 - material production scope outside the frozen paths;
-- release/version work.
+- release/version work;
+- product source mutation before Gate 0 Outcome A/B.
 
-## Current execution hold
+## Current execution state
 
 ```text
 PHASE_6_AUDIT=COMPLETE
 PHASE_6_CONTRACT=ACCEPTED / FROZEN
 SELECTED_OPTION=TWO_STAGE_NATIVE_RESTORE_SHELL
 READINESS_POLICY=GATE0_EVIDENCE_BOUND
+EXECUTION_START_RELEASED=YES / 2026-11-01
+WP0_GATE0=ACTIVE / REAL_MAC_EVIDENCE_PENDING
 PRODUCT_IMPLEMENTATION=NOT_STARTED
-CURRENT_SESSION_PRODUCT_MUTATION=FORBIDDEN
-NEXT_USER_START_REQUIRED=YES
-TASK_RECONCILIATION_REQUIRED=NO AFTER THIS FREEZE
+PRODUCT_MUTATION=HELD_PENDING_GATE0
+NEXT_USER_START_REQUIRED=NO
+TASK_RECONCILIATION_REQUIRED=NO
+PROGRAM_HUMAN_ACCEPTANCE=PENDING
 ```
 
-Next session: when the user explicitly says to start/continue Phase 6 construction, refresh Authority and repository state, run WP0/Gate 0 first, then continue directly if Outcome A or B is proven and no STOP condition fires.
+Next action: execute WP0 / Gate 0 on the Real Mac. Continue directly into WP1–WP4 only after Outcome A or Outcome B is proven and no STOP condition fires.
