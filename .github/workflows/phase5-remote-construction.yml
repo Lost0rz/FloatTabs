@@ -1,0 +1,383 @@
+name: Phase 5 Remote Construction
+
+on:
+  push:
+    branches:
+      - codex/ft-runtime-lifecycle-phase5-background-thrift-001
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, 'phase5 remote construction bootstrap')
+    runs-on: [self-hosted, macOS, ARM64, mac-mini-ci]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Apply bounded Phase 5 patch
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              return text.replace(old, new, 1)
+
+          source_path = Path("FloatTabs/Web/ChatGPTAttentionBridge.swift")
+          source = source_path.read_text()
+
+          source = replace_once(
+              source,
+              '''    static let livenessWatchdogIntervalNanoseconds: UInt64 = 2_000_000_000
+              static let livenessConfirmationDelayNanoseconds: UInt64 = 250_000_000
+              static let livenessProbeScript = "globalThis.__floatTabsAttentionProbeV1?.()"
+              static let benchmarkSnapshotScript = "globalThis.__floatTabsAttentionBenchmarkSnapshotV1?.()"
+
+              typealias LivenessProbeProvider = @MainActor (WKWebView) async -> Any?
+          ''',
+              '''    static let livenessWatchdogIntervalNanoseconds: UInt64 = 2_000_000_000
+              static let longRunningGenerationThreshold: TimeInterval = 30
+              static let hiddenLongRunningWatchdogIntervalNanoseconds: UInt64 = 5_000_000_000
+              static let livenessConfirmationDelayNanoseconds: UInt64 = 250_000_000
+              static let livenessProbeScript = "globalThis.__floatTabsAttentionProbeV1?.()"
+              static let benchmarkSnapshotScript = "globalThis.__floatTabsAttentionBenchmarkSnapshotV1?.()"
+
+              static func nextLivenessWatchdogIntervalNanoseconds(
+                  elapsed: TimeInterval,
+                  documentIsHidden: Bool?
+              ) -> UInt64 {
+                  guard documentIsHidden == true,
+                        elapsed >= longRunningGenerationThreshold else {
+                      return livenessWatchdogIntervalNanoseconds
+                  }
+                  return hiddenLongRunningWatchdogIntervalNanoseconds
+              }
+
+              typealias LivenessProbeProvider = @MainActor (WKWebView) async -> Any?
+          ''',
+              "cadence constants"
+          )
+
+          source = replace_once(
+              source,
+              '''              token: TOKEN,
+              generating: generating,
+              responseIdentity: responseIdentity
+            };
+          };
+
+          // BFCache/history restoration does not rerun document-start injection.
+          ''',
+              '''              token: TOKEN,
+              generating: generating,
+              visibility_state: ["visible", "hidden", "prerender", "unloaded"].includes(document.visibilityState)
+                ? document.visibilityState : "other",
+              responseIdentity: responseIdentity
+            };
+          };
+
+          // BFCache/history restoration does not rerun document-start injection.
+          ''',
+              "liveness probe visibility metadata"
+          )
+
+          source = replace_once(
+              source,
+              '''    private var livenessWatchdogGeneration: UInt64 = 0
+              private var livenessGeneration: UInt64 = 0
+              private var livenessCycleOwnerGeneration: UInt64?
+          ''',
+              '''    private var livenessWatchdogGeneration: UInt64 = 0
+              private var livenessGeneration: UInt64 = 0
+              private var lastLivenessDocumentWasHidden: Bool?
+              private var livenessCycleOwnerGeneration: UInt64?
+          ''',
+              "watchdog visibility state"
+          )
+
+          source = replace_once(
+              source,
+              '''        let documentEpoch = document.epoch
+              let token = document.token
+              let webViewIdentity = ObjectIdentifier(webView)
+          #if DEBUG
+          ''',
+              '''        let documentEpoch = document.epoch
+              let token = document.token
+              let webViewIdentity = ObjectIdentifier(webView)
+              let watchdogStartedAt = ProcessInfo.processInfo.systemUptime
+              lastLivenessDocumentWasHidden = nil
+          #if DEBUG
+          ''',
+              "watchdog start timestamp"
+          )
+
+          source = replace_once(
+              source,
+              '''            "slot_id": .string(slotID.uuidString),
+              "watchdog_interval_ms": .integer(2_000)
+          ''',
+              '''            "slot_id": .string(slotID.uuidString),
+              "watchdog_interval_ms": .integer(2_000),
+              "long_running_threshold_ms": .integer(30_000),
+              "hidden_long_running_interval_ms": .integer(5_000)
+          ''',
+              "watchdog diagnostics"
+          )
+
+          source = replace_once(
+              source,
+              '''            while !Task.isCancelled {
+                guard await self.livenessSleeper(Self.livenessWatchdogIntervalNanoseconds) else { return }
+                guard !Task.isCancelled else { return }
+                await self.performLivenessCycle(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token)
+              }
+          ''',
+              '''            while !Task.isCancelled {
+                let elapsed = max(
+                  ProcessInfo.processInfo.systemUptime - watchdogStartedAt,
+                  0
+                )
+                let interval = Self.nextLivenessWatchdogIntervalNanoseconds(
+                  elapsed: elapsed,
+                  documentIsHidden: self.lastLivenessDocumentWasHidden
+                )
+                guard await self.livenessSleeper(interval) else { return }
+                guard !Task.isCancelled else { return }
+                await self.performLivenessCycle(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token)
+              }
+          ''',
+              "adaptive watchdog loop"
+          )
+
+          source = replace_once(
+              source,
+              '''        livenessWatchdogTask?.cancel()
+              livenessWatchdogTask = nil
+              clearLivenessIdleCandidate(ownedBy: stoppedGeneration)
+          ''',
+              '''        livenessWatchdogTask?.cancel()
+              livenessWatchdogTask = nil
+              lastLivenessDocumentWasHidden = nil
+              clearLivenessIdleCandidate(ownedBy: stoppedGeneration)
+          ''',
+              "watchdog state reset"
+          )
+
+          source = replace_once(
+              source,
+              '''    private func parseLivenessProbe(_ value: Any?) -> ChatGPTBridgePayload? {
+              guard let body = value as? [String: Any], let payload = ChatGPTBridgePayload.parse(body), payload.kind == ChatGPTBridgePayload.baselineKind else { return nil }
+              return payload
+            }
+          ''',
+              '''    private struct LivenessProbeSnapshot {
+              let payload: ChatGPTBridgePayload
+              let documentIsHidden: Bool?
+
+              var token: String { payload.token }
+              var generating: Bool { payload.generating }
+              var responseIdentity: ChatGPTResponseIdentity? { payload.responseIdentity }
+            }
+
+            private func parseLivenessProbe(_ value: Any?) -> LivenessProbeSnapshot? {
+              guard let body = value as? [String: Any],
+                    let payload = ChatGPTBridgePayload.parse(body),
+                    payload.kind == ChatGPTBridgePayload.baselineKind else { return nil }
+              let documentIsHidden: Bool?
+              switch body["visibility_state"] as? String {
+              case "hidden":
+                  documentIsHidden = true
+              case "visible", "prerender", "unloaded", "other":
+                  documentIsHidden = false
+              default:
+                  documentIsHidden = nil
+              }
+              return LivenessProbeSnapshot(
+                  payload: payload,
+                  documentIsHidden: documentIsHidden
+              )
+            }
+          ''',
+              "liveness probe parser"
+          )
+
+          source = replace_once(
+              source,
+              '''            return
+              }
+              if firstProbe.generating {
+          ''',
+              '''            return
+              }
+              lastLivenessDocumentWasHidden = firstProbe.documentIsHidden
+              if firstProbe.generating {
+          ''',
+              "first probe scheduling hint"
+          )
+
+          source = replace_once(
+              source,
+              '''            clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+                return
+              }
+              guard !secondProbe.generating, livenessGeneration == generation else {
+          ''',
+              '''            clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+                return
+              }
+              lastLivenessDocumentWasHidden = secondProbe.documentIsHidden
+              guard !secondProbe.generating, livenessGeneration == generation else {
+          ''',
+              "confirmation probe scheduling hint"
+          )
+
+          source = replace_once(
+              source,
+              '''#if DEBUG
+            var debugLivenessWatchdogActive: Bool { livenessWatchdogTask != nil }
+
+            func debugRunLivenessCycle() async {
+          ''',
+              '''#if DEBUG
+            var debugLivenessWatchdogActive: Bool { livenessWatchdogTask != nil }
+            var debugLastLivenessDocumentWasHidden: Bool? { lastLivenessDocumentWasHidden }
+
+            func debugRunLivenessCycle() async {
+          ''',
+              "debug scheduling hint"
+          )
+
+          source_path.write_text(source)
+
+          test_path = Path("FloatTabsTests/ChatGPTAttentionBridgeTests.swift")
+          tests = test_path.read_text()
+
+          tests = replace_once(
+              tests,
+              '''        XCTAssertTrue(probe.contains("generating: generating"))
+              XCTAssertTrue(probe.contains("isGenerating()"))
+          ''',
+              '''        XCTAssertTrue(probe.contains("generating: generating"))
+              XCTAssertTrue(probe.contains("visibility_state:"))
+              XCTAssertTrue(probe.contains("document.visibilityState"))
+              XCTAssertTrue(probe.contains("isGenerating()"))
+          ''',
+              "probe contract test"
+          )
+
+          anchor = '''    func testGeneratingBaselineActivatesOneLivenessWatchdogAndDuplicateStartDoesNotDuplicateIt() throws {
+              let harness = ChatGPTAttentionBridgeHarness()
+
+              harness.accept(true, token: tokenA)
+              harness.accept(true, token: tokenA, kind: ChatGPTBridgePayload.stateKind)
+
+              XCTAssertTrue(harness.bridge.debugLivenessWatchdogActive)
+              XCTAssertEqual(harness.bridge.debugLivenessWatchdogStartCount, 1)
+            }
+          '''
+          addition = anchor + '''
+
+            func testLongRunningHiddenWatchdogCadenceSelection() {
+              let base = ChatGPTAttentionBridge.livenessWatchdogIntervalNanoseconds
+              let thrift = ChatGPTAttentionBridge.hiddenLongRunningWatchdogIntervalNanoseconds
+
+              XCTAssertEqual(
+                  ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                      elapsed: 0,
+                      documentIsHidden: true
+                  ),
+                  base
+              )
+              XCTAssertEqual(
+                  ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                      elapsed: ChatGPTAttentionBridge.longRunningGenerationThreshold - 0.001,
+                      documentIsHidden: true
+                  ),
+                  base
+              )
+              XCTAssertEqual(
+                  ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                      elapsed: ChatGPTAttentionBridge.longRunningGenerationThreshold,
+                      documentIsHidden: true
+                  ),
+                  thrift
+              )
+              XCTAssertEqual(
+                  ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                      elapsed: 120,
+                      documentIsHidden: false
+                  ),
+                  base
+              )
+              XCTAssertEqual(
+                  ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                      elapsed: 120,
+                      documentIsHidden: nil
+                  ),
+                  base
+              )
+            }
+
+            func testHiddenLivenessProbeUpdatesSchedulingHintWithoutAttentionTransition() async {
+              let hiddenProbe: [String: Any] = [
+                  "version": 1,
+                  "kind": "baseline",
+                  "token": tokenA!,
+                  "generating": true,
+                  "visibility_state": "hidden"
+              ]
+              let harness = ChatGPTAttentionBridgeHarness(probeValues: [hiddenProbe])
+
+              harness.accept(true, token: tokenA)
+              await harness.bridge.debugRunLivenessCycle()
+
+              XCTAssertEqual(harness.observations, [.generationStarted])
+              XCTAssertEqual(harness.bridge.debugLastLivenessDocumentWasHidden, true)
+              XCTAssertTrue(harness.bridge.debugLivenessWatchdogActive)
+            }
+
+            func testMissingLivenessVisibilityMetadataKeepsConservativeCadenceHint() async {
+              let probe: [String: Any] = [
+                  "version": 1,
+                  "kind": "baseline",
+                  "token": tokenA!,
+                  "generating": true
+              ]
+              let harness = ChatGPTAttentionBridgeHarness(probeValues: [probe])
+
+              harness.accept(true, token: tokenA)
+              await harness.bridge.debugRunLivenessCycle()
+
+              XCTAssertNil(harness.bridge.debugLastLivenessDocumentWasHidden)
+              XCTAssertEqual(
+                  ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                      elapsed: 120,
+                      documentIsHidden: harness.bridge.debugLastLivenessDocumentWasHidden
+                  ),
+                  ChatGPTAttentionBridge.livenessWatchdogIntervalNanoseconds
+              )
+            }
+          '''
+          tests = replace_once(tests, anchor, addition, "cadence tests")
+          test_path.write_text(tests)
+          PY
+
+          git diff --check
+          git diff -- FloatTabs/Web/ChatGPTAttentionBridge.swift FloatTabsTests/ChatGPTAttentionBridgeTests.swift
+
+      - name: Commit construction and remove bootstrap workflow
+        shell: bash
+        run: |
+          git config user.name "FloatTabs Phase 5 Remote Constructor"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/phase5-remote-construction.yml
+          git add FloatTabs/Web/ChatGPTAttentionBridge.swift FloatTabsTests/ChatGPTAttentionBridgeTests.swift
+          git commit -m "FT-RUNTIME-LIFECYCLE-MEMORY-001: add background generation liveness thrift"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
