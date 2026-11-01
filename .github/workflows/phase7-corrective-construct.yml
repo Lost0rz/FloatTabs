@@ -1,0 +1,54 @@
+name: Phase7 Corrective Construct
+
+on:
+  push:
+    branches:
+      - codex/ft-runtime-lifecycle-phase7-automatic-001
+
+permissions:
+  contents: write
+
+jobs:
+  corrective:
+    if: github.repository == 'Lost0rz/FloatTabs'
+    runs-on: [self-hosted, macOS, ARM64, mac-mini-ci]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Verify bounded corrective input
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "${GITHUB_REF_NAME}" = "codex/ft-runtime-lifecycle-phase7-automatic-001"
+      - name: Apply Phase 7 corrective
+        run: python3 tools/phase7_corrective_construct.py
+      - name: Verify diff hygiene
+        run: git diff --check
+      - name: Verify Release arm64 build
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -configuration Release \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Remove temporary corrective machinery
+        shell: bash
+        run: |
+          rm -f tools/phase7_corrective_construct.py
+          rm -f .github/workflows/phase7-corrective-construct.yml
+      - name: Commit and push corrective
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Complete Phase 7 lifecycle retirement corrective"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
