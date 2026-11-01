@@ -1,17 +1,17 @@
 # FloatTabs Current Task
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
-**Title:** Runtime Lifecycle / Memory redesign — Phase 3 Native ChatGPT Completion Notification  
-**Status:** `ACTIVE / PHASE 3 IMPLEMENTATION AUTHORIZED — V2 BACKEND SEAM REFINEMENT`  
+**Title:** Runtime Lifecycle / Memory redesign — Phase 4 Automatic Runtime Budget / Policy  
+**Status:** `ACTIVE / PHASE 4 IMPLEMENTATION AUTHORIZED`  
 **Mode:** `EXECUTE`  
-**Task class:** `NATIVE NOTIFICATION PROJECTION / EXACT SLOT ROUTING`  
+**Task class:** `RUNTIME BUDGET POLICY / REAL-MAC SCALE EVIDENCE`  
 **Program contract:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md`  
-**Phase 3 plan:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V2.md`  
+**Phase 4 plan:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase4_Automatic_Runtime_Budget_Policy_Plan_V1.md`  
 **JSC root cause:** `UNKNOWN`
 
 ## Authorization
 
-Implement Phase 3 only, under the frozen Phase 3 V2 plan.
+Implement Phase 4 only under the frozen Phase 4 V1 plan.
 
 Program cadence remains:
 
@@ -20,187 +20,289 @@ phase-focused audit / freeze
 → bounded implementation
 → phase-local machine verification + required CI
 → merge
-→ continue next architecture phase
+→ next architecture phase
 ...
 Phases 1–6 complete
 → unified independent audit
 → one user-owned full human acceptance pass
 ```
 
-Phase 2 is structurally complete and merged at `3b8270de6917b0342143a36d2457686bb59dcc25`.
-
-Phase 3 V2 refines the previously frozen V1 implementation shape after direct comparison with Kylmora's working native-notification implementation. The product target is unchanged; V2 makes the system-notification test seam and explicit same-Slot withdrawal/replacement mandatory.
-
-## Frozen Phase 3 target
+Delivered foundations:
 
 ```text
-valid hidden completion
-→ ChatGPTUnreadResponseCoordinator returns .marked
-→ durable unread presentation synchronized
-→ native notification projection receives persistent Slot UUID
-→ normal lifecycle may reclaim Runtime
-→ user taps notification
-→ exact Slot is selected
-→ existing Runtime restore/recreation path supplies Runtime if absent
-→ FloatTabs is presented
-→ existing acknowledgement rules decide when unread clears
+Phase 1 Safe Hibernate + Restore = COMPLETE
+Phase 2 Ready / Unread Decoupling = COMPLETE
+Phase 3 Native Completion Notification = COMPLETE / MERGED
+Phase 3 merge commit = e182dd51a1bfd21a614e09f33643bf4acea551dc
 ```
 
-Native notification is a projection only. Durable unread remains canonical product truth.
+## Frozen Phase 4 target
 
-## Required ownership decisions
-
-1. Add one App-layer notification coordinator for native macOS notification projection.
-2. Put all direct `UNUserNotificationCenter` operations behind a small injectable backend protocol.
-3. Production uses a system backend; XCTest uses a recording/fake backend and must not depend on real system delivery.
-4. Keep the existing `onChatGPTGenerationCompleted` attention-sound callback unchanged.
-5. Add a distinct Panel callback only for durable unread result `.marked`.
-6. Carry only persistent `Slot.id` UUID as route identity.
-7. Add one bounded `PanelController` route that selects the exact Slot, uses existing Slot/Runtime synchronization, presents FloatTabs, then relies on existing presentation-aware acknowledgement semantics.
-8. Missing/deleted target returns unavailable with no fallback selection.
-9. No notification-owned unread state, Runtime identity, document identity or required in-memory routing record is introduced.
-
-## Notification backend / replacement contract
-
-The new coordinator/backend boundary must support only the Phase 3 system operations needed for correctness:
+Add a central pure Runtime-budget policy for automatically managed Warm/Cold Runtime while retaining existing lifecycle ownership:
 
 ```text
-request alert authorization
-add/deliver notification request
-withdraw prior same-Slot notification state
+read-only resident/protection/recency facts
+→ RuntimeBudgetPolicy pure decision
+→ deterministic ranked candidates
+→ SlotLifecycleCoordinator sole executor
+→ existing WebViewPool hibernate boundary
 ```
 
-Production backend rules:
+The normal managed budget value is selected from fresh strict 1 / 2 / 4 / 8 Real-Mac evidence, not guessed in advance.
 
-- only the system backend may directly access `UNUserNotificationCenter.current()`;
-- authorization/delivery/unavailable errors fail closed as notification-projection failures only;
-- same-Slot notification identity is deterministic;
-- before delivering a newer same-Slot completion notification, explicitly withdraw prior delivered/pending notification state for that identifier where applicable;
-- do not rely only on implicit replacement behavior from repeated system `add()` calls.
+## Required product semantics
 
-The coordinator/backend may live together in the single authorized new production file.
+### Hot
 
-## Notification behavior
+Hot remains an explicit user pin after activation.
 
-- request `.alert` authorization contextually on the first real unseen-completion notification attempt;
-- do not request a system notification sound; existing FloatTabs attention sound remains independent;
-- generic content only: no prompt, assistant body, URL, Profile/session data or document identity;
-- payload contains only `version`, `kind`, and exact `slot_id`;
-- deterministic same-Slot request identifier explicitly replaces stale same-Slot alerts;
-- foreground recognized completion may present as banner/list through the notification-center delegate;
-- only `UNNotificationDefaultActionIdentifier` routes the Slot;
-- dismissal, malformed payload, unknown kind/version or stale Slot is ignored safely;
-- denied/unavailable/error authorization never changes unread, sound, generation, Runtime lifecycle or user data;
-- do not add a persisted FloatTabs notification preference or backup/schema field in Phase 3.
+- normal automatic budget must not evict Hot;
+- critical budget pass must not silently demote Hot;
+- Hot/protected Runtime may make total resident count exceed the managed budget;
+- oversubscription must be reported truthfully.
+
+No Hot/Warm/Cold raw-value or persistence migration is authorized.
+
+### Warm / Cold
+
+Warm and Cold are automatic-budget managed.
+
+Existing timers remain maximum normal retention boundaries:
+
+- budget may hibernate eligible inactive Warm/Cold earlier;
+- timer expiry may still hibernate when budget has spare capacity;
+- Cold ranks before Warm for budget eviction.
+
+### Hard protection
+
+Never budget-evict while protected by:
+
+- active/actually presented state;
+- fullscreen source;
+- supplemental visible surface;
+- existing media protection;
+- Attention `generating`.
+
+These do not protect Runtime:
+
+- Attention `ready`;
+- durable unread;
+- Phase 3 native notification presence.
+
+## Pure policy requirements
+
+Expected new owner:
+
+`FloatTabs/Web/RuntimeBudgetPolicy.swift`
+
+Policy must be deterministic and side-effect free.
+
+Candidate ranking:
+
+```text
+Cold before Warm
+→ older lastUsedAt before newer
+→ slot UUID lexical tie-breaker
+```
+
+Do not rank by guessed exact per-Slot WebContent memory.
+
+`SlotLifecycleCoordinator` remains the only Runtime lifecycle writer.
+
+## Memory pressure
+
+Use the same policy/evaluation engine:
+
+- normal → evidence-selected normal managed budget;
+- warning → evaluate/report using normal budget, no invented tighter target;
+- critical → managed budget `0`, evict every eligible inactive Warm/Cold Runtime while preserving Hot and hard protections.
+
+## Evidence-selected budget
+
+The benchmark must evaluate candidate normal managed budgets in descending order:
+
+```text
+4
+3
+2
+```
+
+Before candidates, capture:
+
+- unbounded/disabled-budget loaded Runtime matrix: `1 / 2 / 4 / 8`;
+- at least 3 stable 8-resident no-op control pairs;
+- median absolute process-tree RSS drift.
+
+For each candidate, run at least 3 repeated controlled 8-resident Warm scenarios.
+
+A candidate qualifies only when:
+
+1. managed resident count converges to target when not blocked by hard protection;
+2. no Hot/protected Runtime is evicted;
+3. median reclaimed process-tree RSS is `> 2 ×` median absolute no-op drift;
+4. no duplicate Runtime, failed restore or data/session loss occurs.
+
+Select the **largest qualifying candidate**.
+
+If none qualifies: `STOP_RECONCILE / PHASE_4_NO_EVIDENCE_BACKED_BUDGET`.
+
+## Restore/materialization evidence
+
+Run at least 10 activation/restoration cycles across reclaimed managed Slots and report product-path Runtime materialization round-trip median/p95.
+
+This is not click-to-interactive/page-ready latency. Phase 6 owns perceived-fast restore.
+
+Any failed activation, duplicate Runtime or state/session loss is a STOP condition.
+
+## Benchmark safety
+
+Expected new tool:
+
+`tools/benchmark/floattabs_runtime_budget_benchmark.py`
+
+Reuse existing Debug benchmark control and responsible-PID process-tree attribution.
+
+Required strict fixture: at least 8 safe configured Slots.
+
+The harness may temporarily change test Slot residency/media through product APIs and use an in-memory DEBUG budget override, but must restore:
+
+- original residency/media;
+- original active Slot;
+- original panel visibility;
+- DEBUG override
+
+on closeout.
+
+Never directly edit persisted profile JSON.
+
+Never automatically create/clone/delete/reset user Slots or Browser Profiles to satisfy the fixture.
+
+If fewer than 8 safe Slots exist: `STOP_RECONCILE / PHASE_4_EVIDENCE_FIXTURE_INSUFFICIENT`.
 
 ## Authorized production files
 
-Only:
+Only expected paths:
 
-- **NEW** `FloatTabs/App/ChatGPTCompletionNotificationCoordinator.swift` — coordinator + bounded backend protocol/system backend;
-- `FloatTabs/App/AppCoordinator.swift`;
+- **NEW** `FloatTabs/Web/RuntimeBudgetPolicy.swift`;
+- `FloatTabs/Web/SlotLifecycleCoordinator.swift`;
 - `FloatTabs/Panel/PanelController.swift`;
-- `FloatTabs.xcodeproj/project.pbxproj` for source/test membership and, only if actually linker-required, the relevant system-framework entry.
+- `FloatTabs/App/AppCoordinator.swift` — composition / DEBUG benchmark-control only;
+- `FloatTabs/Tabs/WebAppProfile.swift` — truthful residency copy only;
+- `FloatTabs/UI/GlobalSettingsController.swift` — truthful residency/timer copy only;
+- `FloatTabs.xcodeproj/project.pbxproj` — membership only.
 
-## Authorized test files
+`WebViewPool.swift` production lifecycle/restore semantics are not authorized to change. Current resident-set signal and hibernate mechanism are sufficient. If they are not sufficient, STOP/reconcile.
 
-- **NEW** `FloatTabsTests/ChatGPTCompletionNotificationTests.swift` — includes recording/fake backend tests;
-- `FloatTabsTests/WebAttentionCrossFeatureTests.swift`;
-- `FloatTabs.xcodeproj/project.pbxproj`.
+## Authorized test / benchmark files
 
-A narrowly necessary adjacent existing test file may be added only when it directly proves the frozen route without expanding production scope. Otherwise STOP/reconcile.
+Expected:
+
+- **NEW** `FloatTabsTests/RuntimeBudgetPolicyTests.swift`;
+- `FloatTabsTests/WebAttentionLifecycleTests.swift`;
+- one narrowly necessary adjacent lifecycle/presentation test only if directly required;
+- `FloatTabs.xcodeproj/project.pbxproj`;
+- **NEW** `tools/benchmark/floattabs_runtime_budget_benchmark.py`;
+- `tools/benchmark/README.md`;
+- `.github/workflows/benchmark-tool-ci.yml` only for new-tool compile/self-test coverage if needed.
+
+No other production path is authorized without STOP/reconciliation.
 
 ## Required machine outcomes
 
-The implementation must prove:
+### Policy
 
-1. coordinator delegates system operations through the injected backend;
-2. hidden valid completion whose durable-unread result is `.marked` emits exactly one notification projection request;
-3. visible completion emits none;
-4. stray/invalid completion emits none;
-5. already-handled duplicate emits none;
-6. a later distinct hidden response in the same Slot may emit a new notification;
-7. authorization granted schedules one generic alert;
-8. denied/error/unavailable authorization schedules none and has no product-state side effect;
-9. same Slot uses deterministic same identifier and explicitly withdraws/replaces previous same-Slot system state;
-10. different Slots remain independent and never withdraw each other;
-11. payload is privacy bounded to version/kind/Slot UUID;
-12. default action routes exact Slot UUID;
-13. dismiss/unknown/malformed payload does not route;
-14. stale/deleted Slot never falls back to current Slot;
-15. non-resident target activation uses existing restore/recreation ownership and does not duplicate Runtime;
-16. notification activation does not clear unread before actual presentation acknowledgement rules allow it;
-17. exact routing does not depend on a coordinator-owned in-memory record containing Runtime identity;
-18. existing attention sound behavior remains unchanged;
-19. Generating remains Runtime-protected and Ready remains non-protecting;
-20. Browser Profile/session/configuration data is unchanged.
+Prove:
 
-## Verification / delivery
+1. Hot excluded from automatic candidates;
+2. hard protections never evicted;
+3. Ready/unread/native notification do not protect Runtime;
+4. Cold before Warm;
+5. LRU by `lastUsedAt` within class;
+6. deterministic UUID tie-break;
+7. target/oversubscription accounting;
+8. warning uses normal target;
+9. critical targets zero managed eligible Runtime;
+10. policy has no side effects.
 
-Required before merge:
+### Lifecycle
 
-- targeted notification/backend tests PASS;
-- focused Phase 3 tests PASS;
-- full XCTest PASS with no new Phase 3-caused failure;
-- Debug arm64 build PASS;
-- Release arm64 build PASS;
-- exact changed-path/scope/data-safety audit PASS;
-- commit and push one Phase 3 implementation branch;
-- exactly one Phase 3 implementation PR;
+Prove:
+
+1. over-budget Warm/Cold may hibernate before timer expiry;
+2. under-budget timers retain current maximum-retention behavior;
+3. Hot stays resident;
+4. protection ending reevaluates budget;
+5. no recursive/duplicate release from resident-set callbacks;
+6. critical pressure uses same policy and sole lifecycle executor;
+7. existing hibernate ordering remains intact;
+8. restore produces exactly one Runtime;
+9. Browser Profile/session/config/unread remain unchanged.
+
+### Benchmark
+
+Prove all Section 7 evidence from the Phase 4 V1 plan and report exact `.benchmark-results/` evidence path.
+
+### Broad gate
+
+Before merge:
+
+- benchmark tool compile/self-test PASS;
+- targeted/focused Phase 4 tests PASS;
+- full XCTest PASS;
+- Debug arm64 PASS;
+- Release arm64 PASS;
+- exact scope/data-safety audit PASS;
+- exactly one Phase 4 implementation PR;
 - literal-head `Build & Test (Apple Silicon arm64)` PASS on `macmini-floattabs-01`;
-- PR remains mergeable with no required host blocker.
+- benchmark-tool CI/self-test PASS if workflow is changed;
+- PR mergeable/no required host blocker.
 
-Under Program Contract V3, do **not** require Phase 3 AI/CUA live smoke, formal independent web audit or user human acceptance before merge.
+No Phase 4 AI/CUA live smoke, formal program audit or user human acceptance is required before merge under Program Contract V3.
 
 ## Explicit forbidden scope
 
 Do not modify without STOP/reconciliation:
 
-- `ChatGPTAttentionBridge.swift`;
-- `ChatGPTResponseBridge.swift`;
-- `ChatGPTResponseExtraction.swift`;
-- `ChatGPTUnreadResponseCoordinator.swift`;
-- `UnreadResponseStore.swift` or unread schema;
-- `WebAttentionCoordinator.swift` protection semantics;
-- `SlotLifecycleCoordinator.swift` timing/policy;
-- `WebViewPool.swift` hibernate/restore semantics;
-- Browser Profile / website session / Slot configuration persistence;
-- persisted notification preference / backup schema;
-- complete browser Web Notification API emulation;
-- page-origin/tag/service-worker notification store;
-- response/prompt preview in native notification;
-- Phase 4 Runtime Budget/policy;
+- ChatGPT detector/response extraction;
+- durable unread semantics/persistence;
+- Phase 3 notification semantics;
+- Browser Profile datastore/session behavior;
+- `WebViewPool` hibernate/restore contract;
+- Slot/Profile persistence schema or Hot/Warm/Cold raw values;
+- private WebKit APIs;
+- persisted Runtime-budget user preference;
+- exact per-Slot WebContent memory attribution claims;
+- user-data deletion/reset;
 - Phase 5 background-generation thrift;
 - Phase 6 perceived-fast restore;
 - release/version metadata.
 
-No user-data reset/deletion is authorized.
-
 ## STOP conditions
 
-STOP and reconcile if:
+STOP/reconcile when:
 
-- notification correctness requires detector/response-extraction changes;
-- a second unread/completion writer would be required;
-- notification state would retain WebView/Runtime/document identity;
-- exact Slot routing would require a coordinator-owned in-memory record as product truth;
-- routing would require fallback to another Slot;
-- unread must be cleared before normal presentation acknowledgement;
-- durable unread schema/persistence must change;
-- Browser Profile/session/configuration behavior must change;
-- lifecycle timer/policy or restore semantics must change;
-- a persisted notification setting/backup migration is required for basic correctness;
-- a full Web Notification API or Phase 4/5/6 work is required;
-- required tests/build/CI fail because of Phase 3;
+- another Runtime lifecycle writer would be required;
+- Hot must be automatically evicted to satisfy normal budget;
+- hard-protected Runtime must be evicted;
+- WebViewPool restore/hibernate semantics must change;
+- persistence/session/schema changes are required;
+- exact per-Slot memory attribution is required;
+- strict 8-Slot safe fixture is unavailable;
+- no candidate budget passes the frozen evidence rule;
+- benchmark cannot safely restore temporary configuration;
+- restore/materialization shows duplicate Runtime, activation failure or state/session loss;
+- tests/build/required CI fail due to Phase 4;
+- Phase 5/6 work is required;
 - overlapping unique work makes the writer unsafe.
 
 ## Delivery boundary
 
-The local executor may commit, push and create/update exactly one Phase 3 implementation PR. It must not merge, release, bump version or begin Phase 4.
+The local executor may implement Phase 4, collect the required benchmark evidence, select the normal budget only by the frozen evidence rule, commit/push one implementation branch and create exactly one Phase 4 implementation PR.
 
-Expected construction terminal result:
+Do not merge, release, bump version or begin Phase 5.
 
-- `WAITING_FOR_PHASE_3_MERGE_GATE` when machine evidence and literal-head CI are complete; or
-- `STOP_RECONCILE` when a frozen STOP condition is triggered.
+Expected successful terminal state:
 
-Program-level independent audit and human acceptance remain deferred until Phases 1–6 are complete.
+`WAITING_FOR_PHASE_4_MERGE_GATE`
+
+Otherwise return the applicable `STOP_RECONCILE` state with evidence.
