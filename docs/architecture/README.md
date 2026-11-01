@@ -7,7 +7,7 @@ Read [`../README.md`](../README.md) first. It is the repository-wide documentati
 For `FT-RUNTIME-LIFECYCLE-MEMORY-001`:
 
 - [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md) — **CURRENT / ACCEPTED / FROZEN** program contract;
-- [`FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — **CURRENT PHASE 6 / ACCEPTED / FROZEN / IMPLEMENTATION NOT STARTED**;
+- [`FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — **CURRENT PHASE 6 / ACCEPTED / FROZEN / EXECUTION STARTED / GATE 0 PENDING**;
 - [`FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`](FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md) — **AUDIT / RATIONALE EVIDENCE**; no longer the execution-scope authority;
 - `CURRENT_STATUS.md` — verified current state/evidence;
 - `CURRENT_TASK.md` — only active mutation authorization;
@@ -83,7 +83,9 @@ The primary ChatGPT page detector remains event-driven. `document.visibilityStat
 
 **Audit:** complete.  
 **Implementation contract:** accepted/frozen.  
-**Product implementation:** not started; held until a future explicit user start.
+**Execution:** started by explicit user instruction on `2026-11-01`.  
+**Current gate:** WP0 / Gate 0 Real-Mac evidence.  
+**Product implementation:** not started; product mutation remains held until Gate 0 Outcome A/B.
 
 Frozen architecture:
 
@@ -103,7 +105,7 @@ Resident Slot switching remains on the direct existing path.
 
 ### Gate 0 readiness contract
 
-The exact callback name is not frozen from structural fixtures. Instead the implementation contract freezes a mandatory Real-Mac evidence gate before product-source mutation.
+The exact callback name is not frozen from structural fixtures. The implementation contract instead requires a Real-Mac evidence gate before product-source mutation.
 
 Allowed evidence classes:
 
@@ -112,9 +114,16 @@ Allowed evidence classes:
 
 If neither class is provable without private API, arbitrary delay/unbounded polling, reload/double-navigation, persistence/session mutation, screenshot persistence, extra resident WebViews or ownership change, execution stops before product mutation.
 
+Current repository evidence plumbing is already sufficient to execute Gate 0 without first changing product Runtime code:
+
+- Debug benchmark control can drive existing Slot `configure`, `activate`, `show` and `hide` operations;
+- `tools/benchmark/floattabs_lifecycle_benchmark.py` can cross actual Cold/Warm production timers, prove hibernate/reclaim, and later re-activate a reclaimed Slot;
+- `WebViewPool` diagnostics expose hibernate/restore/create identity;
+- `SlotNavigationObserver` diagnostics expose exact-current-Runtime provisional/commit/finish callbacks and bounded renderer/liveness evidence.
+
 `web_runtime.restore.completed` remains state-handoff evidence only and is not sufficient by itself to dismiss the restoring presentation.
 
-### Frozen implementation boundary
+### Frozen implementation boundary after Gate 0 PASS
 
 Primary expected production paths:
 
@@ -145,7 +154,7 @@ Any material production scope outside those boundaries requires reconciliation.
 - private `RuntimeBudgetPolicy` inside `SlotLifecycleCoordinator.swift` — deterministic budget decision only;
 - `WebAttentionCoordinator` — sole native Attention state authority;
 - `ChatGPTAttentionBridge` — provider sensing and bounded liveness fallback;
-- `PanelController` — presentation truth and Phase 6 materialization orchestration;
+- `PanelController` — presentation truth and Phase 6 materialization orchestration after Gate 0 passes;
 - `WebPanelContainerView` — visible Web surface/native restoring presentation, not lifecycle policy;
 - `UnreadResponseStore` / unread coordinator — durable unread truth;
 - native notification coordinator — notification projection/routing;
