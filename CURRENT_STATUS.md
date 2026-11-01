@@ -6,11 +6,11 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 7 AUTOMATIC LIFECYCLE CONSTRUCTION**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 7 AUTOMATIC LIFECYCLE CORRECTIVE**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `V5 CONTRACT FROZEN / PHASE 6 MERGED / PHASE 7 IMPLEMENTATION ACTIVE`.
+Current execution state: `V5 CONTRACT FROZEN / PHASE 6 MERGED / PHASE 7 IMPLEMENTATION ACTIVE / CORRECTIVE`.
 
 ## Canonical state
 
@@ -40,10 +40,13 @@ AUTOMATIC_INACTIVE_GRACE=30S
 WARNING_AUTOMATIC_TARGET=1
 CRITICAL_AUTOMATIC_TARGET=0
 
-PHASE_7_CONTRACT=ACCEPTED / FROZEN
-PHASE_7_IMPLEMENTATION=ACTIVE
+PHASE_7_CONTRACT=ACCEPTED / FROZEN / RECONCILED
+PHASE_7_IMPLEMENTATION=ACTIVE / CORRECTIVE
 PHASE_7_BRANCH=codex/ft-runtime-lifecycle-phase7-automatic-001
 PHASE_7_BASE=main@54f2e43b0fbc224affa52d9662ac2ba5aa5b963c
+PHASE_7_FIRST_PRODUCT_HEAD=9118b79cfee7e7a1a065ba5e2e82dca9ad6e19fe
+PHASE_7_QA_DMG_639=FAIL / RELEASE COMPILE / STALE handleRuntimeReleased CALL
+PHASE_7_PR=#188 CLOSED TEMPORARILY DURING CORRECTIVE / DRAFT / UNMERGED
 PROGRAM_HUMAN_ACCEPTANCE=PENDING
 CI_RUNNER=macmini-floattabs-01 / self-hosted / macOS / ARM64 / mac-mini-ci
 ```
@@ -85,14 +88,26 @@ Hard protection remains active/presented, fullscreen, supplemental-visible, Atte
 
 Runtime reclaim does not authorize website-cache/session cleanup.
 
+## Current corrective findings
+
+Fresh static/machine verification of `9118b79c...` found bounded remaining work:
+
+1. Release compile blocker: `PanelController.setResidency` still calls the retired `handleRuntimeReleased(updatedProfile)` helper.
+2. Hot current presentation is no longer used, but dead `hotHostViews` / `showHot` / `retainHotSlots` code remains and must be removed.
+3. `AppShortcutCatalog.residencyBindings` and Shortcuts Settings still expose Set Hot/Warm/Cold Mode; the Phase 7 contract/task scope now explicitly includes `FloatTabs/Hotkeys/AppCommandController.swift` to retire this current product surface.
+4. production hidden-active grace remains 120 seconds; Phase 7 requires the canonical Automatic 30-second grace to be the sole normal post-hide retention boundary.
+5. Phase 4 tests asserting superseded Hot/Warm/Cold behavior must be rewritten/retired, not preserved through compatibility shims.
+
+These findings do not change lifecycle ownership, Browser Profile/session safety, Phase 6 restore architecture or the Automatic/Keep Loaded model.
+
 ## Current execution order
 
 ```text
-WP1 canonical model + compatibility
-→ WP2 lifecycle policy + container simplification
-→ WP3 UI/settings retirement
-→ WP4 recovery/cache integration
-→ WP5 machine + Real-Mac evidence
+bounded corrective
+→ focused migration/lifecycle/UI tests
+→ full XCTest + Debug/Release arm64
+→ required literal-head CI + QA DMG
+→ bounded Real-Mac lifecycle evidence where remotely provable
 → fresh self-audit
 → merge-readiness decision
 ```
