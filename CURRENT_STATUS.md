@@ -6,18 +6,18 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 1 IMPLEMENTATION PR CI**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 1 COMPLETE**
 
-Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
+Current program: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `WAITING / REQUIRED PR CI ON RECONCILED PHASE 1 IMPLEMENTATION`.
+Current execution state: `PHASE 1 COMPLETE / WAITING FOR NEXT PHASE AUTHORIZATION`.
 
-The Phase 1 cadence remains architecture-first: finish the structural Runtime hibernate/restore primitive, prove bounded real-runtime correctness, merge the structural primitive, and defer strict multi-Slot scale/performance tuning to Phase 4 Runtime Budget / Policy.
+Phase 1 established the architecture-first Runtime lifecycle primitive: persistent Slot/Profile/product state is now separated from disposable `WKWebView` Runtime residency. Strict scale/performance tuning remains intentionally deferred to Phase 4.
 
 ## Canonical / current state
 
 ```text
-MAIN_AFTER_CI_RUNNER_CORRECTIVE=ce92f99777507dd03a2e7267c33607fe5aea4c56
+MAIN_AFTER_PHASE_1=188c524fd02e1c31b8a152b2bec224c947526610
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 JSC_ROOT_CAUSE=UNKNOWN
@@ -27,16 +27,19 @@ ACTIVE_PROGRAM=FT-RUNTIME-LIFECYCLE-MEMORY-001
 PHASE_0_CONTRACT_FREEZE=COMPLETE
 HISTORICAL_DOC_GATE=COMPLETE
 PHASE_1_FOCUSED_AUDIT=COMPLETE
-PHASE_1_V1_PLAN=SUPERSEDED_FOR_CURRENT_EXECUTION
 PHASE_1_V2_CONTRACT=ACCEPTED_FROZEN
 PHASE_1_V2_PLAN=ACCEPTED_FROZEN
-CURRENT_PHASE=PHASE_1_SAFE_HIBERNATE_RESTORE_IMPLEMENTATION
-PHASE_1_IMPLEMENTATION_PR=#170 OPEN / UNMERGED
+PHASE_1_IMPLEMENTATION=COMPLETE
+PHASE_1_IMPLEMENTATION_PR=#170 MERGED
+PHASE_1_MERGE_COMMIT=188c524fd02e1c31b8a152b2bec224c947526610
 CI_RUNNER_CORRECTIVE_PR=#171 MERGED
+CI_RUNNER_CORRECTIVE_MERGE=ce92f99777507dd03a2e7267c33607fe5aea4c56
 CI_RUNNER=macmini-floattabs-01 / self-hosted / macOS / ARM64 / mac-mini-ci
-CI_RUNNER_CORRECTIVE_RUN=41255270977 PASS
-PHASE_1_REQUIRED_PR_CI=PENDING_ON_RECONCILED_LITERAL_HEAD
+PHASE_1_REQUIRED_CI_RUN=41257207390 PASS
+PHASE_1_REQUIRED_CI_JOB=124702806620 PASS
+PHASE_1_INDEPENDENT_AUDIT=PASS_WITH_FOLLOWUPS
 STRICT_SCALE_BENCHMARK=DEFERRED_TO_PHASE_4
+PHASE_2=NOT_STARTED / NOT_AUTHORIZED
 ```
 
 ## Current Authority
@@ -51,18 +54,31 @@ AGENTS.md
 → docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md
 → docs/architecture/FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md
 → docs/architecture/DOMAIN_MAP.md for navigation
-→ current source/tests/fresh evidence
+→ current source/tests/fresh runtime evidence
 ```
 
-V1 lifecycle contract/Phase 1 plan remain historical evidence only and do not override V2.
+The V1 lifecycle contract and Phase 1 V1 plan remain historical evidence only.
 
-## Phase 1 target
+## Phase 1 delivered architecture
+
+```text
+Persistent Slot / Browser Profile / product state
+                    │
+                    ▼
+           memory-local restore snapshot
+                    │
+                    ▼
+             WKWebView Runtime
+                LIVE / NIL
+```
+
+Implemented semantic split:
 
 ```text
 hibernate(slotID:)
-  capture compatible opaque WKWebView interaction state when available
+  capture compatible opaque interaction state when available
   → deterministic teardown
-  → retain one memory-local restore snapshot
+  → retain at most one memory-local restore snapshot
   → Runtime becomes non-resident
 
 release(slotID:)
@@ -71,94 +87,75 @@ release(slotID:)
   → Runtime becomes non-resident
 ```
 
-Only normal eligible inactive lifecycle reclamation, including the already-existing eligible critical-Warm path, uses hibernate. All destructive callers remain destructive.
+Normal eligible inactive lifecycle reclamation, including the already-existing eligible critical-Warm path, uses `hibernate`. Destructive delete/reset/rebuild/Profile/cache/recovery paths remain destructive.
 
-## Authorized production scope
+Compatible restore:
 
-- `FloatTabs/Web/WebViewPool.swift`
-- `FloatTabs/Web/SlotLifecycleCoordinator.swift`
-- `FloatTabs/Web/SlotNavigationObserver.swift`
+```text
+resolve same Browser Profile data store
+→ construct fresh Runtime + bridges/observer/popup/sidecars
+→ assign fresh Runtime identity
+→ apply WKWebView.interactionState
+→ consume snapshot
+```
 
-## Authorized tests
+The compatible interaction-state path does not also issue the ordinary initial URL load. Missing/incompatible state uses the existing safe URL fallback.
 
-- `FloatTabsTests/WebViewPoolTests.swift`
-- `FloatTabsTests/WebAttentionLifecycleTests.swift`
-- `FloatTabsTests/WebFocusAdapterTests.swift` only if needed for the narrow observer-invalidation fixture
+## Phase 1 evidence
 
-## Current implementation evidence
-
-PR #170 implementation evidence before repository-host CI:
+Local/focused evidence on the validated implementation content:
 
 ```text
 FOCUSED_TESTS=146 executed / 0 failures
 FULL_TESTS=1073 executed / 3 skipped / 0 failures
 DEBUG_BUILD=PASS
 RELEASE_BUILD=PASS
-STRICT_1_2_4_8_BENCHMARK=NOT_RUN / DEFERRED_TO_PHASE_4
-LIVE_SMOKE=bounded 2 existing Slots; resident drop, fresh Runtime identity, interactionState restore observed
+LIVE_SMOKE=2 existing Slots; resident Runtime drop + fresh Runtime restore observed
 PROFILE_IDENTITY=default preserved
 SESSION_STORE_MUTATION=NONE OBSERVED
 DOUBLE_LOAD=NO COMPETING ORDINARY LOAD OBSERVED
+STRICT_1_2_4_8_BENCHMARK=NOT_RUN / DEFERRED_TO_PHASE_4
 ```
 
-The earlier PR #170 no-run condition was infrastructure, not a product test failure: the PR conflicted with `main`, so GitHub did not create a pull-request workflow run. PR #171 corrected FloatTabs CI to the dedicated local self-hosted runner and proved that route with run `41255270977`, job `124696994671`, runner `macmini-floattabs-01`, arm64, all steps passing.
-
-PR #170 has now been reconciled onto current `main` while preserving the validated Phase 1 production/test blobs. The next gate is required GitHub `Build & Test (Apple Silicon arm64)` on the literal reconciled PR head.
-
-## Phase 1 validation gate — current
-
-Required before merge:
-
-1. exact hibernate vs destructive-release semantics remain correct;
-2. deterministic teardown and stale-callback rejection remain correct;
-3. Browser Profile / cookies / session / Slot configuration remain untouched;
-4. focused regression tests pass;
-5. full unit suite has no new Phase 1 failures;
-6. Debug and Release builds pass;
-7. bounded live 1–2 Slot Runtime smoke proves resident-count drop, fresh single Runtime restore, intact page/conversation/session behavior to the extent observable, and no obvious competing double-load;
-8. required GitHub `Build & Test (Apple Silicon arm64)` passes on the literal reconciled PR head using the dedicated self-hosted runner;
-9. independent web audit passes before merge.
-
-Deferred to Phase 4 and not Phase 1 blockers:
-
-- strict `1 / 2 / 4 / 8` matrix;
-- >=9 configured-Slot fixture;
-- heavy 4/8 repeated runs;
-- no-op/control drift study;
-- `median reclaimed > 2× drift` threshold;
-- final process-tree memory curve;
-- final restore p50/p95 policy threshold;
-- Runtime budget/ranking selection.
-
-## Key invariants
-
-- Browser Profile / `WKWebsiteDataStore` identity and persistent session data remain independent from Runtime lifetime.
-- `WKWebView.interactionState` remains opaque and memory-local; never persist or log contents.
-- compatible interaction-state restore must not also issue a competing ordinary URL load.
-- missing/incompatible state uses the existing safe currentURL/home fallback.
-- deterministic teardown invalidates bridges/popup/navigation observer, clears delegates, calls `stopLoading()`, clears transient Pool state including pending termination incident context, and removes the old Runtime identity.
-- restored Runtime receives a fresh Runtime generation/WebView instance identity.
-- current active/fullscreen/supplemental-visible/media/Attention protection remains unchanged.
-- current Generating/Ready protection remains unchanged in Phase 1.
-- Cold website-cache cleanup semantics remain separate and unchanged.
-
-## Execution / handoff state
-
-Current action:
+Repository-host gate on literal PR #170 head `2e13d5eba51197fe991278caf4fb027c10a25893`:
 
 ```text
-PR #170 reconciled with current main
-→ required self-hosted PR CI
-→ independent web audit
-→ merge decision
+WORKFLOW=macOS CI
+RUN=41257207390
+JOB=124702806620
+JOB_NAME=Build & Test (Apple Silicon arm64)
+RUNNER=macmini-floattabs-01
+RUNNER_LABELS=self-hosted,macOS,ARM64,mac-mini-ci
+DEBUG_BUILD=PASS
+RELEASE_BUILD=PASS
+NATIVE_ARM64_VERIFICATION=PASS
+UNIT_TESTS=PASS
+CONCLUSION=SUCCESS
 ```
 
-Do not merge or release Phase 1 product code before the required CI and independent web audit pass.
+Independent web audit result: `PASS_WITH_FOLLOWUPS`.
 
-## Non-claims
+No blocking scope, ownership, Browser Profile/session-data, stale-callback, duplicate-load, CI, or mergeability defect remained before merge.
 
-- Historical JSC root cause remains `UNKNOWN`.
-- No final Runtime Budget number is accepted yet.
-- No large-scale memory curve is accepted yet.
-- No claim is made that ChatGPT generation survives WebView destruction.
-- No newer public release is authorized.
+## Non-blocking follow-ups
+
+- The bounded live smoke did not independently capture explicit login text from the accessory surface. It did preserve the Default Browser Profile identity, restore the same ChatGPT URL through `interactionState`, and observed no Profile/session-store mutation. This is not a Phase 1 blocker under the accepted V2 gate.
+- Strict multi-Slot memory curves, control-drift thresholds, restore p50/p95 at scale, and automatic Runtime Budget/ranking remain Phase 4 work.
+- Historical JSC/WebContent stall root cause remains `UNKNOWN`; Phase 1 does not claim to fix that historical root cause.
+
+## Next phase boundary
+
+Phase 2 (`Ready / Unread decoupling`) is **not started and not authorized**.
+
+Before Phase 2 product mutation:
+
+1. reread current Authority and the V2 program contract;
+2. perform the Phase 2 focused read-only audit of Attention/Ready/Unread ownership and Runtime protection paths;
+3. freeze Phase 2 exact scope, acceptance and STOP conditions in repository Authority;
+4. only then issue a bounded construction card.
+
+Do not start Phase 4 performance tuning merely because Phase 1 merged; performance policy remains a later phase.
+
+## Release state
+
+No new public release is authorized or claimed by Phase 1 closeout.
