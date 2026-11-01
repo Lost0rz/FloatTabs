@@ -5,7 +5,7 @@ This file is a **derived navigation map**. It does not replace `AGENTS.md`, `CUR
 ## Authority order
 
 1. `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`;
-2. current accepted architecture/design contracts, including `FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md` and the active phase plan;
+2. current accepted architecture/design contract, currently `FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md` plus the active Phase 5 plan;
 3. `docs/README.md` / `docs/architecture/README.md`;
 4. this map for navigation;
 5. production source/tests/fresh evidence;
@@ -15,46 +15,42 @@ This file is a **derived navigation map**. It does not replace `AGENTS.md`, `CUR
 
 | Domain | Owns | Primary source / entry points | Key boundaries |
 |---|---|---|---|
-| App Composition | dependency wiring, launch/termination, top-level services, DEBUG benchmark control composition | `FloatTabs/App/AppCoordinator.swift`, `AppDelegate.swift`, `FloatTabsApp.swift`, `BenchmarkControlServer.swift` | coordinates domains; does not own Tab/Web/Unread/Runtime-budget truth |
-| Native Notification Projection | ChatGPT completion native alert delivery and response parsing | `FloatTabs/App/ChatGPTCompletionNotificationCoordinator.swift` | projection only; Slot UUID routes; never owns unread, Runtime or Profile/session state |
-| Tabs & Profiles | Slot identity, selection, ordering, Web App / Browser Profile configuration, persisted `lastUsedAt` | `FloatTabs/Tabs/TabStore.swift`, `WebAppProfile.swift`, `BrowserProfile.swift`, `WebRenderingProfile.swift` | product/config state; Runtime lifecycle remains Web-domain owned |
-| Runtime Budget Policy | Phase 4 pure budget/eviction ranking decision | Phase 4 target `FloatTabs/Web/RuntimeBudgetPolicy.swift` | deterministic read-only decision only; no AppKit/WebKit/persistence/release side effects |
-| Web Runtime | `WKWebView` creation/reuse, Runtime identity, hibernate/restore/release mechanism | `FloatTabs/Web/WebViewPool.swift`, `SlotNavigationObserver.swift`, `BrowserProfileDataStoreProvider.swift` | mechanism owner; Phase 4 must not change hibernate/restore contract without reconciliation |
-| Runtime Lifecycle | residency execution, inactive timers, protection boundaries, memory-pressure/budget execution | `FloatTabs/Web/SlotLifecycleCoordinator.swift` | sole canonical Runtime lifecycle writer; consumes pure budget decision and executes existing hibernate boundary |
-| Window / Panel / Fullscreen | shell visibility, panel/window synchronization, fullscreen hosting, exact-Slot presentation, bounded cross-domain handoffs | `FloatTabs/Panel/PanelController.swift`, `FloatingPanel.swift`, `FullscreenSourceHost.swift`, `ScreenPositioning.swift` | one writer per presentation state; supplies current presentation/protection facts but does not become policy/persistence owner |
+| App Composition | dependency wiring, launch/termination, top-level services | `FloatTabs/App/AppCoordinator.swift`, `AppDelegate.swift`, `FloatTabsApp.swift` | coordinates domains; does not own Tab/Web/Attention truth |
+| Tabs & Profiles | Slot identity, selection, ordering, Web App / Browser Profile config, persisted `lastUsedAt` | `FloatTabs/Tabs/TabStore.swift`, `WebAppProfile.swift`, `BrowserProfile.swift`, `WebRenderingProfile.swift` | durable product/config state; Runtime lifecycle remains Web-owned |
+| Web Runtime | `WKWebView` creation/reuse, Runtime identity, hibernate/restore/release mechanism, bridge lifetime | `FloatTabs/Web/WebViewPool.swift`, `SlotNavigationObserver.swift`, `BrowserProfileDataStoreProvider.swift` | mechanism owner; does not own lifecycle policy or durable product state |
+| Runtime Lifecycle | residency execution, inactive timers, protection boundaries, memory-pressure and automatic-budget execution | `FloatTabs/Web/SlotLifecycleCoordinator.swift` | sole canonical Runtime lifecycle writer |
+| Runtime Budget Policy | Phase 4 deterministic managed-budget decision | private `RuntimeBudgetPolicy` in `FloatTabs/Web/SlotLifecycleCoordinator.swift` | pure/read-only decision; no WebKit/persistence side effects |
+| Attention / Generation Sensing | ChatGPT generation sensing, native Attention state, liveness fallback | `ChatGPTAttentionBridge.swift`, `WebAttentionCoordinator.swift` | `WebAttentionCoordinator` owns Attention state; bridge senses only; Generating protects Runtime |
+| Background Generation Thrift | Phase 5 bounded reduction of FloatTabs-owned liveness fallback work | `ChatGPTAttentionBridge.swift` | may alter watchdog scheduling only; never provider generation, lifecycle ownership or canonical visibility |
+| Response / Unread | response identity/extraction and durable unread handoff | `ChatGPTResponseBridge.swift`, `ChatGPTResponseExtraction.swift`, `ChatGPTUnreadResponseCoordinator.swift`, `UnreadResponseStore.swift` | durable unread remains independent from Runtime residency |
+| Native Notification Projection | completion alert delivery and exact-Slot response routing | `FloatTabs/App/ChatGPTCompletionNotificationCoordinator.swift` | projection only; never owns unread/Runtime/Profile state |
+| Window / Panel / Fullscreen | shell visibility, window synchronization, fullscreen hosting, exact-Slot presentation | `FloatTabs/Panel/PanelController.swift`, `FloatingPanel.swift`, `FullscreenSourceHost.swift`, `ScreenPositioning.swift` | owns product/presentation visibility truth; page `visibilityState` is not a replacement |
 | Focus / Input / Commands | native/Web focus, shortcuts, commands, click/drag routing | `FloatTabs/Web/WebFocusRouter.swift`, `FloatTabs/Hotkeys/AppCommandController.swift`, `GlobalHotkeyController.swift` | native focus and DOM focus remain distinct; no Runtime ownership |
-| Persistence & Recovery | durable Slot/Profile state, preferences, backups, durable unread | `ProfileRepository.swift`, `AppPreferencesStore.swift`, `FloatTabsBackupService.swift`, `UnreadResponseStore.swift` | no Runtime persistence workaround; Phase 4 adds no Runtime-budget preference/schema |
-| Attention / Response | ChatGPT Attention sensing, response identity/extraction, durable unread handoff | `ChatGPTAttentionBridge.swift`, `ChatGPTResponseBridge.swift`, `ChatGPTResponseExtraction.swift`, `ChatGPTUnreadResponseCoordinator.swift`, `WebAttentionCoordinator.swift` | Generating protects Runtime; Ready/unread do not; Phase 4 does not change sensing/unread semantics |
-| Diagnostics | diagnostic events, incident context, privacy filtering, bounded snapshots | `RuntimeDiagnostics.swift`, `RuntimeDiagnosticWriter.swift`, `RuntimeDiagnosticEvent.swift`, `LongTermPerformanceObservationCoordinator.swift` | evidence only; never policy authority or causal proof |
-| Benchmark / Performance Evidence | DEBUG-safe Real-Mac aggregate process-tree measurement and policy evidence | `tools/benchmark/`, `BenchmarkControlServer.swift`, bounded DEBUG handlers in App/Panel | aggregate responsible-process evidence only; never claim exact per-Slot WebContent memory; restore temporary settings |
-| Website Cache / Storage | re-downloadable website-cache measurement/cleanup | `FloatTabs/Storage/WebsiteCacheCleanupCoordinator.swift`, `WebsiteCacheCleanupService.swift`, `WebsiteCachePolicy.swift` | cache cleanup is not Runtime cleanup and cannot destroy Profile/session data outside explicit policy |
+| Persistence & Recovery | durable Slot/Profile state, preferences, backups, durable unread | `ProfileRepository.swift`, `AppPreferencesStore.swift`, `FloatTabsBackupService.swift`, `UnreadResponseStore.swift` | no Runtime persistence workaround; no Phase 5 schema change |
+| Diagnostics | diagnostic events, incident context, privacy filtering, bounded snapshots, long-term observation | `RuntimeDiagnostics.swift`, `RuntimeDiagnosticWriter.swift`, `RuntimeDiagnosticEvent.swift`, `LongTermPerformanceObservationCoordinator.swift` | evidence only; never lifecycle/Attention/thrift authority |
+| Website Cache / Storage | re-downloadable website-cache measurement/cleanup | `FloatTabs/Storage/WebsiteCacheCleanupCoordinator.swift`, `WebsiteCacheCleanupService.swift`, `WebsiteCachePolicy.swift` | cache cleanup is not Runtime cleanup and cannot destroy Profile/session data |
 | Menu / Status Projection | menu-bar/status projection and entry actions | `FloatTabs/MenuBar/StatusItemController.swift` | projection only; unread truth comes from durable unread |
 
-## Runtime flow through Phase 4
+## Runtime lifecycle flow after Phase 4
 
 ```text
-AppCoordinator
-→ TabStore owns persistent Slot/config + lastUsedAt
-→ PanelController owns shell/presentation facts
+TabStore owns persistent Slot/config + lastUsedAt
 → WebViewPool owns live WKWebView Runtime cache
-→ SlotLifecycleCoordinator owns lifecycle execution
-→ RuntimeBudgetPolicy receives read-only candidate/protection/recency facts
-→ pure ranked decision returns
-→ SlotLifecycleCoordinator performs any eligible existing hibernate boundary
+→ SlotLifecycleCoordinator gathers resident/protection/recency facts
+→ private RuntimeBudgetPolicy returns deterministic ranked decision
+→ SlotLifecycleCoordinator performs eligible existing hibernate boundary
 → Persistence retains user product/session state
-→ Diagnostics/benchmark record bounded evidence only
 ```
-
-## Protection / budget navigation
 
 Phase 4 hard protection sources:
 
 ```text
-active/actually presented
+active / actually presented
 fullscreen source
 supplemental visible Web surface
-media protection
+media protection / pending media query
 Attention Generating
+Hot explicit pin
 ```
 
 These are not Runtime protections:
@@ -65,37 +61,52 @@ durable unread
 native completion notification
 ```
 
-Residency meaning:
+Current normal/warning managed target defaults to 3 Warm/Cold runtimes. Critical pressure targets 0 eligible inactive Warm/Cold. The target may be exceeded by Hot/hard protections.
+
+## Phase 5 generation-thrift flow
 
 ```text
-Hot  -> explicit user pin, outside automatic eviction candidates
-Warm -> automatic-budget managed, normal maximum retention timer remains
-Cold -> automatic-budget managed, first eviction priority, normal maximum retention timer remains
+ChatGPT page event/mutation detector
+→ ChatGPTAttentionBridge observation
+→ WebAttentionCoordinator owns .generating
+→ SlotLifecycleCoordinator sees Runtime protection
+→ Runtime stays live
+
+in parallel:
+ChatGPTAttentionBridge liveness watchdog
+→ small read-only isolated-world probe
+→ page visibility hint + generation state
+→ cadence selector
+→ 2s normally / 5s only after 30s of hidden generation
+→ false result still requires existing 250ms confirmation
 ```
 
-The automatic managed budget can be exceeded by Hot/hard protections; diagnostics must report that oversubscription rather than violating the protection/user-pin contract.
+Important boundaries:
 
-## Phase 4 benchmark route
-
-Use:
-
-- existing `tools/benchmark/floattabs_benchmark.py` / `floattabs_lifecycle_benchmark.py` as infrastructure/history;
-- Phase 4 target `tools/benchmark/floattabs_runtime_budget_benchmark.py` for strict `1 / 2 / 4 / 8`, control drift, candidate-budget and restore/materialization evidence;
-- Debug `BenchmarkControlServer` and product-path configuration/selection only;
-- aggregate FloatTabs-responsible WebKit helper attribution via existing responsible-PID tooling.
-
-Do not directly edit persisted profile JSON or synthesize exact per-Slot WebContent byte ownership.
+- `document.visibilityState` is **local scheduling metadata only**.
+- `PanelController.isAttentionUserVisible(slotID:)` remains canonical product/presentation visibility.
+- Phase 5 never calls Runtime hibernate/release/reload.
+- Phase 5 never pauses/cancels provider generation.
+- the primary mutation-driven detector remains event-driven; Phase 5 does not replace it with polling.
 
 ## Verification routes
 
-Relevant tests under `FloatTabsTests/`:
+Relevant tests:
 
-- Phase 4 target `RuntimeBudgetPolicyTests.swift` — pure ranking/budget/protection rules;
-- `WebAttentionLifecycleTests.swift` — lifecycle timers, protection, memory pressure, hibernate ordering;
-- `WebViewPoolTests.swift` — Runtime identity/hibernate/restore mechanism evidence; production contract should remain unchanged in Phase 4;
-- Attention/Unread/Notification tests — cross-phase non-regression only;
-- Browser Profile tests — persistent user-data boundaries;
-- Phase 3 notification tests — notification projection/routing remains independent from Runtime residency.
+- `FloatTabsTests/ChatGPTAttentionBridgeTests.swift` — Phase 5 cadence/liveness/stale-callback and detector contract;
+- `FloatTabsTests/WebAttentionCoordinatorTests.swift` — Generating/Ready Attention semantics;
+- `FloatTabsTests/WebAttentionLifecycleTests.swift` — lifecycle protection/reclaim ordering;
+- `FloatTabsTests/WebAttentionCrossFeatureTests.swift` — cross-domain non-regression;
+- `FloatTabsTests/WebViewPoolTests.swift` — Runtime identity/hibernate/restore mechanism;
+- Browser Profile tests — persistent user-data boundaries.
+
+Required repository host gate remains `Build & Test (Apple Silicon arm64)` on `macmini-floattabs-01`.
+
+## Performance / benchmark routing
+
+The former Phase 4 strict budget-selection benchmark route is historical/deferred tuning, not active Phase 5 authority.
+
+Current Phase 5 correctness is established by deterministic cadence behavior plus regression/build/CI evidence. Future numeric memory/CPU tuning and user-adjustable thresholds belong to a separately authorized Settings-backed performance task.
 
 ## Incident routing
 
@@ -106,10 +117,11 @@ Slot/config
 vs Runtime budget decision
 vs lifecycle execution
 vs WebView runtime/navigation
+vs Attention sensing/liveness fallback
+vs Response/Unread
 vs Window/Fullscreen
 vs Focus/Input
 vs Persistence
-vs Attention/Response
 vs Native Notification
 ```
 
@@ -117,13 +129,11 @@ Correlate fresh evidence by Slot/session/runtime/navigation generation and time 
 
 ## Known structural notes
 
-- `SlotLifecycleCoordinator` remains the only release/hibernate decision executor in Phase 4.
-- `RuntimeBudgetPolicy` is a pure policy object and must never mutate WebKit or persistence.
-- `WebViewPool.onResidentSetChange` is a read-only/event trigger; it does not transfer lifecycle ownership to the pool.
-- `LongTermPerformanceObservationCoordinator` remains diagnostics-only and cannot become automatic budget authority.
-- `TabStore.lastUsedAt` is the accepted LRU fact source for Phase 4; do not infer recency from diagnostics timestamps.
-- Hot is an explicit user pin; Warm/Cold are automatic-budget managed under the active Phase 4 plan.
-- Browser Profile/session/configuration data remains outside Runtime budget mutation.
+- `SlotLifecycleCoordinator` is the only release/hibernate decision executor.
+- the Phase 4 `RuntimeBudgetPolicy` currently lives privately inside `SlotLifecycleCoordinator.swift`; there is no standalone production `RuntimeBudgetPolicy.swift`.
+- `WebViewPool.onResidentSetChange` is an event trigger, not a policy writer.
+- `LongTermPerformanceObservationCoordinator` remains diagnostics-only.
+- `TabStore.lastUsedAt` remains the LRU fact source.
+- Hot remains an explicit user pin; Warm/Cold remain automatic-budget managed.
+- Browser Profile/session/configuration data remains outside Runtime/thrift mutation.
 - public WebKit APIs do not provide trustworthy exact per-Slot WebContent memory attribution.
-
-If a future task proves a route stale, update only the affected mapping after verifying the replacement owner/source.
