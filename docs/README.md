@@ -21,7 +21,7 @@ Historical documents remain evidence only unless current Authority explicitly re
 For `FT-RUNTIME-LIFECYCLE-MEMORY-001`:
 
 - [`architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md`](architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md) — **CURRENT / ACCEPTED / FROZEN** program contract;
-- [`architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — **CURRENT PHASE 6 / ACCEPTED / FROZEN / IMPLEMENTATION NOT STARTED**;
+- [`architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — **CURRENT PHASE 6 / ACCEPTED / FROZEN / EXECUTION STARTED / GATE 0 PENDING**;
 - [`architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md) — **PHASE 6 AUDIT / RATIONALE EVIDENCE**; execution scope is superseded by the Phase 6 implementation contract;
 - [`architecture/README.md`](architecture/README.md) — architecture routing/status;
 - [`architecture/DOMAIN_MAP.md`](architecture/DOMAIN_MAP.md) — derived source/test navigation only.
@@ -52,7 +52,7 @@ Do not use superseded per-phase human-acceptance wording to block intermediate p
 - Phase 3 Native ChatGPT Completion Notification — delivered.
 - Phase 4 Reference-derived Automatic Runtime Management — delivered in PR #181 / `c910441a954bddbaeca710395cd0d6ed89ec5e5c`.
 - Phase 5 Long-running Background Generation Thrift — delivered in PR #183 / `745d401bf9f282d19bc756c81be3f46f17161e4b`.
-- Phase 6 Perceived-fast Restore — audit complete; implementation contract **accepted/frozen**; implementation **not started** and held until a future explicit user start.
+- Phase 6 Perceived-fast Restore — audit complete; implementation contract **accepted/frozen**; execution **started**; WP0 / Gate 0 Real-Mac evidence is the current active gate; product implementation remains not started until Gate 0 Outcome A/B.
 
 The old [`architecture/FloatTabs_Runtime_Lifecycle_Phase4_Automatic_Runtime_Budget_Policy_Plan_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase4_Automatic_Runtime_Budget_Policy_Plan_V1.md) is historical Phase 4 planning evidence. Its strict benchmark-selection gate was superseded by the user's later reference-derived-default decision and is not current execution authority.
 
@@ -64,7 +64,7 @@ The production Phase 4 default managed target is currently 3 Warm/Cold runtimes 
 
 The old strict `1 / 2 / 4 / 8` scale matrix, drift baseline, `4 → 3 → 2` candidate tournament and restore-latency tuning are deferred. Future tuning should prefer Settings-backed conservative presets/overrides rather than permanently hard-coding one machine-independent optimum. Safety protections remain non-overridable.
 
-## 6. Phase 6 frozen status
+## 6. Phase 6 current status
 
 Selected architecture:
 
@@ -79,14 +79,18 @@ native restore shell immediately
 
 Resident Slot switching remains direct.
 
-Before any Phase 6 product-source mutation, the next execution session must satisfy the frozen **Gate 0 Real-Mac interaction-state readiness evidence**. The contract pre-authorizes two evidence classes:
+The prior future-session hold was released by the user's explicit start instruction on `2026-11-01`. The active task remains `FT-RUNTIME-LIFECYCLE-MEMORY-001`; no successor task or redesign is required.
+
+Before any Phase 6 product-source mutation, execution must satisfy the frozen **Gate 0 Real-Mac interaction-state readiness evidence**. The contract pre-authorizes two evidence classes:
 
 - navigation-backed readiness from exact current-Runtime public callbacks/loading facts;
 - non-navigation readiness from bounded public current-Runtime renderer/page observation.
 
 If neither class is safely provable without private APIs, arbitrary delay/polling, reload/double-navigation, persistence/session mutation, screenshots or extra resident WebViews, execution stops before product mutation.
 
-This freeze intentionally does not guess a callback name from structural XCTest fixtures.
+Current repository tooling is sufficient to run Gate 0 without first changing product Runtime code: the Debug benchmark channel can drive existing Slots, the lifecycle benchmark can force actual Cold hibernate/reclaim and later re-activation, and existing Runtime/navigation diagnostics expose the required content-free correlation facts.
+
+This contract intentionally does not guess a callback name from structural XCTest fixtures. `web_runtime.restore.completed` remains state-handoff evidence only, not readiness truth.
 
 ## 7. Other bounded current contracts
 
