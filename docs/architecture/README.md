@@ -2,28 +2,18 @@
 
 Read [`../README.md`](../README.md) first. It is the repository-wide documentation authority/status index.
 
-Use this file to distinguish current architecture navigation/contracts from historical architecture and Stage documents.
-
-## Current navigation
-
-For source/Authority routing, use:
-
-- [`DOMAIN_MAP.md`](DOMAIN_MAP.md) — derived Domain/source/test navigation map;
-- production code and regression tests on the current Delivery / Semantic HEAD.
-
-`DOMAIN_MAP.md` is navigation only. It does not override product/design contracts or `CURRENT_TASK.md`.
-
 ## Current Runtime Lifecycle / Memory authority
 
-For `FT-RUNTIME-LIFECYCLE-MEMORY-001`, current architecture authority is:
+For `FT-RUNTIME-LIFECYCLE-MEMORY-001`:
 
-- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md) — **ACCEPTED / FROZEN** current program-level contract and unified final acceptance cadence;
-- [`FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V2.md) — **ACTIVE / ACCEPTED / FROZEN** current Phase 3 implementation plan;
-- `CURRENT_STATUS.md` — current program/phase/evidence state;
-- `CURRENT_TASK.md` — the only active execution authorization;
-- production code/tests/fresh evidence.
+- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md) — **ACCEPTED / FROZEN** program contract;
+- [`FloatTabs_Runtime_Lifecycle_Phase4_Automatic_Runtime_Budget_Policy_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase4_Automatic_Runtime_Budget_Policy_Plan_V1.md) — **ACTIVE / ACCEPTED / FROZEN** Phase 4 plan;
+- `CURRENT_STATUS.md` — current state/evidence;
+- `CURRENT_TASK.md` — only active execution authorization;
+- [`DOMAIN_MAP.md`](DOMAIN_MAP.md) — navigation only;
+- production source/tests/fresh evidence.
 
-Program Contract V3 preserves the target architecture — persistent Slot/Profile/product state with disposable `WKWebView` Runtime cache — and keeps intermediate phases on a machine-first cadence:
+Program cadence:
 
 ```text
 phase-focused audit / freeze
@@ -35,131 +25,122 @@ phase-focused audit / freeze
 Phases 1–6 complete
 → unified independent program audit
 → one user-owned full human acceptance pass
-→ final closeout / release decision
 ```
 
 ## Delivered lifecycle foundations
 
 ### Phase 1 — Safe Hibernate + Restore
 
-Complete. Runtime lifetime is separated from persistent Slot/Profile/session lifetime; eligible Runtime reclaim may preserve bounded memory-local restore state.
+Complete. Persistent Slot/Profile/session lifetime is separated from disposable `WKWebView` Runtime lifetime. Eligible hibernate retains only bounded memory-local restore state.
 
 ### Phase 2 — Ready / Unread Decoupling
 
-Complete and merged in PR #176 / merge commit `3b8270de6917b0342143a36d2457686bb59dcc25`.
-
-Current ownership split:
+Complete, merged in PR #176 / `3b8270de6917b0342143a36d2457686bb59dcc25`.
 
 ```text
-Runtime Attention
-  generating -> protects Runtime
-  ready      -> transient only; does not protect Runtime
-
-Durable Unread
-  ChatGPTUnreadResponseCoordinator + UnreadResponseStore
-  -> survives Runtime reclamation
-  -> owns persistent rail/menu unread presentation
+Generating -> Runtime-protected
+Ready      -> transient, not Runtime-protected
+Durable unread -> survives Runtime reclamation
 ```
 
-The delivered Phase 2 V2 plan and scope reconciliation remain implementation evidence, not active Phase 3 mutation authority.
+### Phase 3 — Native ChatGPT Completion Notification
 
-## Active Phase 3 — Native ChatGPT Completion Notification
-
-Phase 3 adds one native macOS notification projection for unseen ChatGPT completion without creating new Runtime or unread ownership.
-
-Frozen V2 flow:
+Complete, merged in PR #179 / `e182dd51a1bfd21a614e09f33643bf4acea551dc`.
 
 ```text
-valid hidden completion
-→ durable unread result .marked
-→ ChatGPTCompletionNotificationCoordinator
-→ injected notification backend
-→ generic native notification keyed only by persistent Slot UUID
-→ Runtime may be reclaimed normally
-→ notification default-action tap
-→ exact Slot selection/presentation
-→ existing Runtime restore/recreation if needed
-→ existing presentation-aware unread acknowledgement
+hidden valid completion
+→ durable unread .marked
+→ native macOS notification
+→ persistent Slot UUID route
+→ exact Slot presentation
+→ existing Runtime restore if absent
+→ existing acknowledgement semantics
 ```
 
-### Phase 3 V2 refinement
+The delivered Phase 3 V2 plan remains implementation evidence, not active mutation authority.
 
-The Phase 3 V1 target remains valid. V2 refines the implementation boundary after direct comparison with Kylmora's working native-notification implementation at commit `7d60b6c4cda0784c9a9034213f0fc323e0841fb0`.
+## Active Phase 4 — Automatic Runtime Budget / Policy
 
-The adopted structural patterns are:
+Phase 4 introduces a central pure decision layer without moving Runtime ownership:
 
-- isolate all direct `UNUserNotificationCenter` operations behind a small testable backend protocol;
-- use a production system backend and a recording/fake XCTest backend;
-- install the notification-center delegate during application startup;
-- explicitly support foreground notification presentation;
-- carry stable persistent Slot UUID rather than retaining any live Web Runtime identity;
-- default click routes exact target; dismiss does not navigate;
-- stale/unknown target does not fall back;
-- explicitly withdraw/replace stale same-Slot notification state rather than relying only on implicit system replacement behavior.
+```text
+WebViewPool live Runtime cache
+→ read-only resident/protection/recency facts
+→ RuntimeBudgetPolicy pure decision
+→ SlotLifecycleCoordinator sole executor
+→ existing hibernate boundary
+```
 
-FloatTabs deliberately does not adopt Kylmora's general-browser Web Notification API shim, page-origin/tag store, service-worker/page-event semantics, icon fetching or content-rich notification body. Those remain out of Phase 3 scope.
+### Frozen product semantics
 
-Phase 3 architecture boundaries:
+- **Hot** remains an explicit user pin after activation and is not automatically budget-evicted.
+- **Warm / Cold** are automatic-budget managed; their existing timers remain maximum normal retention boundaries.
+- Over-budget Warm/Cold may hibernate earlier than their timer.
+- Cold ranks before Warm; within a class, least-recently-used by persisted `lastUsedAt` ranks first; UUID is deterministic tie-break.
+- Active/presented, fullscreen, supplemental-visible, media-protected and Generating Runtime are hard protected.
+- Ready, durable unread and native-notification presence do not protect Runtime.
+- Critical memory pressure uses the same policy with managed target `0`; warning does not invent a tighter target.
+- Hot/hard protection may cause truthful oversubscription above the managed budget.
+- `SlotLifecycleCoordinator` remains the only writer that performs lifecycle release/hibernate.
+- no private WebKit API or exact per-Slot WebContent memory attribution is introduced.
 
-- new notification delivery/response owner belongs to the App composition layer;
-- direct system-notification access belongs only to the backend implementation;
-- native notification is a one-shot projection, never canonical unread state;
-- `Slot.id` is the stable routing identity; notification state never retains `WKWebView`, Runtime generation, document token or Browser Profile identity;
-- exact Slot routing must not require an in-memory notification record as product truth;
-- notification payload/body is privacy-bounded and contains no prompt, assistant response, URL or session data;
-- existing attention sound remains independent and keeps its current generic valid-completion semantics;
-- notification permission denial must not affect unread, sound, generation, reclaim/restore or user data;
-- exact stale/deleted Slot activation fails safely with no fallback to another Slot;
-- Phase 3 does not modify detector/response extraction, durable unread persistence, Runtime lifecycle policy or Phase 4+ behavior.
+### Phase 4 machine decision evidence
 
-See the Phase 3 V2 plan for exact source scope, backend seam, test matrix, STOP conditions and machine gate.
+The normal managed budget is not pre-guessed. It is selected from fresh Real-Mac evidence:
 
-## Current behavior / adjacent design
+```text
+raw loaded-Warm curve: 1 / 2 / 4 / 8
+→ repeated 8-resident no-op drift
+→ candidates 4 → 3 → 2
+→ >=3 repeated 8-resident runs per candidate
+→ choose largest candidate with median reclaim > 2× median absolute control drift
+→ >=10 reclaimed-Slot restore/materialization cycles, report median/p95
+```
 
-For shell interaction, rail geometry, movement, resize and fullscreen coordination, use:
+The restore metric is host-side Runtime materialization through the product path, not click-to-interactive/page-ready. Phase 6 owns perceived-fast restore.
 
-- [`../design/FloatTabs_UI_Design_System_v1.3.md`](../design/FloatTabs_UI_Design_System_v1.3.md) for unaffected shell/rail behavior;
-- [`../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md`](../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md) for the accepted active-Tab and unread-Attention refinement merged in PR #146;
-- production code and regression tests on `main`.
+The benchmark must use safe existing configured Slots, restore temporary policy/media/visibility/active-Slot changes and never create/delete/reset user data merely to satisfy the fixture.
 
-Phase 3 adds native notification routing only. It does not redesign rail/status attention visuals.
-
-The supported runtime and release architecture is Apple Silicon arm64 only.
+See the Phase 4 V1 plan for exact scope, candidate rules, tests and STOP conditions.
 
 ## Runtime diagnostics architecture
 
-Runtime Diagnostics is an evidence plane, not a product-state owner. Canonical runtime, navigation, lifecycle, focus, Attention, unread, notification projection and persistence authorities remain in their owning domains.
+Diagnostics remains evidence-only.
 
-Current boundaries:
+Current ownership:
 
-- `SlotNavigationObserver` owns navigation/runtime observations;
-- `WebViewPool` / `SlotLifecycleCoordinator` own Runtime/recovery/residency execution;
-- `ChatGPTAttentionBridge` owns Attention runtime sensing;
-- `WebAttentionCoordinator` owns transient Attention state;
-- `ChatGPTUnreadResponseCoordinator` / `UnreadResponseStore` own durable unread semantics;
-- `PanelController` composes completion handoff, presentation and exact Slot activation without becoming persistence owner;
-- Phase 3 notification coordinator owns notification policy/response parsing; its backend owns direct system Notification Center access;
-- `RuntimeDiagnostics` records evidence only and never becomes product truth.
+- `WebViewPool` — Runtime creation/hibernate/restore mechanism;
+- `SlotLifecycleCoordinator` — lifecycle execution and Phase 4 budget execution boundary;
+- `RuntimeBudgetPolicy` — Phase 4 pure decision only, no WebKit/persistence side effects;
+- `ChatGPTAttentionBridge` / `WebAttentionCoordinator` — Attention sensing/transient state;
+- `ChatGPTUnreadResponseCoordinator` / `UnreadResponseStore` — durable unread truth;
+- `ChatGPTCompletionNotificationCoordinator` — Phase 3 notification projection/routing;
+- `PanelController` — presentation and bounded cross-domain composition;
+- `RuntimeDiagnostics` — privacy-filtered evidence only.
 
-Public WebKit APIs do not provide reliable exact per-WebContent-process-to-Slot memory attribution. Diagnostics must preserve that limitation.
+Public WebKit APIs do not provide reliable exact per-WebContent-process-to-Slot memory attribution. Aggregate responsible-process evidence must remain labelled accordingly.
 
-The historical WebContent stall/termination root cause remains `UNKNOWN`. Reload/reset/restart/hibernate recovery proves only a recovery boundary unless causal evidence establishes more.
+Historical JSC/WebContent stall root cause remains `UNKNOWN`; recovery boundaries are not causal proof.
 
-## Completed / superseded Runtime Lifecycle documents
+## Adjacent current design
 
-- `FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V1.md` — superseded Phase 3 freeze evidence; V2 is active execution authority.
-- [`FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md) — delivered Phase 2 plan evidence; no longer active execution plan.
-- [`FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md`](FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md) — delivered Phase 2 test-scope evidence.
-- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md) — historical program contract superseded by V3.
-- [`FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md) — historical Phase 2 plan evidence.
-- [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md) — delivered Phase 1 plan evidence.
-- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md) — historical program-contract evidence.
-- [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md) — historical Phase 1 audit/plan evidence.
+For unaffected shell/rail behavior use:
 
-Their facts/rationale remain useful where they do not conflict with current Authority.
+- [`../design/FloatTabs_UI_Design_System_v1.3.md`](../design/FloatTabs_UI_Design_System_v1.3.md);
+- [`../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md`](../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md);
+- current production source/tests.
+
+Supported release architecture remains Apple Silicon arm64.
+
+## Delivered / superseded lifecycle documents
+
+- [`FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V2.md) — delivered Phase 3 evidence.
+- `FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V1.md` — superseded Phase 3 freeze evidence.
+- [`FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md) — delivered Phase 2 evidence.
+- [`FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md`](FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md) — delivered Phase 2 corrective evidence.
+- [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md) — delivered Phase 1 evidence.
+- `FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md` / V1 — historical program contracts superseded by V3.
 
 ## Rule
 
-When a versioned architecture/design/product document disagrees with current production code or a newer accepted contract, treat the older statement as historical unless explicitly restored by `CURRENT_TASK.md` or a current linked contract.
-
-Never use a historical `FROZEN`, `LOCKED`, `accepted`, `canonical`, or `CONSTRUCTION_GATE_READY` label as present-day execution authority.
+Older architecture/product/Stage documents are historical unless current Authority explicitly restores them. When they conflict with current V3/Phase 4/source/tests, preserve them as evidence but follow the current Authority.
