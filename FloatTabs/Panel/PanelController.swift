@@ -4256,16 +4256,13 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     @discardableResult
     func setResidency(_ policy: SlotResidencyPolicy, for id: UUID) -> Bool {
-        guard tabStore.updateResourcePolicy(id: id, residencyPolicy: policy),
-              let updatedProfile = tabStore.profiles.first(where: { $0.id == id }) else {
+        // Legacy IPC/test adapter only. The canonical product state is
+        // Automatic / Keep Loaded and no current UI projects legacy labels.
+        guard tabStore.updateResourcePolicy(id: id, residencyPolicy: policy) else {
             return false
         }
-
-        handleRuntimeReleased(updatedProfile)
-
         if tabStore.activeTabID == id {
             synchronizeTransientUIHost()
-            statusHUDView.show(residency: policy)
         }
         return true
     }

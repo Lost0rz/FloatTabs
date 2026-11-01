@@ -79,7 +79,7 @@ final class SlotLifecycleCoordinator {
     nonisolated static let defaultWarmReleaseDelay: TimeInterval = 120
     nonisolated static let defaultAutomaticReleaseDelay: TimeInterval = 30
     nonisolated static let warningManagedResidentTarget = RuntimeBudgetPolicy.warningManagedResidentTarget
-    nonisolated static let defaultHiddenActiveGraceDelay: TimeInterval = 120
+    nonisolated static let defaultHiddenActiveGraceDelay: TimeInterval = 0
     nonisolated static let defaultMediaProtectionPollDelay: TimeInterval = 10
     nonisolated static let defaultManagedResidentTarget = RuntimeBudgetPolicy.defaultManagedResidentTarget
 
@@ -207,10 +207,6 @@ final class SlotLifecycleCoordinator {
         if let activeSlotID, !validIDs.contains(activeSlotID) {
             self.activeSlotID = nil
         }
-
-        // Phase 7 has no hidden Hot host. Remove any compatibility host that
-        // could have survived an in-process preference transition.
-        container.retainHotSlots([])
 
         for slotID in Array(inactivePlans.keys) where
             !validIDs.contains(slotID) || !webViewPool.contains(slotID: slotID) {
