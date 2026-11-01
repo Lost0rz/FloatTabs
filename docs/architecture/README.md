@@ -18,52 +18,46 @@ For source/Authority routing, use:
 For `FT-RUNTIME-LIFECYCLE-MEMORY-001`, current architecture authority is:
 
 - [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md) — **ACCEPTED / FROZEN** current program-level contract;
-- [`FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md) — **ACCEPTED / FROZEN** current Phase 2 implementation plan;
+- [`FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md) — **ACCEPTED / FROZEN** current Phase 2 implementation/acceptance plan;
+- [`FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md`](FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md) — accepted test-only scope corrective;
 - `CURRENT_STATUS.md` — current program/phase/evidence state;
 - `CURRENT_TASK.md` — the only active execution authorization;
-- production code/tests/fresh runtime evidence.
+- production code/tests/fresh evidence.
 
-The V2 program contract preserves the accepted target architecture — persistent Slot/Profile/product state with disposable `WKWebView` Runtime cache — and the architecture-first cadence:
+The V2 program contract preserves the accepted target architecture — persistent Slot/Profile/product state with disposable `WKWebView` Runtime cache — and the architecture-first cadence.
 
-```text
-structural correctness
-→ bounded live Runtime validation
-→ merge
-→ dependent architecture phases
-→ scale benchmark / policy tuning when Phase 4 needs it
-```
+Phase 1 Safe Hibernate + Restore is complete.
 
-Phase 1 Safe Hibernate + Restore is complete. Its accepted V2 plan remains historical Phase 1 evidence, not current Phase 2 authorization.
-
-Phase 2 now freezes the next ownership split:
+Phase 2 freezes this ownership split:
 
 ```text
 Runtime Attention
-  generating -> may protect Runtime
+  generating -> protects Runtime
   ready      -> transient only; does not protect Runtime
 
 Durable Unread
   ChatGPTUnreadResponseCoordinator + UnreadResponseStore
   -> survives Runtime reclamation
-  -> owns persistent unread presentation
+  -> owns persistent rail/menu unread presentation
 ```
 
-The current Phase 2 plan defines exact production/test scope, completion-handoff ordering, verification gates and STOP conditions.
+The current Phase 2 V2 plan keeps the V1 architecture/scope but changes verification cadence: machine execution owns tests/builds/diff/PR/CI and independent audit; timing-sensitive real UI/runtime acceptance is performed by the user in one concentrated pass after machine work is complete. AI/CUA interaction is not a construction gate and cannot set human acceptance PASS.
 
 ## Completed / superseded Runtime Lifecycle documents
 
+- [`FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md) — historical Phase 2 plan evidence; its AI-driven bounded live-smoke construction gate is superseded by Phase 2 V2.
 - [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md) — accepted/frozen delivered Phase 1 plan; Phase 1 is complete.
 - [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md) — historical program-contract evidence. Its strict Phase 1 scale-benchmark/STOP gate is superseded by V2.
-- [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md) — historical Phase 1 audit/plan evidence. Its 1/2/4/8 benchmark acceptance gate is superseded by the V2 cadence.
+- [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md) — historical Phase 1 audit/plan evidence.
 
-Their audit facts and rationale remain useful historical evidence where they do not conflict with current V2/Phase 2 Authority.
+Their audit facts and rationale remain useful historical evidence where they do not conflict with current Authority.
 
 ## Current behavior
 
 For shell interaction, rail geometry, movement, resize and fullscreen coordination, use:
 
 - [`../design/FloatTabs_UI_Design_System_v1.3.md`](../design/FloatTabs_UI_Design_System_v1.3.md) for unaffected shell/rail behavior;
-- [`../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md`](../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md) for the accepted active-Tab and unread-Attention visual refinement merged in PR #146;
+- [`../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md`](../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md) for the accepted active-Tab and unread-Attention refinement merged in PR #146;
 - production code and regression tests on `main`;
 - the current release record under `../release/` only as version-specific historical evidence.
 
