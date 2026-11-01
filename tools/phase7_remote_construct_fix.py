@@ -32,36 +32,36 @@ if text.count(old) != 1:
     raise SystemExit(f"construction fix 1 expected one target, got {text.count(old)}")
 text = text.replace(old, new, 1)
 
-# Fix 2: onSetResidency intentionally exists once on ExternalControlZoneView and
-# once on ExternalWebAppTabView. Replace both declarations in one asserted step.
-old = '''replace_once(
-    p,
-    "    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?\\n",
-    ''' + '"""' + '''    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)? // legacy command/test seam
-    var onSetRuntimeRetention: ((UUID, SlotRuntimeRetentionPreference) -> Void)?
-''' + '"""' + '''
-)
-# ExternalWebAppTabView has the same declaration; update the second occurrence.
-replace_once(
-    p,
-    "    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?\\n",
-    ''' + '"""' + '''    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)? // legacy command/test seam
-    var onSetRuntimeRetention: ((UUID, SlotRuntimeRetentionPreference) -> Void)?
-''' + '"""' + '''
-)
+# Fix 2: ExternalControlZoneView and ExternalWebAppTabView intentionally carry
+# the same legacy callback declaration. Override only this exact replace_once
+# case: first encounter must see exactly two declarations and updates both;
+# the second scripted encounter is then a deterministic no-op.
+marker = "# -----------------------------------------------------------------------------\n# WP1 — canonical retention model with additive legacy compatibility."
+if text.count(marker) != 1:
+    raise SystemExit("construction fix 2 could not locate WP1 marker")
+wrapper = r'''
+_original_replace_once = replace_once
+_rail_retention_callback_replaced = False
+
+def replace_once(path, old, new):
+    global _rail_retention_callback_replaced
+    rail_old = "    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?\n"
+    if old == rail_old:
+        if _rail_retention_callback_replaced:
+            return
+        source = read(path)
+        count = source.count(old)
+        if count != 2:
+            raise SystemExit(
+                f"{path}: expected exactly two rail residency callback declarations, got {count}"
+            )
+        write(path, source.replace(old, new))
+        _rail_retention_callback_replaced = True
+        return
+    return _original_replace_once(path, old, new)
+
 '''
-new = '''replace_all_checked(
-    p,
-    "    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?\\n",
-    ''' + '"""' + '''    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)? // legacy command/test seam
-    var onSetRuntimeRetention: ((UUID, SlotRuntimeRetentionPreference) -> Void)?
-''' + '"""' + ''',
-    minimum=2,
-)
-'''
-if text.count(old) != 1:
-    raise SystemExit(f"construction fix 2 expected one target block, got {text.count(old)}")
-text = text.replace(old, new, 1)
+text = text.replace(marker, wrapper + marker, 1)
 
 script.write_text(text)
 exec(compile(text, str(script), "exec"), {"__name__": "__main__", "__file__": str(script)})
