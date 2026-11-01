@@ -32,19 +32,21 @@ if text.count(old) != 1:
     raise SystemExit(f"construction fix 1 expected one target, got {text.count(old)}")
 text = text.replace(old, new, 1)
 
-# Fix 2: ExternalControlZoneView and ExternalWebAppTabView intentionally carry
-# the same legacy callback declaration. Override only this exact replace_once
-# case: first encounter must see exactly two declarations and updates both;
-# the second scripted encounter is then a deterministic no-op.
+# The original transformer contains two intentionally broader assumptions:
+# 1) the rail callback declaration appears twice;
+# 2) WebViewPool's recovery disposition is actually an inline switch, not a
+#    temporary local variable. Override only those exact replace_once requests.
 marker = "# -----------------------------------------------------------------------------\n# WP1 — canonical retention model with additive legacy compatibility."
 if text.count(marker) != 1:
-    raise SystemExit("construction fix 2 could not locate WP1 marker")
+    raise SystemExit("construction wrapper could not locate WP1 marker")
 wrapper = r'''
 _original_replace_once = replace_once
 _rail_retention_callback_replaced = False
+_recovery_switch_replaced = False
 
 def replace_once(path, old, new):
-    global _rail_retention_callback_replaced
+    global _rail_retention_callback_replaced, _recovery_switch_replaced
+
     rail_old = "    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?\n"
     if old == rail_old:
         if _rail_retention_callback_replaced:
@@ -58,44 +60,39 @@ def replace_once(path, old, new):
         write(path, source.replace(old, new))
         _rail_retention_callback_replaced = True
         return
+
+    recovery_transform_old = '''        let recoveryDisposition = Self.recoveryDisposition(
+            isActive: isActive,
+            residencyPolicy: residencyPolicy
+        )
+'''
+    if old == recovery_transform_old:
+        if _recovery_switch_replaced:
+            return
+        source = read(path)
+        actual_old = '''        switch Self.recoveryDisposition(
+            isActive: isActive,
+            residencyPolicy: residencyPolicy
+        ) {
+'''
+        actual_new = '''        switch Self.recoveryDisposition(
+            isActive: isActive,
+            runtimeRetentionPreference: runtimeRetentionPreference
+        ) {
+'''
+        count = source.count(actual_old)
+        if count != 1:
+            raise SystemExit(
+                f"{path}: expected one actual recovery switch, got {count}"
+            )
+        write(path, source.replace(actual_old, actual_new, 1))
+        _recovery_switch_replaced = True
+        return
+
     return _original_replace_once(path, old, new)
 
 '''
 text = text.replace(marker, wrapper + marker, 1)
-
-# Fix 3: WebViewPool performs the disposition inline in a switch; the initial
-# transform was written against an intermediate local-variable shape.
-old = '''replace_once(
-    p,
-    ''' + '"""' + '''        let recoveryDisposition = Self.recoveryDisposition(
-            isActive: isActive,
-            residencyPolicy: residencyPolicy
-        )
-''' + '"""' + ''',
-    ''' + '"""' + '''        let recoveryDisposition = Self.recoveryDisposition(
-            isActive: isActive,
-            runtimeRetentionPreference: runtimeRetentionPreference
-        )
-''' + '"""' + '''
-)
-'''
-new = '''replace_once(
-    p,
-    ''' + '"""' + '''        switch Self.recoveryDisposition(
-            isActive: isActive,
-            residencyPolicy: residencyPolicy
-        ) {
-''' + '"""' + ''',
-    ''' + '"""' + '''        switch Self.recoveryDisposition(
-            isActive: isActive,
-            runtimeRetentionPreference: runtimeRetentionPreference
-        ) {
-''' + '"""' + '''
-)
-'''
-if text.count(old) != 1:
-    raise SystemExit(f"construction fix 3 expected one transform block, got {text.count(old)}")
-text = text.replace(old, new, 1)
 
 script.write_text(text)
 exec(compile(text, str(script), "exec"), {"__name__": "__main__", "__file__": str(script)})
