@@ -6,11 +6,11 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 5 BACKGROUND GENERATION THRIFT**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 6 PERCEIVED-FAST RESTORE AUDIT**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `WAITING_FOR_PHASE_5_MERGE_GATE`.
+Current execution state: `PHASE_6_AUDIT_ACTIVE / IMPLEMENTATION_NOT_AUTHORIZED`.
 
 ## Canonical state
 
@@ -19,76 +19,45 @@ PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 JSC_ROOT_CAUSE=UNKNOWN
 
-PHASE_1_SAFE_HIBERNATE_RESTORE=COMPLETE
+PHASE_1_SAFE_HIBERNATE_RESTORE=COMPLETE / MERGED
 PHASE_2_READY_UNREAD_DECOUPLING=COMPLETE / MERGED
 PHASE_3_NATIVE_COMPLETION_NOTIFICATION=COMPLETE / MERGED
 PHASE_4_REFERENCE_DERIVED_RUNTIME_MANAGEMENT=COMPLETE / MERGED
-PHASE_4_MERGE_COMMIT=c910441a954bddbaeca710395cd0d6ed89ec5e5c
-PHASE_4_EMPIRICAL_TUNING=DEFERRED / FUTURE SETTINGS-BACKED TUNING
-PHASE_5_IMPLEMENTATION=COMPLETE / PR #183 OPEN / MERGE GATE
-PHASE_5_IMPLEMENTATION_SEMANTIC_HEAD=e36589d4729f86b2e76609bcb699107e50f63919
-PHASE_5_REQUIRED_CI_ON_SEMANTIC_HEAD=PASS / RUN 1287
-PHASE_5_QA_DMG_ON_SEMANTIC_HEAD=PASS / RUN 623
-PHASE_6=NOT_STARTED / NOT_AUTHORIZED
+PHASE_5_BACKGROUND_GENERATION_THRIFT=COMPLETE / MERGED
+PHASE_5_PR=#183
+PHASE_5_MERGE_COMMIT=745d401bf9f282d19bc756c81be3f46f17161e4b
+PHASE_5_LITERAL_HEAD=f9cef25f8eee47d9973bfd9bd9401af072b1b8e6
+PHASE_5_REQUIRED_CI=PASS / RUN 1290
+PHASE_5_QA_DMG=PASS / RUN 626
+PHASE_6=AUDIT_ACTIVE / IMPLEMENTATION_NOT_AUTHORIZED
 PROGRAM_HUMAN_ACCEPTANCE=PENDING
 CI_RUNNER=macmini-floattabs-01 / self-hosted / macOS / ARM64 / mac-mini-ci
 ```
 
-## Authority/document reconciliation
+## Phase 5 closeout
 
-The stale Runtime Lifecycle document routing has been corrected on PR #183:
+PR #183 merged after literal-head required CI and QA DMG passed. Delivered behavior preserves the existing event-driven ChatGPT detector, generation Runtime protection, two-probe completion confirmation, Runtime/document/token stale guards, `WebViewPool` ownership and Browser Profile/session/persistence boundaries.
 
-- `FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md` is the current accepted program contract;
-- the former V3 Phase 4 strict `1 / 2 / 4 / 8` benchmark-selection gate is historical/deferred tuning rather than current Phase 4 correctness authority;
-- `docs/README.md` and `docs/architecture/README.md` now route to V4 and the active Phase 5 plan;
-- `DOMAIN_MAP.md` now reflects actual delivered source ownership, including the Phase 4 private `RuntimeBudgetPolicy` inside `SlotLifecycleCoordinator.swift`;
-- old contracts/plans remain historical evidence and were not rewritten to pretend they were current.
+Long-running hidden generation now reduces FloatTabs-owned liveness-watchdog cadence from 2s to 5s after 30s while visible/unknown/short generation keeps the existing 2s cadence. The values are conservative engineering defaults rather than measured optimum.
 
-## Delivered Phase 5 behavior
+## Phase 6 authority
 
-Focused audit identified the fixed native liveness-watchdog cadence as the smallest safe FloatTabs-owned optimization boundary. The primary page detector remains event-driven/mutation-coalesced and is not replaced with polling.
+The accepted V4 Runtime Lifecycle contract defines Phase 6 as **Perceived-fast Restore**: improve user-perceived restoration after Runtime reclamation without retaining heavyweight `WKWebView`s merely for continuity.
 
-Delivered policy:
+The user has authorized a **detailed read-only Phase 6 audit** after Phase 5 merge. This does not authorize Phase 6 product implementation.
 
-```text
-page visible / visibility unknown
-→ 2s liveness-watchdog cadence
+The audit must determine the current restore path, ownership boundaries, latency sources, available bounded restore state, focus/window/fullscreen interactions, Browser Profile/session continuity, stale-callback risks, credible solution options and the smallest safe implementation boundary.
 
-page hidden + generation age < 30s
-→ 2s cadence
+## Non-negotiable boundaries during audit
 
-page hidden + generation age >= 30s
-→ 5s cadence
-
-first liveness probe says not-generating
-→ existing 250ms confirmation
-→ second current-context false required before synthetic finish
-```
-
-`document.visibilityState` is local bridge scheduling metadata only. `PanelController` remains canonical product/presentation visibility authority.
-
-The implementation preserves:
-
-- `WebAttentionCoordinator` as Attention authority;
-- `generating` as Runtime-protecting for the full generation;
-- `SlotLifecycleCoordinator` as sole Runtime lifecycle executor;
-- `WebViewPool` hibernate/restore semantics;
-- natural completion and existing token/document/runtime stale-callback guards;
-- Browser Profile/session/configuration/persistence boundaries.
-
-The 30s/5s values are conservative engineering defaults, not measured optimum. Later machine/user tuning remains a separately authorized Settings-backed performance task.
-
-## Verification evidence
-
-Semantic implementation head `e36589d4729f86b2e76609bcb699107e50f63919` passed:
-
-- Debug arm64 build;
-- Release arm64 build;
-- native Release architecture verification;
-- full existing XCTest suite including focused Phase 5 cadence/probe coverage;
-- required `Build & Test (Apple Silicon arm64)` on `macmini-floattabs-01` — run `1287`;
-- QA DMG — run `623`;
-- final diff/scope review: only 9 expected control/docs/source/test files; no `WebViewPool`, `SlotLifecycleCoordinator`, Browser Profile/session/persistence, release/version or Phase 6 mutation.
+- `WebViewPool` remains live Runtime mechanism owner unless a later accepted design explicitly changes ownership.
+- `SlotLifecycleCoordinator` remains sole Runtime lifecycle executor.
+- `PanelController` remains product/presentation visibility authority.
+- `WebAttentionCoordinator` remains Attention authority.
+- Browser Profile / website session / persistent user data must not be reset, deleted or rewritten as a restore shortcut.
+- no private WebKit API.
+- no Runtime retention policy change merely to hide restore latency.
+- no Phase 6 implementation before audit/design freeze and task reconciliation.
 
 ## Current authority
 
@@ -98,22 +67,10 @@ AGENTS.md
 → CURRENT_TASK.md
 → docs/README.md
 → docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md
-→ docs/architecture/FloatTabs_Runtime_Lifecycle_Phase5_Background_Generation_Thrift_Plan_V1.md
 → docs/architecture/DOMAIN_MAP.md
-→ current production source/tests/fresh evidence
+→ current production source/tests/fresh runtime evidence
 ```
-
-## Merge gate
-
-PR #183 is the single Phase 5 delivery PR. This control-alignment commit is control-only drift after the verified semantic implementation head.
-
-Before merge, the **literal current PR head** must still satisfy:
-
-- required `Build & Test (Apple Silicon arm64)` PASS;
-- clean/mergeable PR state;
-- changed paths remain inside Phase 5/document-reconciliation scope;
-- no ownership/data-safety/Phase 6/release drift.
 
 ## Next action
 
-Run the literal-head merge gate. If green and mergeable, Phase 5 is ready for the user's next merge decision. Do not merge or begin Phase 6 without that authorization.
+Complete the Phase 6 read-only audit against merged `main`. Produce a concrete restore-path/ownership map, risks, candidate designs, recommended bounded implementation, verification gates and unresolved evidence. Stop before product mutation until Phase 6 design/scope is explicitly authorized.
