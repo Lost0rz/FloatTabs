@@ -25,7 +25,7 @@ These are current entry points when their scope applies:
 - [`architecture/README.md`](architecture/README.md) — current architecture-document routing and status.
 - [`architecture/DOMAIN_MAP.md`](architecture/DOMAIN_MAP.md) — derived source/Domain/test navigation; not task Authority.
 - [`architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md`](architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md) — accepted/frozen current Runtime Lifecycle / Memory program contract and program-level verification/acceptance cadence.
-- [`architecture/FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V1.md) — accepted/frozen active Phase 3 implementation plan.
+- [`architecture/FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V2.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V2.md) — accepted/frozen active Phase 3 implementation plan, including the native-notification backend seam and explicit same-Slot replacement contract.
 - [`design/FloatTabs_UI_Design_System_v1.3.md`](design/FloatTabs_UI_Design_System_v1.3.md) — current shell/rail interaction baseline where not superseded by a newer bounded design contract or production source/tests.
 - [`design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md`](design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md) — accepted active-tab/unread visual refinement for its bounded UI surface.
 
@@ -54,7 +54,8 @@ Phase-specific machine evidence that determines architecture remains phase-local
 
 ## 4. Current / delivered Runtime Lifecycle phase plans
 
-- [`architecture/FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V1.md) — **ACTIVE / ACCEPTED / FROZEN** Phase 3 plan.
+- [`architecture/FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V2.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V2.md) — **ACTIVE / ACCEPTED / FROZEN** Phase 3 plan.
+- `architecture/FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V1.md` — superseded Phase 3 freeze evidence; V2 wins for active execution.
 - [`architecture/FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md) — delivered Phase 2 semantic/implementation evidence; Phase 2 is complete and merged.
 - [`architecture/FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md`](architecture/FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md) — accepted Phase 2 test-only corrective evidence.
 - [`architecture/FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md) — delivered Phase 1 plan evidence.
@@ -82,6 +83,7 @@ The following remain historical evidence and must not override current V3/curren
 - `architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`
 - `architecture/FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`
 - `architecture/FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md`
+- `architecture/FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V1.md`
 
 V2 remains useful evidence for separating structural correctness from Phase 4 scale tuning. V3 supersedes its repeated per-phase acceptance cadence for current program execution.
 
@@ -126,4 +128,4 @@ When a historical document disagrees with current source/tests or a newer accept
 3. follow current Authority/current source;
 4. add/update a status banner or routing index if the conflict could mislead future work.
 
-For the active Runtime Lifecycle / Memory program, old Hot/Warm/Cold Stage contracts, old Attention residency-protection contracts and superseded per-phase acceptance gates are historical inputs only. They do not override `CURRENT_TASK.md`, `architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md`, or the active Phase 3 plan.
+For the active Runtime Lifecycle / Memory program, old Hot/Warm/Cold Stage contracts, old Attention residency-protection contracts, superseded Phase 3 V1 wording and superseded per-phase acceptance gates are historical inputs only. They do not override `CURRENT_TASK.md`, `architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md`, or the active Phase 3 V2 plan.

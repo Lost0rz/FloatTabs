@@ -18,7 +18,7 @@ For source/Authority routing, use:
 For `FT-RUNTIME-LIFECYCLE-MEMORY-001`, current architecture authority is:
 
 - [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md) — **ACCEPTED / FROZEN** current program-level contract and unified final acceptance cadence;
-- [`FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V1.md) — **ACTIVE / ACCEPTED / FROZEN** current Phase 3 implementation plan;
+- [`FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V2.md) — **ACTIVE / ACCEPTED / FROZEN** current Phase 3 implementation plan;
 - `CURRENT_STATUS.md` — current program/phase/evidence state;
 - `CURRENT_TASK.md` — the only active execution authorization;
 - production code/tests/fresh evidence.
@@ -67,11 +67,13 @@ The delivered Phase 2 V2 plan and scope reconciliation remain implementation evi
 
 Phase 3 adds one native macOS notification projection for unseen ChatGPT completion without creating new Runtime or unread ownership.
 
-Frozen flow:
+Frozen V2 flow:
 
 ```text
 valid hidden completion
 → durable unread result .marked
+→ ChatGPTCompletionNotificationCoordinator
+→ injected notification backend
 → generic native notification keyed only by persistent Slot UUID
 → Runtime may be reclaimed normally
 → notification default-action tap
@@ -80,18 +82,37 @@ valid hidden completion
 → existing presentation-aware unread acknowledgement
 ```
 
+### Phase 3 V2 refinement
+
+The Phase 3 V1 target remains valid. V2 refines the implementation boundary after direct comparison with Kylmora's working native-notification implementation at commit `7d60b6c4cda0784c9a9034213f0fc323e0841fb0`.
+
+The adopted structural patterns are:
+
+- isolate all direct `UNUserNotificationCenter` operations behind a small testable backend protocol;
+- use a production system backend and a recording/fake XCTest backend;
+- install the notification-center delegate during application startup;
+- explicitly support foreground notification presentation;
+- carry stable persistent Slot UUID rather than retaining any live Web Runtime identity;
+- default click routes exact target; dismiss does not navigate;
+- stale/unknown target does not fall back;
+- explicitly withdraw/replace stale same-Slot notification state rather than relying only on implicit system replacement behavior.
+
+FloatTabs deliberately does not adopt Kylmora's general-browser Web Notification API shim, page-origin/tag store, service-worker/page-event semantics, icon fetching or content-rich notification body. Those remain out of Phase 3 scope.
+
 Phase 3 architecture boundaries:
 
 - new notification delivery/response owner belongs to the App composition layer;
+- direct system-notification access belongs only to the backend implementation;
 - native notification is a one-shot projection, never canonical unread state;
 - `Slot.id` is the stable routing identity; notification state never retains `WKWebView`, Runtime generation, document token or Browser Profile identity;
+- exact Slot routing must not require an in-memory notification record as product truth;
 - notification payload/body is privacy-bounded and contains no prompt, assistant response, URL or session data;
 - existing attention sound remains independent and keeps its current generic valid-completion semantics;
 - notification permission denial must not affect unread, sound, generation, reclaim/restore or user data;
 - exact stale/deleted Slot activation fails safely with no fallback to another Slot;
 - Phase 3 does not modify detector/response extraction, durable unread persistence, Runtime lifecycle policy or Phase 4+ behavior.
 
-See the Phase 3 V1 plan for exact source scope, test matrix, STOP conditions and machine gate.
+See the Phase 3 V2 plan for exact source scope, backend seam, test matrix, STOP conditions and machine gate.
 
 ## Current behavior / adjacent design
 
@@ -117,7 +138,7 @@ Current boundaries:
 - `WebAttentionCoordinator` owns transient Attention state;
 - `ChatGPTUnreadResponseCoordinator` / `UnreadResponseStore` own durable unread semantics;
 - `PanelController` composes completion handoff, presentation and exact Slot activation without becoming persistence owner;
-- Phase 3 notification coordinator owns only `UNUserNotificationCenter` projection/response plumbing;
+- Phase 3 notification coordinator owns notification policy/response parsing; its backend owns direct system Notification Center access;
 - `RuntimeDiagnostics` records evidence only and never becomes product truth.
 
 Public WebKit APIs do not provide reliable exact per-WebContent-process-to-Slot memory attribution. Diagnostics must preserve that limitation.
@@ -126,6 +147,7 @@ The historical WebContent stall/termination root cause remains `UNKNOWN`. Reload
 
 ## Completed / superseded Runtime Lifecycle documents
 
+- `FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V1.md` — superseded Phase 3 freeze evidence; V2 is active execution authority.
 - [`FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md) — delivered Phase 2 plan evidence; no longer active execution plan.
 - [`FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md`](FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md) — delivered Phase 2 test-scope evidence.
 - [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md) — historical program contract superseded by V3.
@@ -135,16 +157,6 @@ The historical WebContent stall/termination root cause remains `UNKNOWN`. Reload
 - [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md) — historical Phase 1 audit/plan evidence.
 
 Their facts/rationale remain useful where they do not conflict with current Authority.
-
-## Historical architecture references
-
-### `FloatTabs_Technical_Architecture_v1.2.md`
-
-Historical architecture baseline only. It contains deliberately preserved old assumptions. Verify present behavior in current source/tests.
-
-### `Stage_1_Interaction_Baseline.md`
-
-Historical pointer only. The complete original pre-Slot baseline is retained at [`archive/Stage_1_Interaction_Baseline.md`](archive/Stage_1_Interaction_Baseline.md).
 
 ## Rule
 
