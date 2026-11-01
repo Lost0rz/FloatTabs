@@ -106,6 +106,8 @@
 		A00000000000000000000078 /* SettingsInformationArchitecture.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000078 /* SettingsInformationArchitecture.swift */; };
 		A00000000000000000000079 /* SettingsInformationArchitectureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */; };
 		A00000000000000000000080 /* LongTermPerformanceObservationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000080 /* LongTermPerformanceObservationCoordinator.swift */; };
+		A00000000000000000000081 /* ChatGPTCompletionNotificationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000081 /* ChatGPTCompletionNotificationCoordinator.swift */; };
+		A00000000000000000000082 /* ChatGPTCompletionNotificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000082 /* ChatGPTCompletionNotificationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -220,6 +222,8 @@
 		B00000000000000000000078 /* SettingsInformationArchitecture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInformationArchitecture.swift; sourceTree = "<group>"; };
 		B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInformationArchitectureTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000080 /* LongTermPerformanceObservationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LongTermPerformanceObservationCoordinator.swift; sourceTree = "<group>"; };
+		B00000000000000000000081 /* ChatGPTCompletionNotificationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTCompletionNotificationCoordinator.swift; sourceTree = "<group>"; };
+		B00000000000000000000082 /* ChatGPTCompletionNotificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTCompletionNotificationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -278,6 +282,7 @@
 				B00000000000000000000060 /* AttentionSoundAssetStore.swift */,
 				B00000000000000000000035 /* AttentionSoundPlayer.swift */,
 				B00000000000000000000022 /* BenchmarkControlServer.swift */,
+				B00000000000000000000081 /* ChatGPTCompletionNotificationCoordinator.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -447,6 +452,7 @@
 				B0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift */,
 				B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */,
 				B00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift */,
+				B00000000000000000000082 /* ChatGPTCompletionNotificationTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -596,6 +602,7 @@
 				A00000000000000000000080 /* LongTermPerformanceObservationCoordinator.swift in Sources */,
 				A00000000000000000000003 /* AppCoordinator.swift in Sources */,
 				A00000000000000000000060 /* AttentionSoundAssetStore.swift in Sources */,
+				A00000000000000000000081 /* ChatGPTCompletionNotificationCoordinator.swift in Sources */,
 				A00000000000000000000035 /* AttentionSoundPlayer.swift in Sources */,
 				A00000000000000000000023 /* AppPreferencesStore.swift in Sources */,
 				A00000000000000000000063 /* UnreadResponseStore.swift in Sources */,
@@ -689,6 +696,7 @@
 				A0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift in Sources */,
 				A00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift in Sources */,
 				A00000000000000000000079 /* SettingsInformationArchitectureTests.swift in Sources */,
+				A00000000000000000000082 /* ChatGPTCompletionNotificationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
