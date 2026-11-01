@@ -659,12 +659,14 @@ final class SlotLifecycleCoordinator {
             }
 
             if profile.backgroundMediaPolicy == .allowBackgroundAudio {
+                self.mediaProtectionPendingSlotIDs.insert(profile.id)
                 self.mediaPlayingQuery(profile.id) { [weak self] isPlaying in
                     guard let self,
                           self.planMatches(plan, slotID: profile.id),
                           !self.isVisibleSlot(profile.id) else {
                         return
                     }
+                    self.mediaProtectionPendingSlotIDs.remove(profile.id)
                     guard !self.isProactivelyProtected(slotID: profile.id) else {
                         let protection = self.protectionState(slotID: profile.id)
                         self.recordProtectionObservations(
