@@ -10,7 +10,7 @@
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `PHASE_6_EXECUTION_STARTED / WP0_GATE0_REAL_MAC_PENDING / PRODUCT_MUTATION_HELD_PENDING_GATE0`.
+Current execution state: `PHASE_6_EXECUTION_ACTIVE / WP0_GATE0_OUTCOME_A_COMPLETE / PRODUCT_MUTATION_RELEASED / WP1_ACTIVE`.
 
 ## Canonical state
 
@@ -36,9 +36,10 @@ PHASE_6_CONTRACT=ACCEPTED / FROZEN
 PHASE_6_CONTRACT_RECORD=FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md
 PHASE_6_RECOMMENDATION=TWO-STAGE NATIVE RESTORE SHELL
 PHASE_6_EXECUTION_START=AUTHORIZED BY USER / 2026-11-01
-PHASE_6_GATE0=REAL-MAC INTERACTIONSTATE READINESS / PENDING
-PHASE_6_IMPLEMENTATION=NOT_STARTED
-PHASE_6_PRODUCT_MUTATION=HELD UNTIL GATE0 OUTCOME_A_OR_B
+PHASE_6_GATE0=COMPLETE / OUTCOME_A / NAVIGATION_BACKED_READINESS
+PHASE_6_GATE0_CORROBORATION=BOUNDED_CURRENT_RUNTIME_LIVENESS_SUCCESS
+PHASE_6_IMPLEMENTATION=WP1 ACTIVE
+PHASE_6_PRODUCT_MUTATION=RELEASED BY GATE0 OUTCOME_A
 PHASE_6_NEXT_USER_START_REQUIRED=NO
 TASK_RECONCILIATION_REQUIRED=NO
 PROGRAM_HUMAN_ACCEPTANCE=PENDING
@@ -63,33 +64,30 @@ selected/summoned reclaimed Slot
 
 The resident Slot fast path remains direct and does not pass through restoring UI.
 
-## Current Gate 0 state
+## Gate 0 result
 
-The future-start hold has been released by the user's explicit instruction on `2026-11-01`. The active task therefore continues directly under the frozen Phase 6 contract; no redesign or successor task is required.
+WP0 / Gate 0 completed on a Real Mac using an actually hibernated existing ChatGPT Slot. The verification made no source changes and restored the temporary product state afterward.
 
-Before any Phase 6 product-source mutation, WP0 / Gate 0 must still run on a Real Mac against an actually hibernated existing Slot and classify the real public behavior as one of:
+Observed compatible `interactionState` restore:
 
-- **Outcome A — navigation-backed readiness:** compatible `interactionState` restore exposes usable exact-current-Runtime navigation/loading callbacks;
-- **Outcome B — non-navigation readiness:** compatible `interactionState` restore does not reliably emit the same navigation sequence, but readiness is provable through a bounded public current-Runtime renderer/page observation;
-- **STOP:** no bounded public readiness fact exists, or correctness requires private API, arbitrary delays/polling, reload/double-navigation, persistence mutation, screenshots, extra resident WebViews or ownership changes.
+- `web_runtime.hibernate.completed` reported `interaction_state_present=true` and the target Slot left the resident set;
+- reactivation emitted `web_runtime.restore.begin` with `restore_source=interaction_state` and created a fresh Runtime identity;
+- the exact fresh Runtime emitted `navigation.provisional_started → navigation.commit → navigation.finished` with `stale=false`;
+- bounded cross-world liveness on that same Runtime later reported `runtime_context_current=true`, successful main/isolated-world probes, `ready_state=complete`, `is_loading=false`, `estimated_progress=1`, and finished-navigation facts;
+- focus recognition succeeded before and after commit;
+- no duplicate ordinary URL load, Browser Profile/session mutation, persistence reset, private API, arbitrary readiness timer or unbounded polling was required.
 
-Existing evidence plumbing is sufficient to execute WP0 without first changing product Runtime code:
+Therefore the frozen Gate 0 classification is **Outcome A — navigation-backed readiness**. Outcome B-style bounded observation also succeeded as corroboration, but Outcome A is the implementation trigger class.
 
-- the Debug benchmark control channel can select/show/hide/configure existing Slots;
-- `tools/benchmark/floattabs_lifecycle_benchmark.py` can drive a Cold Slot through actual hibernate/reclaim and later re-activate it;
-- current diagnostics already correlate `web_runtime.hibernate.completed`, `web_runtime.restore.begin`, `web_runtime.restore.completed`, fresh Runtime identity, and navigation callbacks;
-- current bounded renderer/liveness probes remain evidence only and do not mutate Browser Profile/session state.
-
-Gate 0 records only content-free timestamps/events. It must not log page text, screenshots, DOM content, cookies, session values or opaque interaction state.
-
-`web_runtime.restore.completed` alone is not readiness truth.
+`web_runtime.restore.completed` remains state-handoff evidence only; Phase 6 completion must use exact-current-Runtime navigation-backed readiness and current request/runtime revalidation.
 
 ## Frozen ownership / safety boundaries
 
 - `WebViewPool` remains live Runtime creation/hibernate/restore owner;
 - `SlotLifecycleCoordinator` remains sole Runtime lifecycle/budget executor;
-- `PanelController` remains presentation authority and owns Phase 6 materialization orchestration after Gate 0 passes;
+- `PanelController` remains presentation authority and owns Phase 6 materialization orchestration;
 - `WebPanelContainerView` may own only lightweight native restoring presentation;
+- `SlotNavigationObserver` may expose only the narrow Outcome-A readiness seam needed by the current owner;
 - `WebAttentionCoordinator` remains Attention authority;
 - Browser Profile/session/persistent user data remain unchanged;
 - Phase 4 Runtime budget remains unchanged;
@@ -111,6 +109,11 @@ The implementation contract owns Phase 6 execution scope; the audit remains evid
 
 ## Next action
 
-Execute WP0 / Gate 0 on the Real Mac first. If Gate 0 produces Outcome A or B and no STOP condition fires, continue directly with WP1–WP4 on the current Phase 6 implementation branch. If Gate 0 produces the STOP outcome, stop before product mutation and reconcile evidence.
+Continue the same task and PR directly through:
+
+1. WP1 — native restoring presentation in `WebPanelContainerView`;
+2. WP2 — two-stage `PanelController` materialization with stale-request generation and AppKit run-loop yield;
+3. WP3 — Outcome-A exact-current-Runtime navigation readiness completion;
+4. WP4 — focused/full tests, Debug/Release arm64, literal-head required CI, bounded Real-Mac smoke and independent exact-diff audit.
 
 The program-final human UI/runtime acceptance remains pending and is intentionally deferred until the integrated Phase 6 implementation and final independent audit are complete.

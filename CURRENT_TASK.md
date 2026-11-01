@@ -2,8 +2,8 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Title:** Runtime Lifecycle / Memory redesign — Phase 6 perceived-fast restore  
-**Status:** `ACTIVE / WP0 GATE0 REAL-MAC EVIDENCE`  
-**Mode:** `EXECUTION STARTED / PRODUCT MUTATION HELD PENDING GATE0`  
+**Status:** `ACTIVE / WP1 NATIVE RESTORING PRESENTATION`  
+**Mode:** `EXECUTION ACTIVE / PRODUCT MUTATION RELEASED BY GATE0 OUTCOME_A`  
 **Task class:** `WEB RUNTIME / RESTORE RESPONSIVENESS`  
 **JSC root cause:** `UNKNOWN`
 
@@ -19,9 +19,34 @@ Frozen implementation contract:
 
 `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`
 
-The user explicitly instructed FloatTabs to start remote Phase 6 construction on `2026-11-01`. That instruction releases the prior future-session execution hold. This remains the same task and same frozen contract; no successor task or redesign is required.
+The user explicitly instructed FloatTabs to start remote Phase 6 construction on `2026-11-01`. The mandatory WP0 / Gate 0 Real-Mac verification has now completed with **OUTCOME_A**. Product source/test mutation inside the frozen Phase 6 implementation boundary is therefore authorized; no successor task or redesign is required.
 
-The first executable work package is still mandatory WP0 / Gate 0. Until Gate 0 proves Outcome A or Outcome B, product source/test mutation is not authorized.
+## Gate 0 accepted evidence
+
+The Real-Mac verification used an actually hibernated existing Slot and returned the repository to its pre-run state with no source mutation.
+
+Accepted facts:
+
+```text
+hibernate completed with interaction_state_present=true
+→ target Runtime reclaimed from resident set
+→ reactivation used restore_source=interaction_state
+→ fresh Runtime identity created
+→ exact fresh Runtime emitted navigation.provisional_started
+→ navigation.commit
+→ navigation.finished
+→ stale=false for the observed callback sequence
+→ bounded exact-current-Runtime liveness also succeeded
+→ focus recognition succeeded
+```
+
+The fresh Runtime identity differed from the pre-hibernate Runtime identity. No duplicate ordinary URL load was observed. Browser Profile/session/persistent user data were not reset or rewritten.
+
+Classification: **Outcome A — navigation-backed readiness**.
+
+The existing bounded cross-world observation also succeeded and remains corroborating evidence, not a replacement truth owner.
+
+`web_runtime.restore.completed` alone remains insufficient readiness truth.
 
 ## Frozen objective
 
@@ -34,7 +59,7 @@ reclaimed Slot selected/summoned
 → revalidate current materialization request
 → existing WebViewPool creates/restores fresh Runtime
 → attach Runtime under restoring state
-→ evidence-backed current-Runtime readiness
+→ Outcome-A exact-current-Runtime navigation readiness
 → remove restoring state
 → existing focus/input ownership resumes
 ```
@@ -43,71 +68,25 @@ Resident Slot switching keeps the current direct fast path.
 
 ## Frozen ownership
 
-- `PanelController` — Phase 6 presentation/materialization orchestration and stale request generation after Gate 0 passes;
+- `PanelController` — Phase 6 presentation/materialization orchestration and stale request generation;
 - `WebPanelContainerView` — native restoring presentation only;
 - `WebViewPool` — existing Runtime creation/restore mechanism;
 - `SlotLifecycleCoordinator` — sole lifecycle/budget executor;
-- `SlotNavigationObserver` / existing Web Runtime seams — navigation/readiness evidence only if Gate 0 requires the narrow existing owner;
+- `SlotNavigationObserver` / existing Web Runtime seams — narrow navigation/readiness evidence only;
 - `WebFocusRouter` / existing Panel focus path — focus ownership unchanged;
 - `WebAttentionCoordinator` — Attention unchanged;
 - `RuntimeDiagnostics` — evidence only.
 
 No second Runtime lifecycle or presentation truth owner is authorized.
 
-## WP0 / Gate 0 — current active gate
-
-On a Real Mac, use an existing Slot that has actually been hibernated and record only content-free public facts:
-
-```text
-selection / summon request
-→ shell ordering boundary
-→ fresh WKWebView allocation
-→ interactionState assignment OR URL fallback classification
-→ navigation provisional / commit / finish callbacks, if any
-→ isLoading transitions, if observable
-→ bounded current-Runtime renderer/page readiness
-→ focus success/failure boundary
-```
-
-Do not record page text, screenshots, DOM content, cookies, session values or opaque interaction state.
-
-### Existing execution path
-
-Use current production/debug evidence plumbing first. The repository already provides:
-
-- the Debug loopback benchmark control channel for existing Slot `configure`, `activate`, `show` and `hide` operations;
-- `tools/benchmark/floattabs_lifecycle_benchmark.py`, which can drive Cold inactive Slots beyond the product grace window until they are actually hibernated/reclaimed and then re-activate them;
-- Runtime diagnostics for `web_runtime.hibernate.completed`, `web_runtime.restore.begin`, `web_runtime.restore.completed`, fresh Runtime identity and `navigation.provisional_started` / `navigation.commit` / `navigation.finished` callbacks;
-- bounded renderer/liveness probes that are evidence-only and must remain current-Runtime guarded.
-
-Do not add new product Runtime instrumentation merely to make Gate 0 easier unless the existing public evidence is genuinely insufficient; that insufficiency is a STOP/reconciliation condition under this frozen task.
-
-### Gate 0 allowed outcomes
-
-**Outcome A — navigation-backed readiness**
-
-A compatible `interactionState` restore exposes usable current-Runtime navigation/loading callbacks. Reuse only the exact-current-Runtime validated callback path as the trigger for the final bounded readiness check.
-
-**Outcome B — non-navigation readiness**
-
-A compatible `interactionState` restore does not reliably expose the same navigation sequence, but readiness can be established through a bounded public current-Runtime renderer/page observation without ownership drift or unbounded polling.
-
-**STOP outcome**
-
-Stop before product mutation if no bounded public readiness fact exists or if readiness would require private WebKit API, arbitrary fixed delays, unbounded polling, reload/double-navigation, Browser Profile/session mutation, screenshot persistence, extra resident WebViews, or materially different ownership.
-
-The restoring presentation may be removed only after the current materialization generation, current Slot and exact current Runtime all still match and the Gate 0-approved public readiness fact succeeds.
-
-`web_runtime.restore.completed` alone is not readiness truth.
-
-## Authorized implementation scope after Gate 0 PASS
+## Authorized implementation scope
 
 Expected production files:
 
 - `FloatTabs/Panel/PanelController.swift`
 - `FloatTabs/Web/WebViewContainer.swift`
-- `FloatTabs/Web/WebViewPool.swift` only for a narrow read-only query/result if needed; no semantic restore rewrite
-- `FloatTabs/Web/SlotNavigationObserver.swift` only if Gate 0 Outcome A proves a narrow existing-owner readiness seam is required
+- `FloatTabs/Web/WebViewPool.swift` only for a narrow read-only/query/callback seam if needed; no semantic restore rewrite
+- `FloatTabs/Web/SlotNavigationObserver.swift` only for the narrow Outcome-A readiness seam if required
 
 Expected tests:
 
@@ -132,30 +111,29 @@ Any additional production file with material semantic responsibility requires ST
 11. No page screenshot or opaque interaction state is persisted/logged.
 12. No arbitrary fixed timer becomes readiness truth.
 13. Existing focus/fullscreen ownership remains canonical.
+14. Outcome-A readiness completion must correlate the current materialization generation, current Slot and exact current Runtime before removing restoring UI.
 
 ## Work packages
 
-### WP0 — Gate 0 evidence — ACTIVE
+### WP0 — Gate 0 evidence — COMPLETE / OUTCOME_A
 
-Real-Mac readiness classification. Evidence/control only; no product source mutation.
+Real-Mac evidence established navigation-backed readiness on an exact fresh current Runtime. No product-source mutation occurred during verification.
 
-### WP1 — native restoring presentation
+### WP1 — native restoring presentation — ACTIVE
 
-Add the bounded native restoring surface to `WebPanelContainerView` with focused deterministic tests.
-
-Dependency: WP0 PASS.
+Add the bounded native restoring surface to `WebPanelContainerView` with focused deterministic tests. The surface must be lightweight, contain no page/user data, and remain visually above a newly attached restoring WebView until the current request reaches the approved readiness boundary.
 
 ### WP2 — two-stage orchestration
 
-Update `PanelController` so the native shell/restoring state is presented before reclaimed Runtime materialization and stale request generations are rejected.
+Update `PanelController` so a visible reclaimed Slot first presents native shell/restoring state, returns to the AppKit run loop, then materializes through the existing `WebViewPool`. Add a private materialization generation/request and reject stale selection/dismiss/fullscreen/reset work.
 
-Dependency: WP0 PASS + WP1.
+Dependency: WP1.
 
 ### WP3 — readiness completion
 
-Wire the Gate 0 Outcome A/B fact into current-Runtime restore completion using the smallest existing owner/seam.
+Wire Outcome A through the smallest existing navigation owner/seam. A navigation callback may complete restoring presentation only when the materialization generation, active Slot and exact pooled Runtime all still match. No timer, reload or duplicate navigation may become readiness truth.
 
-Dependency: WP0 classification + WP1/WP2.
+Dependency: WP1/WP2.
 
 ### WP4 — verification and merge readiness
 
@@ -165,7 +143,7 @@ This work-package structure is not a mandated Sub Agent topology.
 
 ## Verification gates
 
-1. **Gate 0 Real-Mac evidence:** Outcome A or B; otherwise STOP.
+1. **Gate 0 Real-Mac evidence:** PASS / Outcome A.
 2. **Focused correctness:** resident fast path, restoring-before-materialization ordering, stale request rejection, dismiss/switch/fullscreen boundaries, current-request-only completion, unchanged restore/session invariants.
 3. **Full XCTest:** no Phase 6 regressions.
 4. **Debug + Release + native arm64:** PASS.
@@ -185,7 +163,7 @@ Merge readiness requires all of the following:
 - no extra persistent WebView residency;
 - stale materialization work cannot affect a newer selection/presentation;
 - interaction-state restore/session safety remains intact;
-- readiness is based on Gate 0-proven public bounded evidence;
+- restoring-state dismissal uses Outcome-A exact-current-Runtime navigation readiness;
 - Phase 4 budget semantics remain unchanged;
 - no screenshot/page-content/opaque-state persistence/logging;
 - focused/full tests and builds pass;
@@ -224,8 +202,7 @@ STOP/reconcile if execution requires:
 - Attention semantics change;
 - unresolved fullscreen source ownership outside the current session-lock boundary;
 - material production scope outside the frozen paths;
-- release/version work;
-- product source mutation before Gate 0 Outcome A/B.
+- release/version work.
 
 ## Current execution state
 
@@ -233,14 +210,18 @@ STOP/reconcile if execution requires:
 PHASE_6_AUDIT=COMPLETE
 PHASE_6_CONTRACT=ACCEPTED / FROZEN
 SELECTED_OPTION=TWO_STAGE_NATIVE_RESTORE_SHELL
-READINESS_POLICY=GATE0_EVIDENCE_BOUND
+READINESS_POLICY=OUTCOME_A_NAVIGATION_BACKED_EXACT_CURRENT_RUNTIME
 EXECUTION_START_RELEASED=YES / 2026-11-01
-WP0_GATE0=ACTIVE / REAL_MAC_EVIDENCE_PENDING
-PRODUCT_IMPLEMENTATION=NOT_STARTED
-PRODUCT_MUTATION=HELD_PENDING_GATE0
+WP0_GATE0=COMPLETE / OUTCOME_A
+WP1_NATIVE_RESTORING_PRESENTATION=ACTIVE
+WP2_TWO_STAGE_ORCHESTRATION=PENDING
+WP3_READINESS_COMPLETION=PENDING
+WP4_VERIFICATION=PENDING
+PRODUCT_IMPLEMENTATION=STARTED
+PRODUCT_MUTATION=AUTHORIZED_WITHIN_FROZEN_SCOPE
 NEXT_USER_START_REQUIRED=NO
 TASK_RECONCILIATION_REQUIRED=NO
 PROGRAM_HUMAN_ACCEPTANCE=PENDING
 ```
 
-Next action: execute WP0 / Gate 0 on the Real Mac. Continue directly into WP1–WP4 only after Outcome A or Outcome B is proven and no STOP condition fires.
+Next action: implement WP1, then continue directly through WP2/WP3 on the same branch and PR before WP4 verification.
