@@ -176,6 +176,8 @@ Use focused tests first. Increase verification for changes involving:
 
 Real macOS interaction/runtime changes require relevant runtime acceptance; static review alone is insufficient.
 
+For timing-sensitive real-product interaction acceptance, prefer a concentrated user-owned human acceptance pass after machine implementation, tests/builds, repository CI, and independent audit are complete. Local AI/Computer Use may assist debugging or evidence collection when explicitly needed, but should not impersonate the final human acceptance operator or block construction solely because an AI-driven UI smoke is awkward to reproduce, unless the current task explicitly requires that machine-run interaction as a separate gate.
+
 Before merge/release, separately confirm current PR base/head, exact diff, required CI, reviews/mergeability, task scope, Authority integrity, and applicable runtime acceptance. Repository-host gates apply to the literal identity GitHub governs and cannot be inferred from older semantic evidence.
 
 ## CI execution
