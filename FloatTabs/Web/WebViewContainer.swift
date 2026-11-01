@@ -1064,12 +1064,8 @@ final class WebPanelContainerView: NSView {
         slotID: UUID,
         residencyPolicy: SlotResidencyPolicy
     ) {
-        switch residencyPolicy {
-        case .hot:
-            showHot(webView: webView, slotID: slotID)
-        case .warm, .cold:
-            showTransient(webView: webView, slotID: slotID)
-        }
+        _ = residencyPolicy // legacy call-site projection only
+        showTransient(webView: webView, slotID: slotID)
     }
 
     // MARK: Phase 6 restoring presentation
@@ -1122,31 +1118,17 @@ final class WebPanelContainerView: NSView {
     }
 
     func deactivate(slotID: UUID, residencyPolicy: SlotResidencyPolicy) {
+        _ = residencyPolicy // legacy call-site projection only
         guard activeSlotID == slotID else { return }
-
-        switch residencyPolicy {
-        case .hot:
-            if let host = hotHostViews[slotID] {
-                // Freeze the outgoing Hot viewport before another Slot changes
-                // the panel size. Only an active Hot host follows live resizing.
-                //
-                // Keep the independent host and WKWebView attached so Hot keeps
-                // its DOM/SPA/runtime state, but stop presenting an inactive Hot
-                // page. Reactivation unhides this exact same host in `showHot`.
-                host.autoresizingMask = []
-                host.isHidden = true
-            }
-        case .warm, .cold:
-            detachHostedTransientIfOwned()
-        }
-
+        detachHostedTransientIfOwned()
         activeSlotID = nil
         activeWebView = nil
     }
 
     func retainHotSlots(_ validHotSlotIDs: Set<UUID>) {
-        let staleHotSlotIDs = hotHostViews.keys.filter { !validHotSlotIDs.contains($0) }
-        for slotID in staleHotSlotIDs {
+        _ = validHotSlotIDs
+        // Compatibility cleanup only. Phase 7 never creates Hot hosts.
+        for slotID in Array(hotHostViews.keys) {
             guard let host = hotHostViews.removeValue(forKey: slotID) else { continue }
             host.detachOwnedWebView()
             host.removeFromSuperview()

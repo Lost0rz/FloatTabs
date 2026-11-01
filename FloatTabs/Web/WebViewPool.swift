@@ -651,20 +651,35 @@ final class WebViewPool {
         Set(webViews.keys)
     }
 
-    /// Read-only residency metadata for diagnostics. Lifecycle remains the
-    /// sole owner of release decisions.
+    /// Legacy projection retained for protocol/diagnostic compatibility.
     func residencyPolicy(for slotID: UUID) -> SlotResidencyPolicy? {
         residencyPolicyProvider(slotID)
+    }
+
+    func runtimeRetentionPreference(for slotID: UUID) -> SlotRuntimeRetentionPreference? {
+        residencyPolicyProvider(slotID).map(SlotRuntimeRetentionPreference.init(legacy:))
+    }
+
+    static func recoveryDisposition(
+        isActive: Bool,
+        runtimeRetentionPreference: SlotRuntimeRetentionPreference?
+    ) -> WebContentRecoveryDisposition {
+        if isActive || runtimeRetentionPreference == .keepLoaded {
+            return .reloadNow
+        }
+        return .deferUntilActivation
     }
 
     static func recoveryDisposition(
         isActive: Bool,
         residencyPolicy: SlotResidencyPolicy?
     ) -> WebContentRecoveryDisposition {
-        if isActive || residencyPolicy == .hot {
-            return .reloadNow
-        }
-        return .deferUntilActivation
+        recoveryDisposition(
+            isActive: isActive,
+            runtimeRetentionPreference: residencyPolicy.map(
+                SlotRuntimeRetentionPreference.init(legacy:)
+            )
+        )
     }
 
     private func handleIncidentRequest(
@@ -684,7 +699,7 @@ final class WebViewPool {
     ) {
         guard let webView = webViews[slotID] else { return }
         let isActive = isSlotActive(slotID)
-        let residencyPolicy = residencyPolicyProvider(slotID)
+        let runtimeRetentionPreference = runtimeRetentionPreference(for: slotID)
         let pendingIncidentContext = pendingTerminationIncidentContexts.removeValue(forKey: slotID)
         let incidentContext = suppliedIncidentContext
             ?? pendingIncidentContext
@@ -723,7 +738,7 @@ final class WebViewPool {
 
         switch Self.recoveryDisposition(
             isActive: isActive,
-            residencyPolicy: residencyPolicy
+            runtimeRetentionPreference: runtimeRetentionPreference
         ) {
         case .reloadNow:
             deferredReloadSlotIDs.remove(slotID)

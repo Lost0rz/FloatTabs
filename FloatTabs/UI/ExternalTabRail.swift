@@ -934,7 +934,8 @@ final class ExternalControlZoneView: NSView {
     var onSetWebsiteMode: ((UUID, WebsiteMode) -> Void)?
     var onSetWindowSize: ((UUID, SimpleViewportPreset) -> Void)?
     var onSetZoom: ((UUID, CGFloat) -> Void)?
-    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?
+    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)? // legacy command/test seam
+    var onSetRuntimeRetention: ((UUID, SlotRuntimeRetentionPreference) -> Void)?
     var onSetBackgroundMedia: ((UUID, BackgroundMediaPolicy) -> Void)?
     var onSetBrowserProfile: ((UUID, UUID?) -> Void)?
     var onOpenInNewTabWithBrowserProfile: ((UUID, UUID?) -> Void)?
@@ -1389,8 +1390,8 @@ final class ExternalControlZoneView: NSView {
         view.onSetZoom = { [weak self] slotID, zoom in
             self?.onSetZoom?(slotID, zoom)
         }
-        view.onSetResidency = { [weak self] slotID, policy in
-            self?.onSetResidency?(slotID, policy)
+        view.onSetRuntimeRetention = { [weak self] slotID, preference in
+            self?.onSetRuntimeRetention?(slotID, preference)
         }
         view.onSetBackgroundMedia = { [weak self] slotID, policy in
             self?.onSetBackgroundMedia?(slotID, policy)
@@ -2263,7 +2264,8 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     var onSetWebsiteMode: ((UUID, WebsiteMode) -> Void)?
     var onSetWindowSize: ((UUID, SimpleViewportPreset) -> Void)?
     var onSetZoom: ((UUID, CGFloat) -> Void)?
-    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?
+    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)? // legacy command/test seam
+    var onSetRuntimeRetention: ((UUID, SlotRuntimeRetentionPreference) -> Void)?
     var onSetBackgroundMedia: ((UUID, BackgroundMediaPolicy) -> Void)?
     var onSetBrowserProfile: ((UUID, UUID?) -> Void)?
     var onOpenInNewTabWithBrowserProfile: ((UUID, UUID?) -> Void)?
@@ -2289,7 +2291,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     private var mouseDownLocation: NSPoint?
     private var isDragging = false
     private var renderingProfile: WebRenderingProfile = .canonicalDefault
-    private var residencyPolicy: SlotResidencyPolicy = .warm
+    private var runtimeRetentionPreference: SlotRuntimeRetentionPreference = .automatic
     private var windowSizeEditingEnabled = true
     private var backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive
     private var webAppName = ""
@@ -2522,7 +2524,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         webAppName = profile.name
         browserProfileID = profile.browserProfileID
         renderingProfile = profile.renderingProfile.normalized()
-        residencyPolicy = profile.residencyPolicy
+        runtimeRetentionPreference = profile.runtimeRetentionPreference
         backgroundMediaPolicy = profile.backgroundMediaPolicy
         loadFaviconIfNeeded(from: profile.homeURL)
         refreshProfilePresentation()
@@ -2749,17 +2751,25 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         duplicateProfile.submenu = duplicateProfileMenu
         menu.addItem(duplicateProfile)
 
-        let residency = NSMenuItem(title: "Residency", action: nil, keyEquivalent: "")
-        let residencyMenu = NSMenu(title: "Residency")
-        for policy in SlotResidencyPolicy.allCases {
-            let item = NSMenuItem(title: policy.displayName, action: #selector(setResidencyFromMenu(_:)), keyEquivalent: "")
+        let runtimeRetention = NSMenuItem(
+            title: "Runtime Retention",
+            action: nil,
+            keyEquivalent: ""
+        )
+        let runtimeRetentionMenu = NSMenu(title: "Runtime Retention")
+        for preference in SlotRuntimeRetentionPreference.allCases {
+            let item = NSMenuItem(
+                title: preference.displayName,
+                action: #selector(setRuntimeRetentionFromMenu(_:)),
+                keyEquivalent: ""
+            )
             item.target = self
-            item.representedObject = policy.rawValue
-            item.state = policy == residencyPolicy ? .on : .off
-            residencyMenu.addItem(item)
+            item.representedObject = preference.rawValue
+            item.state = preference == runtimeRetentionPreference ? .on : .off
+            runtimeRetentionMenu.addItem(item)
         }
-        residency.submenu = residencyMenu
-        menu.addItem(residency)
+        runtimeRetention.submenu = runtimeRetentionMenu
+        menu.addItem(runtimeRetention)
 
         let media = NSMenuItem(title: "Background Media", action: nil, keyEquivalent: "")
         let mediaMenu = NSMenu(title: "Background Media")
@@ -2840,10 +2850,10 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         onManageBrowserProfiles?()
     }
 
-    @objc private func setResidencyFromMenu(_ sender: NSMenuItem) {
+    @objc private func setRuntimeRetentionFromMenu(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
-              let policy = SlotResidencyPolicy(rawValue: raw) else { return }
-        onSetResidency?(slotID, policy)
+              let preference = SlotRuntimeRetentionPreference(rawValue: raw) else { return }
+        onSetRuntimeRetention?(slotID, preference)
     }
 
     @objc private func setBackgroundMediaFromMenu(_ sender: NSMenuItem) {

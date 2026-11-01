@@ -42,6 +42,38 @@ enum SlotResidencyPolicy: String, Codable, CaseIterable, Equatable {
     }
 }
 
+enum SlotRuntimeRetentionPreference: String, Codable, CaseIterable, Equatable {
+    case automatic
+    case keepLoaded
+
+    var displayName: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .keepLoaded: return "Keep Loaded"
+        }
+    }
+
+    var detailText: String {
+        switch self {
+        case .automatic:
+            return "Manage this Runtime automatically. Inactive Runtime may be reclaimed and restored on demand."
+        case .keepLoaded:
+            return "Prefer to keep an already loaded inactive Runtime during normal operation. Critical memory pressure may still reclaim it."
+        }
+    }
+
+    init(legacy residencyPolicy: SlotResidencyPolicy) {
+        self = residencyPolicy == .hot ? .keepLoaded : .automatic
+    }
+
+    var legacyProjection: SlotResidencyPolicy {
+        switch self {
+        case .automatic: return .warm
+        case .keepLoaded: return .hot
+        }
+    }
+}
+
 enum BackgroundMediaPolicy: String, Codable, CaseIterable, Equatable {
     case pauseWhenInactive
     case allowBackgroundAudio
@@ -70,7 +102,14 @@ struct WebAppProfile: Codable, Identifiable, Equatable {
     /// eligible for automatic downgrade.
     var homeURLSchemeWasInferred: Bool
     var renderingProfile: WebRenderingProfile
-    var residencyPolicy: SlotResidencyPolicy
+    var runtimeRetentionPreference: SlotRuntimeRetentionPreference
+
+    /// Rollback/protocol compatibility only. Current product lifecycle decisions
+    /// must use `runtimeRetentionPreference`.
+    var residencyPolicy: SlotResidencyPolicy {
+        get { runtimeRetentionPreference.legacyProjection }
+        set { runtimeRetentionPreference = SlotRuntimeRetentionPreference(legacy: newValue) }
+    }
     var backgroundMediaPolicy: BackgroundMediaPolicy
     var createdAt: Date
     var lastUsedAt: Date
@@ -84,7 +123,8 @@ struct WebAppProfile: Codable, Identifiable, Equatable {
         currentURL: URL? = nil,
         homeURLSchemeWasInferred: Bool = false,
         renderingProfile: WebRenderingProfile = .canonicalDefault,
-        residencyPolicy: SlotResidencyPolicy = .warm,
+        runtimeRetentionPreference: SlotRuntimeRetentionPreference = .automatic,
+        residencyPolicy: SlotResidencyPolicy? = nil,
         backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive,
         createdAt: Date = Date(),
         lastUsedAt: Date = Date()
@@ -97,7 +137,9 @@ struct WebAppProfile: Codable, Identifiable, Equatable {
         self.currentURL = currentURL
         self.homeURLSchemeWasInferred = homeURLSchemeWasInferred
         self.renderingProfile = renderingProfile
-        self.residencyPolicy = residencyPolicy
+        self.runtimeRetentionPreference = residencyPolicy.map {
+            SlotRuntimeRetentionPreference(legacy: $0)
+        } ?? runtimeRetentionPreference
         self.backgroundMediaPolicy = backgroundMediaPolicy
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
@@ -114,6 +156,7 @@ extension WebAppProfile {
         case currentURL
         case homeURLSchemeWasInferred
         case renderingProfile
+        case runtimeRetentionPreference
         case residencyPolicy
         case backgroundMediaPolicy
         case createdAt
@@ -135,10 +178,19 @@ extension WebAppProfile {
             forKey: .homeURLSchemeWasInferred
         ) ?? false
         renderingProfile = try container.decode(WebRenderingProfile.self, forKey: .renderingProfile)
-        residencyPolicy = try container.decodeIfPresent(
+        if let currentPreference = try container.decodeIfPresent(
+            SlotRuntimeRetentionPreference.self,
+            forKey: .runtimeRetentionPreference
+        ) {
+            runtimeRetentionPreference = currentPreference
+        } else if let legacyPolicy = try container.decodeIfPresent(
             SlotResidencyPolicy.self,
             forKey: .residencyPolicy
-        ) ?? .warm
+        ) {
+            runtimeRetentionPreference = SlotRuntimeRetentionPreference(legacy: legacyPolicy)
+        } else {
+            runtimeRetentionPreference = .automatic
+        }
         backgroundMediaPolicy = try container.decodeIfPresent(
             BackgroundMediaPolicy.self,
             forKey: .backgroundMediaPolicy
@@ -157,7 +209,14 @@ extension WebAppProfile {
         try container.encodeIfPresent(currentURL, forKey: .currentURL)
         try container.encode(homeURLSchemeWasInferred, forKey: .homeURLSchemeWasInferred)
         try container.encode(renderingProfile, forKey: .renderingProfile)
-        try container.encode(residencyPolicy, forKey: .residencyPolicy)
+        try container.encode(
+            runtimeRetentionPreference,
+            forKey: .runtimeRetentionPreference
+        )
+        try container.encode(
+            runtimeRetentionPreference.legacyProjection,
+            forKey: .residencyPolicy
+        )
         try container.encode(backgroundMediaPolicy, forKey: .backgroundMediaPolicy)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(lastUsedAt, forKey: .lastUsedAt)

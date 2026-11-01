@@ -136,7 +136,7 @@ final class TabStore {
             currentURL: homeURL,
             homeURLSchemeWasInferred: false,
             renderingProfile: source.renderingProfile.normalized(),
-            residencyPolicy: source.residencyPolicy,
+            runtimeRetentionPreference: source.runtimeRetentionPreference,
             backgroundMediaPolicy: source.backgroundMediaPolicy,
             createdAt: now,
             lastUsedAt: now
@@ -297,7 +297,7 @@ final class TabStore {
             currentURL: source.currentURL.flatMap { WebAppURL.isSafe($0) ? $0 : nil } ?? source.homeURL,
             homeURLSchemeWasInferred: source.homeURLSchemeWasInferred,
             renderingProfile: source.renderingProfile.normalized(),
-            residencyPolicy: source.residencyPolicy,
+            runtimeRetentionPreference: source.runtimeRetentionPreference,
             backgroundMediaPolicy: source.backgroundMediaPolicy,
             createdAt: now,
             lastUsedAt: now
@@ -379,21 +379,39 @@ final class TabStore {
     }
 
     @discardableResult
+    func updateRuntimeRetentionPreference(
+        id: UUID,
+        preference: SlotRuntimeRetentionPreference
+    ) -> Bool {
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
+        guard profiles[index].runtimeRetentionPreference != preference else { return true }
+        return persistConfigurationMutation {
+            profiles[index].runtimeRetentionPreference = preference
+            return true
+        }
+    }
+
+    /// Legacy command/backup compatibility adapter. New product UI writes the
+    /// canonical runtime-retention preference directly.
+    @discardableResult
     func updateResourcePolicy(
         id: UUID,
         residencyPolicy: SlotResidencyPolicy? = nil,
         backgroundMediaPolicy: BackgroundMediaPolicy? = nil
     ) -> Bool {
         guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
-        let residencyChanged = residencyPolicy.map { profiles[index].residencyPolicy != $0 } ?? false
+        let retentionPreference = residencyPolicy.map(SlotRuntimeRetentionPreference.init(legacy:))
+        let retentionChanged = retentionPreference.map {
+            profiles[index].runtimeRetentionPreference != $0
+        } ?? false
         let mediaChanged = backgroundMediaPolicy.map {
             profiles[index].backgroundMediaPolicy != $0
         } ?? false
-        guard residencyChanged || mediaChanged else { return true }
+        guard retentionChanged || mediaChanged else { return true }
 
         return persistConfigurationMutation {
-            if let residencyPolicy {
-                profiles[index].residencyPolicy = residencyPolicy
+            if let retentionPreference {
+                profiles[index].runtimeRetentionPreference = retentionPreference
             }
             if let backgroundMediaPolicy {
                 profiles[index].backgroundMediaPolicy = backgroundMediaPolicy
