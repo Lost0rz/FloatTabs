@@ -23,7 +23,7 @@ Current stage:
 ~~~text
 WP1 exact-Runtime cold-presentation gate = MERGED / COMPLETE
 → WP2 control/design bootstrap and staged Automatic lifecycle = ACTIVE
-→ source mutation only after remote bootstrap verification
+→ source implementation active after remote bootstrap verification
 → WP3 scheduling and WP4 integration remain separate
 ~~~
 

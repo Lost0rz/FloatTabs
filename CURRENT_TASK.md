@@ -3,12 +3,12 @@
 **Task ID:** FT-ADAPTIVE-LIFECYCLE-RESTORE-001
 **Card ID:** FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001
 **Title:** Replace fixed-count normal Runtime reclaim with staged Automatic lifecycle
-**Status:** ACTIVE / WP2 CONTROL BOOTSTRAP
-**Mode:** CONTROL/DESIGN FIRST; SOURCE MUTATION GATED ON REMOTE VERIFICATION
+**Status:** ACTIVE / WP2 IMPLEMENTATION AUTHORIZED
+**Mode:** SOURCE IMPLEMENTATION / ONE DRAFT PR / NO MERGE OR RELEASE
 **Task class:** WEB RUNTIME / LIFECYCLE POLICY
 **Baseline:** origin/main@2a52800f770266f7c901eb612a0b319ddca142df
 **Branch:** codex/adaptive-lifecycle-wp2-policy
-**PR:** one new Draft PR after bootstrap; do not reuse PR #194
+**PR:** #195 OPEN / DRAFT; do not reuse PR #194
 
 ## Authorization
 
@@ -55,6 +55,19 @@ Before product source mutation:
 6. Create one Draft PR separate from PR #194.
 
 Product source mutation is authorized only after step 5 is remotely verified. The control bootstrap must not include source or test changes.
+
+## Bootstrap completion
+
+The control/design-only bootstrap is remotely verified:
+
+~~~text
+CONTROL_BOOTSTRAP_HEAD=e289171eff3d5045c48a86c229b7967e126ec087
+REMOTE_REF=origin/codex/adaptive-lifecycle-wp2-policy
+REMOTE_DELIVERY=PUSHED_VERIFIED
+WP2_DRAFT_PR=195 / OPEN / DRAFT
+~~~
+
+The required source-mutation gate is satisfied. Continue implementation on this branch and PR only.
 
 ## Implementation boundary
 

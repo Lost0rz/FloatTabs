@@ -37,7 +37,7 @@ Current stage:
 WP1 canonical cold-presentation gate = MERGED / COMPLETE
 WP2 staged Automatic lifecycle = ACTIVE
 WP2 control/design bootstrap = FIRST
-WP2 source mutation = GATED ON REMOTE BOOTSTRAP VERIFICATION
+WP2 source implementation = ACTIVE after remote bootstrap verification
 WP3 scheduling mutation = NOT STARTED
 WP4 integration mutation = NOT STARTED
 ~~~
