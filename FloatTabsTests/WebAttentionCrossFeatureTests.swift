@@ -2041,11 +2041,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), webInteractionRegained ? .idle : .ready)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
-        if webInteractionRegained {
-    XCTAssertNil(controller.debugInactivePlanToken(slotID: slot.id))
-} else {
-    XCTAssertNotNil(controller.debugInactivePlanToken(slotID: slot.id))
-}
+        XCTAssertNil(controller.debugInactivePlanToken(slotID: slot.id))
 
         try select(named: "Plain", in: store)
         XCTAssertEqual(controller.debugPendingWarmReleaseCount, 1)
