@@ -1,70 +1,87 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-11-03
-**Repository:** Lost0rz/FloatTabs
-**Default branch:** main
+**Status date:** 2026-11-03  
+**Repository:** `Lost0rz/FloatTabs`  
+**Default branch:** `main`
 
 ## Mode
 
-**MODE: ADAPTIVE LIFECYCLE — WP2 STAGED AUTOMATIC POLICY**
+**MODE: ADAPTIVE LIFECYCLE — WP2 CORRECTIVE / MACHINE GATE**
 
-Current task: FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / card FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001 — ACTIVE.
+Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / WP2-001` — **ACTIVE / CORRECTIVE AUTHORIZED**.
 
-Execution branch:
+Branch: `codex/adaptive-lifecycle-wp2-policy`  
+Draft PR: `#195`  
+Baseline: `main@2a52800f770266f7c901eb612a0b319ddca142df`  
+Control/design bootstrap: `e289171eff3d5045c48a86c229b7967e126ec087`  
+WP2 implementation evidence head: `647178030b5a448916537745e7a993e4eca0a238`  
+Durable policy: `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`
 
-codex/adaptive-lifecycle-wp2-policy
+## Repository / gate state
 
-Execution baseline:
-
-main@2a52800f770266f7c901eb612a0b319ddca142df
-
-Control/design authority:
-
-docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md
-
-## Verified repository state
-
-~~~text
-PR_194=MERGED
-PR_194_MERGE_COMMIT=2a52800f770266f7c901eb612a0b319ddca142df
-ORIGIN_MAIN=2a52800f770266f7c901eb612a0b319ddca142df
+```text
 WP1=COMPLETE / HUMAN_ACCEPTED
-WP2=ACTIVE
-WP2_CONTROL_BOOTSTRAP=PUSHED_VERIFIED
-WP2_CONTROL_BOOTSTRAP_HEAD=e289171eff3d5045c48a86c229b7967e126ec087
-WP2_SOURCE_MUTATION=IMPLEMENTED / LOCAL_MACHINE_GATES_PASS
-WP2_DRAFT_PR=195 / OPEN / DRAFT
-HUMAN_UI_ACCEPTANCE=PENDING / USER_OWNED
+WP2_FIXED_RESIDENT_COUNT=REMOVED
+WP2_STAGED_AUTOMATIC_POLICY=IMPLEMENTED
+LOCAL_FOCUSED_TESTS=PASS (589 run / 4 skipped / 0 failed)
+LOCAL_FULL_XCTEST=PASS (1160 run / 4 skipped / 0 failed)
+LOCAL_DEBUG_RELEASE_ARM64=PASS
+PACKAGE_LOCK=UNCHANGED
+EXACT_HEAD_SELF_HOSTED_CI=PASS / 41481345174
+EXACT_HEAD_QA_DMG=FAIL / 41481345149
+INDEPENDENT_AUDIT=STOP / IMPORTANT
+HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
+PR_195=OPEN_DRAFT_UNMERGED
 WP3_SCHEDULING_MUTATION=NOT_STARTED
 WP4_OTHER_MUTATION=NOT_STARTED
-PRIVATE_WEBKIT_SPI=FORBIDDEN
-~~~
+```
 
-The WP1 branch/worktree is preserved and not reused for WP2. The new WP2 worktree was created cleanly from the verified post-merge origin/main. Existing relevant worktrees had no local-only commits or uncommitted tracked/untracked changes at preflight; no existing branch or worktree was overwritten.
+## Verified corrective blockers
 
-## WP1 regression boundary
+### A. Hosted QA Release compile compatibility
 
-PR #194 completed the canonical cold-presentation gate and exact-Runtime readiness. The accepted contract is [Adaptive Lifecycle Restore Contract V2](docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md). Its presentation, restore, focus, unread, notification-route, and data-safety behavior remains a WP2 regression boundary.
+The exact-head hosted QA DMG build fails under Xcode 26.6 Release/WMO at `FloatTabs/Web/SlotLifecycleCoordinator.swift:1052`:
 
-## WP2 policy
+```text
+let stage = plan.map { stage(forInactiveSince: $0.inactiveSinceUptime) }
+```
 
-Normal residency no longer uses a fixed Runtime count. Keep Loaded / Pinned is never automatically reclaimed. Automatic Slots use RECENT (<30s), IDLE (30s to <600s), and LONG_IDLE (>=600s) stages. Under normal pressure, only an inactive unprotected LONG_IDLE Automatic Runtime may hibernate. Warning reclaims eligible IDLE/LONG_IDLE Automatic progressively; critical may include RECENT Automatic. Both pressure paths revalidate fresh facts after each step and exclude Keep Loaded and hard-protected Runtime.
+The compiler resolves `Optional.map` through SwiftUI `Optional: Gesture` overloads and cannot infer the closure. The local and self-hosted builds passing do not transfer to this hosted Release identity. Corrective must make this expression unambiguous without changing lifecycle semantics.
 
-600s is an initial implementation default, not a permanent product invariant. The 30s boundary is anti-thrash protection, not destructive lifetime. SlotLifecycleCoordinator remains the sole lifecycle policy writer. Full requirements and regressions are in Policy V7 and CURRENT_TASK.md.
+### B. Progressive pressure stale-plan continuation
 
-The WP1 human run observed fixed-count normal eviction while three Automatic Runtime instances were in use. At the new baseline, lifecycle source still contains defaultManagedResidentTarget=2, count-based decisions, an approximately 30s release path, and a critical path that can reclaim inactive Keep Loaded. These are the WP2 baseline facts to replace.
+The async media-validation path owns `pressureReclaimEvaluationToken`, clears it on callback, then validates the captured inactive plan. If that captured plan is stale while pressure is still warning/critical, the current guard returns without restarting progressive candidate selection. Another eligible Automatic Runtime can therefore remain unreclaimed until some unrelated later lifecycle event re-enters pressure evaluation.
 
-## Current execution
+The exact-head `isPlaying == true` branch itself already marks media protection and schedules pressure continuation; it is **not** the remaining defect. Corrective scope is stale/invalidated async evaluation and equivalent owned-evaluation exits under sustained pressure.
 
-~~~text
-control/design bootstrap = remotely verified at e289171eff3d5045c48a86c229b7967e126ec087
-WP2 Draft PR = #195 / OPEN / DRAFT
-source implementation = active on codex/adaptive-lifecycle-wp2-policy
-focused lifecycle/cross-feature/pool/ExternalShell/WP1 presentation/notification/diagnostic/privacy/preference/cache suites = PASS (589 run / 4 skipped / 0 failed)
-full XCTest = PASS (1,160 run / 4 skipped / 0 failed)
-Debug/Release arm64 builds = PASS; Release binary architecture = arm64
-Package lock = unchanged after locked resolution
-exact-head CI/QA and independent audit = PENDING
-~~~
+### C. V7 deterministic time-test contract
 
-The WP2 source changes are local and not yet pushed. Do not merge the WP2 PR or release. Human UI acceptance remains user-owned and pending.
+Policy V7 requires lifecycle-stage tests to inject time rather than wait in real time. Production currently reads `ProcessInfo.processInfo.systemUptime` directly and at least one stage-boundary test still depends on real waiting. Machine evidence is therefore incomplete against the frozen test contract. Add a bounded monotonic-time/test scheduling seam sufficient to test RECENT → IDLE → LONG_IDLE deterministically without changing production policy timings.
+
+## Preserved WP2 policy
+
+- normal Runtime count is never a reclaim reason;
+- Keep Loaded / Pinned is never automatically reclaimed by normal, warning, or critical FloatTabs policy;
+- Automatic stages remain RECENT `<30s`, IDLE `>=30s && <600s`, LONG_IDLE `>=600s`;
+- 30s remains anti-thrash protection; 600s remains the initial tunable long-idle default;
+- warning reclaims only eligible IDLE/LONG_IDLE Automatic progressively;
+- critical may include RECENT Automatic but never Keep Loaded or hard-protected Runtime;
+- pressure progression remains fresh-fact, oldest-first, one-step-at-a-time;
+- WP1 presentation/readiness, generation/Attention, media/fullscreen, notification privacy/routing, and Browser Profile/session data safety remain regression boundaries.
+
+## Next gate
+
+```text
+WP2 corrective A+B+C
+→ focused deterministic regressions
+→ full XCTest
+→ Debug/Release arm64
+→ package-lock + architecture checks
+→ push exact head
+→ self-hosted macOS CI
+→ hosted QA DMG
+→ fresh independent exact-diff / ownership / data-safety audit
+→ only if all PASS: user-owned Human UI acceptance
+```
+
+Do not merge PR #195, release, or begin WP3/WP4 before that gate is complete.
