@@ -7,75 +7,41 @@ Read [`../README.md`](../README.md) first. It is the repository-wide documentati
 For `FT-RUNTIME-LIFECYCLE-MEMORY-001`:
 
 - [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md) — **CURRENT / ACCEPTED / FROZEN** program contract;
-- [`FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — **CURRENT PR #187-SCOPED PHASE 6 CONTRACT**;
-- [`FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md) — **CURRENT PHASE 7 / ACCEPTED / FROZEN / IMPLEMENTATION NOT STARTED**;
+- [`FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — delivered Phase 6 scoped contract; PR #187 merged;
+- [`FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md) — **CURRENT PHASE 7 / ACCEPTED / FROZEN** implementation contract;
 - `CURRENT_STATUS.md` — verified current state/evidence;
 - `CURRENT_TASK.md` — only active mutation authorization;
 - [`DOMAIN_MAP.md`](DOMAIN_MAP.md) — navigation/current-source routing only.
 
 V4 and earlier program contracts are historical for current execution.
 
-## Audit result that caused V5
-
-The current source still implements a hybrid legacy residency model:
-
-- Hot is explicitly non-evictable by the normal/critical automatic managed-budget policy;
-- Warm/Cold use separate persisted timers;
-- the current Tab menu exposes Hot/Warm/Cold;
-- Performance Settings exposes Warm retention and Cold release delay;
-- inactive Hot keeps its WebView attached in a hidden Hot host;
-- normal managed target is 3 Warm/Cold runtimes;
-- Phase 6 deliberately leaves those semantics unchanged.
-
-Real-Mac QA therefore exposed a program-level mismatch: Phase 6 can make restore responsive, but legacy Hot can still keep several heavyweight ChatGPT runtimes resident indefinitely.
-
-V5 classifies V4 as `STOP` for final program acceptance while preserving the delivered Phase 6 architecture.
-
 ## Delivered lifecycle foundations
 
 ### Phase 1 — Safe Hibernate + Restore
 
-Complete / merged. Persistent Slot/Profile/session lifetime is separated from disposable `WKWebView` Runtime lifetime.
+Delivered / merged. Persistent Slot/Profile/session lifetime is separated from disposable `WKWebView` Runtime lifetime.
 
 ### Phase 2 — Ready / Unread Decoupling
 
-Complete / merged. Generating protects Runtime; Ready/unread does not require Runtime residency.
+Delivered / merged. Generating protects Runtime; Ready/unread does not require Runtime residency.
 
 ### Phase 3 — Native Completion Notification
 
-Complete / merged. Hidden valid completion can route back to the exact persistent Slot independently of Runtime residency.
+Delivered / merged. Hidden valid completion can route back to the exact persistent Slot independently of Runtime residency.
 
 ### Phase 4 — Managed Runtime budget foundation
 
-Complete / merged in PR #181.
-
-Reusable mechanism remains valid: deterministic resident-set evaluation, `lastUsedAt` ranking facts, memory-pressure input and `SlotLifecycleCoordinator` as sole executor.
-
-Its Hot/Warm/Cold current-product policy and target `3` are superseded by the V5 Phase 7 target once Phase 7 lands.
+Delivered / merged. Deterministic resident-set evaluation, `lastUsedAt` ranking facts, memory-pressure input and `SlotLifecycleCoordinator` as sole lifecycle executor remain reusable; legacy Hot/Warm/Cold policy is superseded by Phase 7.
 
 ### Phase 5 — Background Generation Thrift
 
-Complete / merged in PR #183. Generating remains Runtime-protected while hidden liveness fallback work is reduced.
+Delivered / merged. Generating remains Runtime-protected while hidden liveness fallback work is reduced.
 
-## Phase 6 — Perceived-fast Restore
+### Phase 6 — Perceived-fast Restore
 
-PR #187 is OPEN / DRAFT / UNMERGED.
+Delivered / merged in PR #187 at `main@54f2e43b0fbc224affa52d9662ac2ba5aa5b963c`.
 
-Current product head:
-
-`76c092523fe343eacc0592bfac25086da0d0d83d`
-
-Current evidence:
-
-- Gate 0 Outcome A navigation-backed readiness: PASS;
-- C1-C4 functional corrective: applied;
-- required macOS CI run 1312: PASS;
-- QA DMG run 637: PASS;
-- bounded Real-Mac restore smoke: still needs completion;
-- fresh independent exact-diff audit: pending;
-- known comment-only churn must be cleaned or explicitly accepted before merge.
-
-Phase 6 architecture remains:
+Architecture:
 
 ```text
 reclaimed Slot selected/summoned
@@ -87,17 +53,22 @@ reclaimed Slot selected/summoned
 → canonical focus/input resumes
 ```
 
-Phase 6 does not own the final residency policy.
+Phase 6 does not own residency policy.
 
 ## Phase 7 — Automatic Lifecycle Simplification
 
-Contract frozen; implementation not started.
+Implementation is complete on PR #188 and is at final merge closeout.
 
-Target product policy:
+Current product policy:
 
 ```text
 Automatic   — default
 Keep Loaded — explicit normal-operation preference
+
+normal target = 2 Automatic runtimes
+inactive grace = 30s
+warning target = 1 Automatic runtime
+critical target = 0 Automatic runtimes
 ```
 
 Legacy compatibility:
@@ -107,44 +78,58 @@ Hot       -> Keep Loaded
 Warm/Cold -> Automatic
 ```
 
-Initial automatic defaults:
+Hard protections remain:
 
-```text
-normal target = 2
-inactive grace = 30s
-warning target = 1
-critical target = 0
-```
+- active / actually presented;
+- fullscreen source;
+- supplemental visible Web surface;
+- Attention Generating;
+- active/pending allowed-background-media protection;
+- current Phase 6 materialization/restoring ownership.
 
-Hard protection remains active/presented, fullscreen, supplemental-visible, Attention generating and active/pending allowed-background-media protection.
+Keep Loaded does not preload at launch, does not require hidden presentation ownership, survives ordinary reclaim and may be reclaimed under critical pressure when inactive and otherwise unprotected.
 
-Keep Loaded does not preload at launch, does not require a hidden presentation host and may be reclaimed under critical pressure when inactive and otherwise unprotected.
+Legacy Cold-based website-cache cleanup coupling is retired; Runtime reclaim and website-cache cleanup remain separate domains.
 
-Legacy Cold-based website-cache cleanup coupling is retired; Runtime reclaim and website cache cleanup remain separate domains.
+## Phase 7 verification status
+
+Semantic/acceptance head:
+
+`b894641a254e7ffb49c84b4ed32d9c70a3f28ad7`
+
+Verified on that identity:
+
+- required `Build & Test (Apple Silicon arm64)` / macOS CI #1349 — PASS;
+- QA DMG #668 — PASS;
+- Benchmark Tool CI #139 — PASS;
+- fresh product exact-diff audit — PASS;
+- bounded Real-Mac Automatic/Keep Loaded acceptance — PASS;
+- Keep Loaded relaunch non-preload check — PASS;
+- session continuity check — PASS;
+- no unresolved product/runtime defect found.
+
+Control/routing status alignment may advance the literal PR head without changing product semantics. Before merge, the required repository-host check must pass on the final literal head and PR #188 must remain mergeable.
 
 ## Current ownership
 
 - `WebViewPool` — live Runtime creation/hibernate/restore and renderer recovery mechanism;
 - `SlotLifecycleCoordinator` — sole Runtime lifecycle/budget executor;
-- Runtime budget policy/value logic — read-only deterministic decision support owned inside Web lifecycle;
-- `TabStore` / `WebAppProfile` — persistent Slot configuration and future Automatic/Keep Loaded preference;
+- Runtime budget policy/value logic — read-only deterministic decision support inside Web lifecycle;
+- `TabStore` / `WebAppProfile` — persistent Slot configuration and Automatic/Keep Loaded preference;
 - `WebAttentionCoordinator` — native Attention authority;
 - `PanelController` — presentation truth + Phase 6 orchestration;
-- `WebPanelContainerView` — presentation only; Phase 7 removes policy-specific hidden Hot host responsibility;
+- `WebPanelContainerView` — presentation only, with no hidden Hot host ownership;
 - Website Cache domain — cache cleanup only, not Runtime lifecycle;
 - `RuntimeDiagnostics` — evidence only.
 
 ## Program sequence from here
 
 ```text
-finish Phase 6 smoke + fresh exact-diff audit
-→ merge PR #187
-→ implement Phase 7 from fresh main
-→ focused/full machine gates + required CI
-→ bounded Real-Mac lifecycle/memory evidence
-→ fresh integrated independent audit
-→ one user-owned final human acceptance
-→ closeout/release decision
+final control/routing alignment
+→ required check on literal PR head
+→ merge PR #188 if mergeable
+→ fresh post-merge integrated Phases 1-7 audit
+→ user-owned final integrated acceptance / release decision
 ```
 
 Do not treat old Stage residency docs, V1-V4 contracts or the Phase 4 planning document as current policy authority.
