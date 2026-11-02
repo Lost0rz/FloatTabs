@@ -6,165 +6,186 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 8 PRESSURE + EFFICIENCY RE-SCOPE MERGED / MACHINE + INDEPENDENT AUDIT COMPLETE / PROGRAM-FINAL HUMAN ACCEPTANCE PENDING**
+**MODE: NATIVE COMPLETION NOTIFICATION — RELIABILITY + RICH PREVIEW / DESIGN AUDIT COMPLETE / IMPLEMENTATION AUTHORIZED**
 
-Current task: `FT-RUNTIME-LIFECYCLE-MEMORY-001-PHASE8-PRESSURE-EFFICIENCY` — **CLOSED / MERGED**.
+Current task: `FT-NOTIFICATION-RELIABILITY-RICH-PREVIEW-001` — **ACTIVE / DESIGN FROZEN / READY FOR IMPLEMENTATION**.
 
-The user selected `D_COMBINE` on 2026-11-02: execute measurement-independent lifecycle improvements now and defer aggregate-memory-budget work until supported deterministic WebKit helper attribution exists. Best-effort/correlation attribution remains rejected.
+Task branch:
+
+`codex/notification-reliability-rich-preview-001`
+
+Execution baseline:
+
+`main@08831ad2cc3e7f18432b1a6ecdc983e849a992aa`
 
 ## Repository / delivery state
 
 ```text
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
-JSC_ROOT_CAUSE=UNKNOWN
-
-PHASE_7_PR=#188_MERGED
-PHASE_7_DELIVERY=COMPLETE
-PROGRAM_CONTRACT=V6_ACCEPTED_FROZEN
-ORIGINAL_PHASE8_BUDGET_CONTRACT=STOPPED_AT_GATE0
-PHASE8_WP0=COMPLETE_2026-11-02
-PHASE8_GATE0=FAIL_AGGREGATE_ATTRIBUTION_NOT_PROVABLE
-USER_RECONCILIATION=D_COMBINE
-BUDGET_TRACK=DEFERRED_PLATFORM_BLOCKED
-BEST_EFFORT_ATTRIBUTION=FORBIDDEN
-RESCOPE_CONTRACT=ACCEPTED_FROZEN
-RESCOPE_SCOPE=PRESSURE_LADDER_PLUS_BACKGROUND_EFFICIENCY
-PR_190=MERGED_AT_MAIN_065D2923
-PR_191=MERGED
-PR_191_HEAD=1C86E62B
-PR_191_SQUASH_MERGE=5BD54EF6
-RESCOPE_GATE_R0=PASS
-RESCOPE_GATE_R1=PASS
-RESCOPE_GATE_R2=PASS
-RESCOPE_GATE_R3=PASS
-RESCOPE_GATE_R4=PASS_LITERAL_HEAD_1C86E62B
-RESCOPE_GATE_R5=PASS_INDEPENDENT_WEB_AUDIT
-R1_SUSTAINED_PRESSURE_CORRECTIVE=PASS
-NORMAL_TARGET_2=PRESERVED
-NORMAL_30S_GRACE=PRESERVED
-WARNING_KEEP_LOADED=PRESERVED
-CRITICAL_ORDER=AUTOMATIC_THEN_KEEP_LOADED
-PRIVATE_SPI=NOT_ADDED
-PRODUCT_DATA_MUTATION=NONE
-HUMAN_UI_ACCEPTANCE=PENDING_PROGRAM_FINAL
-NEXT_GATE=PROGRAM_FINAL_HUMAN_RUNTIME_UI_ACCEPTANCE
+MAIN_BASELINE=08831AD2
+OPEN_PRS_AT_TASK_START=0
+TASK=FT-NOTIFICATION-RELIABILITY-RICH-PREVIEW-001
+TASK_STATE=ACTIVE
+DESIGN_AUDIT=COMPLETE
+DESIGN_CONTRACT=ACCEPTED_FROZEN
+IMPLEMENTATION=NOT_STARTED
+HUMAN_UI_ACCEPTANCE=PENDING
+MERGE_AUTHORIZED=NO
 ```
 
-Current re-scope contract:
+Current task contract:
 
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md`
+`docs/architecture/FloatTabs_Native_Completion_Notification_Reliability_Rich_Preview_Contract_V1.md`
 
-WP0 evidence report:
+## Verified notification baseline
 
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`
+Fresh audit of the current production notification path established:
 
-## Phase 8 re-scope merged result
-
-### R1 — progressive system-memory-pressure ladder
-
-Healthy-state Phase 7 policy is preserved:
+1. `ChatGPTCompletionNotificationCoordinator` is the sole native notification projection owner and the sole `UNUserNotificationCenter` integration.
+2. Notification attempts are triggered only for a valid hidden ChatGPT completion that produces durable unread `.marked`.
+3. Visible completion, invalid/stray finish and already-handled duplicate completion do not notify.
+4. Current notification content is intentionally generic:
 
 ```text
-normal
-→ Automatic resident target = 2
-→ Automatic inactive release = 30s
+title = FloatTabs
+body  = A ChatGPT response is ready.
 ```
 
-Pressure behavior now is:
+5. The old Phase 3 contract deliberately prohibited response text in the notification body. The user has now superseded that product requirement for native notification title/body content.
+6. Routing `userInfo` currently contains only `version / kind / slot_id`; this privacy-bounded routing payload remains correct and must not expand.
+7. Default-action notification click already routes the exact persistent Slot UUID through `PanelController.presentSlotFromCompletionNotification(...)` and the existing Runtime restore/materialization path.
+8. Current response infrastructure identifies the latest assistant response root and status/identity but deliberately does not extract response-body text.
+9. Current notification diagnostics cannot distinguish “system accepted request” from “user visibly saw a banner”, and they do not capture the current public macOS notification settings state.
+
+## Frozen new product behavior
+
+### Notification content
 
 ```text
-warning
-→ progressively reclaim eligible inactive/unprotected Automatic
-→ one Runtime at a time
-→ Keep Loaded preserved
-→ revalidate latest pressure + current ownership between steps
+Title = normalized target Slot/Web App name
+        fallback ChatGPT
+        max 80 user-perceived characters
 
-critical
-→ reclaim eligible Automatic first
-→ then inactive/unprotected Keep Loaded
-→ active/hard-protected Runtime remains untouched
-→ one Runtime at a time
-
-normal pressure restored
-→ cancel pending pressure continuation
-→ no mass restore
-→ future restore remains demand-driven
+Body  = latest completed assistant-response plain-text preview
+        normalized whitespace
+        max 240 user-perceived characters
+        fallback A ChatGPT response is ready.
 ```
 
-The independent audit found one blocking sustained-pressure `no_candidate` re-entry defect. PR #191 corrected it with an idempotent eligibility re-entry seam. Regressions prove sustained warning/critical re-entry, warning→critical takeover, stale-normal clearing and single reclaim-chain behavior.
+Do not include prompt/user text, URL, Browser Profile/session identity, Runtime identity or document token.
 
-### R2 — bounded background efficiency
+Slot name and preview are ephemeral projection inputs only. FloatTabs must not persist or log them.
 
-The verified host-side cost center was sustained hidden-generation watchdog cadence:
+### Preview extraction
+
+Reuse the existing assistant-root semantics in `ChatGPTResponseExtraction`.
+
+`ChatGPTResponseBridge` may add a separate one-shot preview snapshot API with existing WebView/document invalidation guards. The existing response-status snapshot must remain body-free.
+
+Preview extraction is best-effort and may fall back to the generic body if the Runtime/navigation changes or trustworthy content is unavailable. It must not add periodic polling or new long-lived Runtime protection.
+
+### Notification reliability / diagnostics
+
+Before system submission, read current public `UNNotificationSettings` through the injectable backend seam and record bounded settings facts only:
+
+- authorization status;
+- alert setting;
+- alert style;
+- Notification Center setting;
+- show-previews setting.
+
+If authorization is `notDetermined`, request `.alert` contextually and reread settings. Do not repeatedly request authorization for every already-authorized completion.
+
+A successful `UNUserNotificationCenter.add(...)` proves system submission/acceptance only. It does not prove that macOS displayed a visible banner. Diagnostics must not overclaim visible delivery or claim Focus suppression as a proven root cause.
+
+### Exact routing
+
+Preserve:
 
 ```text
-hidden generation <30s    → 2s fallback interval
-hidden generation 30–120s → 5s fallback interval
-hidden generation >=120s  → 10s fallback interval
+notification default action
+→ persistent Slot UUID
+→ exact Slot select
+→ existing presentation/materialization
 ```
 
-The event bridge remains the primary completion signal. No WebContent-memory reduction is claimed from this host-side scheduling change.
+A stale/deleted Slot must remain a safe no-op with no fallback to the current Slot.
 
-## Verification / audit closeout
+## Background / lifecycle compatibility
 
-PR #191 literal merge head `1c86e62b7169407ec9cbf242eb29e31c9db3da2e` passed:
-
-- focused R1 lifecycle tests;
-- focused R2 watchdog/backoff tests;
-- full XCTest;
-- Debug arm64 build;
-- Release arm64 build;
-- native arm64 architecture verification;
-- package-lock unchanged check;
-- self-hosted `Build & Test (Apple Silicon arm64)` run `41389550011`;
-- QA DMG run `41389550006`;
-- fresh independent exact-diff / ownership audit.
-
-Independent audit final verdict before merge:
+The merged Phase 8 background policy remains authoritative and unchanged:
 
 ```text
-BLOCKING_FINDINGS=0
-IMPORTANT_FINDINGS=0
-R1_PRESSURE_LADDER=PASS
-SUSTAINED_PRESSURE_REENTRY=PASS
-ELIGIBILITY_BOUNDARY_COVERAGE=PASS
-WARNING_TO_CRITICAL_TAKEOVER=PASS
-SINGLE_TRANSACTION_INVARIANT=PASS
-R2_BACKGROUND_EFFICIENCY=PASS
-DIAGNOSTICS_SEMANTICS=PASS
-CODE_MERGE_READY=YES
+hidden generation <30s    → 2s fallback watchdog
+hidden generation 30–120s → 5s fallback watchdog
+hidden generation >=120s  → 10s fallback watchdog
 ```
 
-PR #191 was squash-merged to `main` as `5bd54ef63266dafff8f1a36f4b883367f2158516` on 2026-11-02.
+Generating Runtime remains hard-protected. The new notification task must not change lifecycle timers, pressure ordering or generation protection.
 
-## Source / ownership truth
+After completion, the Runtime may be reclaimed normally. Notification click must continue to restore a non-resident target through existing lifecycle ownership.
 
-- `SlotLifecycleCoordinator` remains the sole lifecycle writer.
-- `WebViewPool` owns hibernate/release/runtime mechanics.
-- `PanelController` constructs/wires the coordinator; it is not a second lifecycle writer.
-- `ChatGPTAttentionBridge` owns bounded provider sensing/liveness fallback.
-- `RuntimeDiagnostics` remains evidence-only.
+## Expected implementation scope
 
-## Deferred / blocked work
+Production:
 
-Still platform-blocked until a supported deterministic aggregate measurement capability exists:
+- `FloatTabs/App/ChatGPTCompletionNotificationCoordinator.swift`
+- `FloatTabs/App/AppCoordinator.swift`
+- `FloatTabs/Panel/PanelController.swift`
+- `FloatTabs/Web/ChatGPTResponseBridge.swift`
+- `FloatTabs/Web/ChatGPTResponseExtraction.swift`
+- `FloatTabs/Web/WebViewPool.swift` only if a minimal read-only response-bridge seam is proven necessary.
 
-- aggregate FloatTabs/WebKit memory monitor as lifecycle-budget input;
-- Auto/Custom/Unlimited aggregate memory-budget scheduler;
-- memory-budget Settings UI/persistence projection;
-- aggregate-memory A/B claims requiring attributable FloatTabs/WebKit working-set evidence.
+Focused tests:
 
-Do not substitute transition correlation, guessed per-tab memory, Runtime count, private WebKit SPI, root-only tooling, restricted entitlements or destructive website/session operations.
+- `FloatTabsTests/ChatGPTCompletionNotificationTests.swift`
+- `FloatTabsTests/ChatGPTResponseExtractionTests.swift`
+- `FloatTabsTests/ChatGPTResponseBridgeTests.swift`
+- `FloatTabsTests/WebAttentionCrossFeatureTests.swift`
+- narrowly necessary diagnostics/privacy test if needed.
+
+## Gates
+
+```text
+N0_SOURCE_RECONCILIATION=PENDING_EXECUTOR
+N1_PREVIEW_EXTRACTION=PENDING
+N2_NOTIFICATION_CONTENT_SETTINGS=PENDING
+N3_COMPOSITION_EXACT_ROUTING=PENDING
+N4_BACKGROUND_LIFECYCLE_REGRESSION=PENDING
+N5_FULL_REPOSITORY_MACHINE_GATE=PENDING
+INDEPENDENT_AUDIT=PENDING
+HUMAN_UI_ACCEPTANCE=PENDING
+MERGE=NOT_AUTHORIZED_YET
+```
+
+Human acceptance is required because this task changes real native notification content and interaction. AI/browser/screenshot inspection cannot self-approve that gate.
+
+## Previous lifecycle program state
+
+The Phase 8 pressure + efficiency task remains **CLOSED / MERGED**. Its merged behavior and platform-blocked aggregate-memory track are unchanged.
+
+Still preserved:
+
+- Automatic normal target=2;
+- Automatic inactive release=30s;
+- warning progressively reclaims eligible Automatic only;
+- critical reclaims Automatic first, then inactive/unprotected Keep Loaded;
+- best-effort aggregate WebContent/GPU attribution remains forbidden;
+- Browser Profile/session/product data mutation remains out of scope.
+
+The broader lifecycle-program human acceptance is still pending and may be exercised together with the final integrated notification/runtime validation, but this notification task has its own explicit native-notification acceptance gate.
 
 ## Next gate
 
-No further product mutation is authorized by the closed Phase 8 re-scope task.
-
-The next lifecycle-program gate is:
-
 ```text
-PROGRAM_FINAL_HUMAN_RUNTIME_UI_ACCEPTANCE
+LOCAL_EXECUTOR
+→ N0 fresh source reconciliation
+→ implement bounded preview + settings diagnostics + rich notification content
+→ focused N1-N4 tests
+→ full N5 machine gates
+→ push same task branch / Draft PR
+→ literal-head self-hosted CI + QA DMG
+→ independent exact-diff / ownership / privacy audit
+→ stop at HUMAN_UI_ACCEPTANCE=PENDING
 ```
-
-Human validation should exercise normal Slot switching/restoration, Automatic/Keep Loaded behavior, generation protection, background media protection and sustained use under ordinary system conditions. Aggregate memory-budget claims remain explicitly out of scope.
