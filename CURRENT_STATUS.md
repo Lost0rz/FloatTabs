@@ -6,11 +6,11 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 8 RE-SCOPE R1/R2 IMPLEMENTED / AWAITING SELF-HOSTED CI + INDEPENDENT EXACT-DIFF AUDIT**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 8 PRESSURE + EFFICIENCY RE-SCOPE COMPLETE / R5 PASS / PR #191 MERGE AUTHORIZED**
 
 Current task: `FT-RUNTIME-LIFECYCLE-MEMORY-001-PHASE8-PRESSURE-EFFICIENCY`.
 
-The user selected `D_COMBINE` on 2026-11-02: execute the measurement-independent work now (`B`) and defer the aggregate-memory-budget track until a supported deterministic attribution capability exists (`A`). Best-effort/correlation attribution (`C`) is rejected.
+The user selected `D_COMBINE` on 2026-11-02: execute the measurement-independent work now (`B`) and defer the aggregate-memory-budget track until a supported deterministic attribution capability exists (`A`). Best-effort/correlation attribution (`C`) remains rejected.
 
 ## Repository / delivery state
 
@@ -31,15 +31,24 @@ BEST_EFFORT_ATTRIBUTION=FORBIDDEN
 RESCOPE_CONTRACT=ACCEPTED_FROZEN
 RESCOPE_SCOPE=PRESSURE_LADDER_PLUS_BACKGROUND_EFFICIENCY
 PR_190=MERGED_AT_MAIN_065D2923
+SUCCESSOR_PR=#191
 SUCCESSOR_BRANCH=codex/ft-pressure-efficiency-phase8-rescope-001
-RESCOPE_GATE_R0=PASS_FOCUSED_SOURCE_RECONCILIATION
-RESCOPE_R1_PRESSURE_LADDER=IMPLEMENTED
-RESCOPE_R2_BACKGROUND_EFFICIENCY=IMPLEMENTED
-RESCOPE_LOCAL_MACHINE_GATES=PASS_FULL_XCTEST_DEBUG_RELEASE_ARM64_LOCK
+RESCOPE_GATE_R0=PASS
+RESCOPE_GATE_R1=PASS
+RESCOPE_GATE_R2=PASS
+RESCOPE_GATE_R3=PASS
+RESCOPE_GATE_R4=PASS_ON_IMPLEMENTATION_HEAD
+RESCOPE_GATE_R5=PASS_INDEPENDENT_WEB_AUDIT
+R1_SUSTAINED_PRESSURE_CORRECTIVE=PASS
 NORMAL_TARGET_2=PRESERVED
 NORMAL_30S_GRACE=PRESERVED
+WARNING_KEEP_LOADED=PRESERVED
+CRITICAL_ORDER=AUTOMATIC_THEN_KEEP_LOADED
+PRIVATE_SPI=NOT_ADDED
+PRODUCT_DATA_MUTATION=NONE
 HUMAN_UI_ACCEPTANCE=PENDING_PROGRAM_FINAL
-NEXT_GATE=SELF_HOSTED_CI_THEN_INDEPENDENT_EXACT_DIFF_AUDIT
+PR_191_MERGE_READINESS=YES
+NEXT_GATE=LITERAL_CONTROL_CLOSEOUT_HEAD_CI_THEN_SQUASH_MERGE
 ```
 
 Current re-scope contract:
@@ -50,121 +59,122 @@ WP0 evidence report:
 
 `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`
 
-## WP0 closeout
+## Phase 8 re-scope implementation result
 
-Gate 0 established:
+### R1 — progressive system-memory-pressure ladder
 
-- supported public APIs can read per-pid physical footprint and enumerate same-user WebKit helpers;
-- the Networking helper can be deterministically attributed through FloatTabs' unique WebKit data-root fd paths;
-- no supported public production API can deterministically attribute the dominant WebContent/GPU XPC instances to the FloatTabs host app;
-- therefore an honest aggregate FloatTabs/WebKit working-set cannot drive the proposed GiB budget.
-
-The previous PR #190 head `b775975968f7eecc46940ed69e1b2fab0e41cab3` passed macOS CI run `41380640917`. This reconciliation changes documentation/control on top of that head, so the **literal new PR head must pass fresh required CI before merge**.
-
-No `FloatTabs/**` product file was changed by WP0 or this reconciliation.
-
-## User decision — D_COMBINE
+The fixed Phase 7 pressure count targets were retired. Healthy-state policy remains unchanged.
 
 ```text
-B NOW
-→ implement only measurement-independent lifecycle work:
-   1. progressive system-memory-pressure ladder
-   2. bounded background observer/task/generation efficiency
+normal
+→ Automatic resident target = 2
+→ Automatic inactive release = 30s
 
-A LATER
-→ keep aggregate memory-budget architecture deferred/platform-blocked
-→ reopen only if a supported deterministic helper-attribution capability appears
-
-C REJECTED
-→ no best-effort transition correlation
-→ no guessed per-tab MB
-→ no Runtime-count substitution for aggregate memory
-```
-
-## Current production truth preserved during re-scope
-
-Until a future budget implementation is separately proven feasible and authorized, healthy/normal conditions keep the merged Phase 7 policy:
-
-```text
-runtimeRetentionPreference = Automatic | Keep Loaded
-normal Automatic resident target = 2
-Automatic inactive release path = 30s
-```
-
-The re-scope does **not** retire that healthy-state normal policy.
-
-The authorized lifecycle policy change is bounded to system memory pressure:
-
-```text
 warning
-→ progressive one-at-a-time reclaim of eligible inactive Automatic
+→ progressively reclaim eligible inactive/unprotected Automatic
+→ one Runtime at a time
 → Keep Loaded preserved
-→ current pressure/ownership revalidated between steps
+→ revalidate latest pressure + current ownership between steps
 
 critical
-→ Automatic first
-→ then inactive/unprotected Keep Loaded if still required
-→ active/hard-protected untouched
+→ reclaim eligible Automatic first
+→ then inactive/unprotected Keep Loaded
+→ active/hard-protected Runtime remains untouched
 → one Runtime at a time
 
 normal pressure restored
-→ stop pending pressure progression
-→ no mass restore; restore remains demand-driven
+→ cancel pending pressure continuation
+→ no mass restore
+→ future restore remains demand-driven
 ```
 
-## Background-efficiency scope
+The independent audit found one blocking R1 defect at the sustained-pressure `no_candidate` boundary: a Runtime that became eligible later could fail to re-enter the pressure ladder unless another same-level system pressure event arrived.
 
-The second authorized package may reduce verified host-side work involving hidden liveness/fallback probes, repeated detector evaluation, observer/task lifetime, stale callbacks and presentation-only work for detached Runtime.
+That finding was corrected on PR #191 with an idempotent sustained-pressure re-entry seam driven by current lifecycle eligibility changes. Focused regressions prove:
 
-Required invariants:
+- warning + generation protection ends without another warning event → eligible Automatic is reclaimed;
+- critical + Keep Loaded protection ends without another critical event → Keep Loaded is reclaimed after eligible Automatic is exhausted;
+- warning → critical takeover cancels the stale warning continuation and preserves Automatic-before-Keep-Loaded ordering;
+- normal pressure clears stale pressure state before later eligibility changes;
+- repeated eligibility boundaries do not create duplicate reclaim chains.
 
-- live `Generating` remains Runtime-protected;
-- completion/unread/native notification routing remains correct;
-- current document/runtime ownership remains exact;
-- hibernate/restore does not duplicate observers/tasks;
-- Browser Profile, cookies, website session data and persisted Slot configuration remain untouched;
-- efficiency claims are limited to the host-side work actually measured/tested.
+### R2 — bounded background efficiency
 
-## Source owner map carried forward from WP0
+The verified remaining host-side cost center was sustained hidden generation watchdog cadence. The event bridge remains the primary completion signal; only the bounded fallback cadence changes:
 
-- `SlotLifecycleCoordinator` — sole lifecycle writer; current healthy/pressure count policy owner.
-- `WebViewPool` — hibernate/release/resident-set mechanics and runtime ownership seams.
-- `PanelController` constructs the lifecycle coordinator; it is not a second lifecycle writer.
-- `ChatGPTAttentionBridge` / Attention runtime — bounded provider sensing and hidden liveness/fallback work.
-- `RuntimeDiagnostics` — evidence only.
+```text
+hidden generation < 30s   → 2s fallback interval
+hidden generation 30–120s → 5s fallback interval
+hidden generation >=120s  → 10s fallback interval
+```
 
-The successor implementation must begin with Gate R0 focused source reconciliation against **fresh main after PR #190 merge**. If this owner map materially changed, update Authority before product mutation.
+No WebContent-memory claim is made from this host-side scheduling reduction. Generation protection, completion routing, unread/native notification behavior and document/runtime ownership remain unchanged.
+
+## Verification / audit closeout
+
+The implementation and corrective have passed:
+
+- focused R1 lifecycle tests;
+- focused R2 watchdog/backoff tests;
+- full XCTest;
+- Debug arm64 build;
+- Release arm64 build;
+- native arm64 architecture verification;
+- package-lock unchanged check;
+- self-hosted `Build & Test (Apple Silicon arm64)` on the implementation/corrective literal head;
+- QA DMG on the same implementation/corrective literal head;
+- fresh independent exact-diff / ownership audit.
+
+Independent audit verdict after corrective:
+
+```text
+BLOCKING_FINDINGS=0
+IMPORTANT_FINDINGS=0
+R1_PRESSURE_LADDER=PASS
+SUSTAINED_PRESSURE_REENTRY=PASS
+ELIGIBILITY_BOUNDARY_COVERAGE=PASS
+WARNING_TO_CRITICAL_TAKEOVER=PASS
+SINGLE_TRANSACTION_INVARIANT=PASS
+R2_BACKGROUND_EFFICIENCY=PASS
+DIAGNOSTICS_SEMANTICS=PASS
+CODE_MERGE_READY=YES
+VERDICT=PASS_WITH_CONTROL_ALIGNMENT_FOLLOWUP
+```
+
+This control-plane update is that follow-up. Because it creates a new literal PR head, the required repository-host CI must pass again before merge. The earlier implementation-head PASS is evidence for the code diff, not a substitute for the new literal-head merge gate.
+
+## Source / ownership truth
+
+- `SlotLifecycleCoordinator` remains the sole lifecycle writer.
+- `WebViewPool` owns hibernate/release/runtime mechanics; its product semantics were not redesigned by the corrective.
+- `PanelController` constructs/wires the coordinator; it is not a second lifecycle writer.
+- `ChatGPTAttentionBridge` owns bounded provider sensing/liveness fallback; the R1 corrective did not change R2 semantics.
+- `RuntimeDiagnostics` remains evidence-only.
 
 ## Deferred / blocked work
 
-Blocked until a supported deterministic aggregate measurement capability exists:
+Still blocked until a supported deterministic aggregate measurement capability exists:
 
-- aggregate resource monitor as budget input;
-- Auto/Custom/Unlimited memory-budget scheduler;
+- aggregate resource monitor as a lifecycle-budget input;
+- Auto/Custom/Unlimited aggregate memory-budget scheduler;
 - memory-budget Advanced UI/persistence projection;
 - aggregate-memory A/B claims requiring attributable FloatTabs/WebKit working-set evidence.
 
-The V6 budget model remains a future architecture direction, not current shipped behavior.
+Do not substitute transition correlation, guessed per-tab memory, Runtime count, private WebKit SPI, root-only tooling, restricted entitlements or destructive website/session operations.
 
-## Safety boundary
+## Merge boundary
 
-Do not:
+PR #191 is authorized to merge after this control-only closeout head passes the required self-hosted repository-host gate and remains clean/mergeable.
 
-- implement budget enforcement from host+Networking-only measurement;
-- use transition correlation, guessed per-tab memory or Runtime count as aggregate-memory substitutes;
-- use private WebKit SPI, root-gated `launchctl`, EndpointSecurity entitlement paths or `task_for_pid` in production;
-- change the healthy-state normal target=2 / 30s policy under the current re-scope;
-- add a second lifecycle writer;
-- hibernate an actively generating Runtime merely to save resources;
-- clear, migrate or overwrite Browser Profile cookies/session/site data;
-- claim WebContent memory reduction from host-side observer/timer reductions.
+Required sequence:
 
-## Immediate next state
+```text
+1. literal control-closeout PR head required macOS CI = PASS
+2. QA DMG = PASS if triggered for that head
+3. fresh PR head/base/mergeability check = PASS
+4. mark #191 Ready for Review if still Draft
+5. squash merge #191 using expected literal head SHA
+6. verify fresh main contains the merged Phase 8 re-scope
+```
 
-PR #190 is the WP0 + reconciliation closeout vehicle. After this documentation/control update:
-
-1. wait for the literal new #190 head to pass required self-hosted macOS CI;
-2. perform fresh PR identity/exact-diff/mergeability check;
-3. merge #190 if those gates pass;
-4. start the authorized pressure+efficiency implementation from fresh merged `main` on one bounded successor branch/PR;
-5. run Gate R0 before any `FloatTabs/**` mutation.
+Human runtime/UI acceptance remains `PENDING_PROGRAM_FINAL`; under the accepted re-scope contract it is not an earlier blocker for PR #191 merge.
