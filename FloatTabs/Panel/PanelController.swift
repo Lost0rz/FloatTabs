@@ -1071,7 +1071,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     var onSelectedSlotPresentationChange: ((String?, URL?) -> Void)?
     var onAttentionPresentationChange: ((Int, Bool) -> Void)?
     var onChatGPTGenerationCompleted: ((UUID) -> Void)?
-    var onChatGPTUnreadCompletionMarked: ((UUID) -> Void)?
+    var onChatGPTUnreadCompletionMarked: ((UUID, String?, String?) -> Void)?
     var onOpenGlobalSettings: (() -> Void)?
 
     init(
@@ -3542,7 +3542,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             )
         }
         if case .marked = completionResult {
-            onChatGPTUnreadCompletionMarked?(slotID)
+            projectCompletionNotification(slotID: slotID)
         }
         if isValidGenerationCompletion {
             onChatGPTGenerationCompleted?(slotID)
@@ -3932,6 +3932,28 @@ final class PanelController: NSObject, NSWindowDelegate {
             ]
         )
         return attempt
+    }
+
+    /// Resolves bounded notification projection input for one newly `.marked`
+    /// hidden completion: the persistent Slot display name and an optional
+    /// one-shot assistant-response preview. The preview is best-effort — a
+    /// missing bridge, reclaimed Runtime, replaced document or generating
+    /// state simply yields no preview. Exactly one projection callback fires
+    /// per `.marked` completion; neither name nor preview is persisted here.
+    private func projectCompletionNotification(slotID: UUID) {
+        let displayName = tabStore.profiles.first(where: { $0.id == slotID })?.name
+        guard let responseBridge = webViewPool.responseBridge(for: slotID) else {
+            onChatGPTUnreadCompletionMarked?(slotID, displayName, nil)
+            return
+        }
+        responseBridge.previewLatestAssistantResponse { [weak self] snapshot in
+            guard let self else { return }
+            self.onChatGPTUnreadCompletionMarked?(
+                slotID,
+                displayName,
+                snapshot?.previewText
+            )
+        }
     }
 
     private func requestLatestResponseHandledSnapshot(

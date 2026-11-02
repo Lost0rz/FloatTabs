@@ -160,8 +160,12 @@ final class AppCoordinator {
         completionNotificationCoordinator.onRouteSlot = { [weak self] slotID in
             _ = self?.panelController.presentSlotFromCompletionNotification(slotID)
         }
-        panelController.onChatGPTUnreadCompletionMarked = { [weak completionNotificationCoordinator] slotID in
-            completionNotificationCoordinator?.notify(slotID: slotID)
+        panelController.onChatGPTUnreadCompletionMarked = { [weak completionNotificationCoordinator] slotID, displayName, assistantPreview in
+            completionNotificationCoordinator?.notify(
+                slotID: slotID,
+                displayName: displayName,
+                assistantPreview: assistantPreview
+            )
         }
         resolveStartupConfigurationRecoveryIfNeeded()
 

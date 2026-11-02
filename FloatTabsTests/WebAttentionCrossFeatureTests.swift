@@ -6068,7 +6068,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let bridge = try attentionBridge(pool: pool, slot: slot)
         var notificationCount = 0
         var soundCount = 0
-        controller.onChatGPTUnreadCompletionMarked = { _ in
+        controller.onChatGPTUnreadCompletionMarked = { _, _, _ in
             notificationCount += 1
         }
         controller.onChatGPTGenerationCompleted = { _ in
@@ -6103,7 +6103,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         defer { controller.debugClearPresentationFactOverride(slotID: slot.id) }
         var notificationCount = 0
         var soundCount = 0
-        controller.onChatGPTUnreadCompletionMarked = { _ in
+        controller.onChatGPTUnreadCompletionMarked = { _, _, _ in
             notificationCount += 1
         }
         controller.onChatGPTGenerationCompleted = { _ in
@@ -6130,7 +6130,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         var notificationCount = 0
         var soundCount = 0
-        controller.onChatGPTUnreadCompletionMarked = { _ in
+        controller.onChatGPTUnreadCompletionMarked = { _, _, _ in
             notificationCount += 1
         }
         controller.onChatGPTGenerationCompleted = { _ in
@@ -6160,7 +6160,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
         var notificationCount = 0
         var soundCount = 0
-        controller.onChatGPTUnreadCompletionMarked = { _ in
+        controller.onChatGPTUnreadCompletionMarked = { _, _, _ in
             notificationCount += 1
         }
         controller.onChatGPTGenerationCompleted = { _ in
@@ -6221,7 +6221,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             ChatGPTResponseIdentity(rawValue: "message:phase3-distinct-second")
         )
         var notificationCount = 0
-        controller.onChatGPTUnreadCompletionMarked = { _ in
+        controller.onChatGPTUnreadCompletionMarked = { _, _, _ in
             notificationCount += 1
         }
 
@@ -6445,4 +6445,119 @@ private final class InstantBackTestSchemeHandler: NSObject, WKURLSchemeHandler {
     }
 
     func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
+}
+
+// MARK: 4.11 Notification rich projection input (name + one-shot preview)
+
+extension WebAttentionCrossFeatureTests {
+    /// N3: a hidden `.marked` completion hands the composition seam the
+    /// persistent Slot display name; a non-resident/missing response runtime
+    /// yields no preview without blocking the single projection callback.
+    func testHiddenMarkedCompletionProjectsSlotNameAndBestEffortPreview() async throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "NamedChat", url: "https://chatgpt.com/chat-named")]
+        )
+        let slot = try profile(named: "NamedChat", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "NamedChat")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        var projections: [(slotID: UUID, displayName: String?, preview: String?)] = []
+        controller.onChatGPTUnreadCompletionMarked = { slotID, displayName, preview in
+            projections.append((slotID, displayName, preview))
+        }
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "rich-projection-hidden-completion"
+        )
+
+        let projected = try await waitUntil { projections.count == 1 }
+        XCTAssertTrue(projected)
+        XCTAssertEqual(projections[0].slotID, slot.id)
+        XCTAssertEqual(projections[0].displayName, "NamedChat")
+        // The pooled runtime never navigated to a real supported document in
+        // this harness, so no trusted preview exists — best-effort nil without
+        // blocking the projection.
+        XCTAssertNil(projections[0].preview)
+    }
+
+    /// N3: preview failure still emits exactly one projection attempt.
+    func testPreviewFailureStillEmitsExactlyOneGenericProjection() async throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        // Force the preview provider to fail by invalidating the bridge's
+        // document before any projection: harness runtimes hold no current
+        // document, which already yields nil preview.
+        var projections: [(slotID: UUID, displayName: String?, preview: String?)] = []
+        controller.onChatGPTUnreadCompletionMarked = { slotID, displayName, preview in
+            projections.append((slotID, displayName, preview))
+        }
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "rich-projection-preview-failure"
+        )
+
+        let projected = try await waitUntil { projections.count == 1 }
+        XCTAssertTrue(projected)
+        XCTAssertEqual(projections[0].displayName, "ChatA")
+        XCTAssertNil(projections[0].preview)
+    }
+
+    /// A suspended one-shot preview provider cannot suppress the hidden
+    /// `.marked` notification projection; timeout supplies nil exactly once,
+    /// and a later provider result is ignored.
+    func testHiddenMarkedCompletionPreviewTimeoutStillProjectsExactlyOnce() async throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attention = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+        XCTAssertTrue(
+            responseBridge.debugReceiveDocumentReady(
+                documentToken: "completion-preview-timeout-doc-123456"
+            )
+        )
+
+        var lateProviderCompletion: (@MainActor (ChatGPTResponsePreviewSnapshot?) -> Void)?
+        responseBridge.debugSetResponsePreviewSnapshotProvider { _, _, completion in
+            lateProviderCompletion = completion
+        }
+        var projections: [(UUID, String?, String?)] = []
+        controller.onChatGPTUnreadCompletionMarked = { slotID, name, preview in
+            projections.append((slotID, name, preview))
+        }
+
+        completeGeneration(
+            bridge: attention,
+            webView: webView,
+            token: "completion-preview-timeout-generation"
+        )
+
+        let projected = try await waitUntil(timeoutMilliseconds: 3_000) {
+            projections.count == 1
+        }
+        XCTAssertTrue(projected, "preview timeout must not suppress notification projection")
+        XCTAssertEqual(projections.count, 1)
+        XCTAssertEqual(projections[0].0, slot.id)
+        XCTAssertEqual(projections[0].1, "ChatA")
+        XCTAssertNil(projections[0].2, "nil preview selects the generic notification body")
+
+        lateProviderCompletion?(
+            ChatGPTResponsePreviewSnapshot(
+                documentToken: "completion-preview-timeout-doc-123456",
+                generating: false,
+                previewText: "late preview"
+            )
+        )
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(projections.count, 1, "late provider result cannot project twice")
+    }
 }

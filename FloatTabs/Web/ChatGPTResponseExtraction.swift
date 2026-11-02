@@ -532,6 +532,79 @@ enum ChatGPTResponseExtraction {
             };
           };
 
+          // One-shot assistant-response preview projection. Reuses the same
+          // assistant-root/content/exclusion semantics as identity status; the
+          // gathered text is a bounded plain-text window only. No prompt/user
+          // or composer content is selected, and no raw HTML is returned.
+          const PREVIEW_GATHER_LIMIT = 600;
+          globalThis.__floatTabsChatGPTResponsePreviewV1 = () => {
+            const latestRoot = latestAssistantResponseRoot();
+            const generating = isGenerating();
+            if (!latestRoot || generating) {
+              return {
+                version: 1,
+                documentToken: documentToken,
+                generating: generating,
+                preview: null
+              };
+            }
+            const nodes = [];
+            if (latestRoot.matches && latestRoot.matches(RESPONSE_CONTENT_SELECTOR)) {
+              nodes.push(latestRoot);
+            }
+            nodes.push(...Array.from(latestRoot.querySelectorAll(
+              RESPONSE_CONTENT_SELECTOR
+            )));
+            const eligibleNodes = nodes.filter((node) => isRendered(node)
+              && !node.matches(RESPONSE_EXCLUDED_SELECTOR)
+              && !node.closest(RESPONSE_EXCLUDED_SELECTOR));
+            const selectedNodes = new Set(eligibleNodes);
+            const topLevelNodes = eligibleNodes.filter((node) => {
+              let ancestor = node.parentElement;
+              while (ancestor && latestRoot.contains(ancestor)) {
+                if (selectedNodes.has(ancestor)) return false;
+                ancestor = ancestor.parentElement;
+              }
+              return true;
+            });
+            let text = "";
+            const appendBounded = (value) => {
+              for (const character of value) {
+                if (text.length + character.length > PREVIEW_GATHER_LIMIT) return false;
+                text += character;
+              }
+              return true;
+            };
+            for (const node of topLevelNodes) {
+              if (text.length >= PREVIEW_GATHER_LIMIT) break;
+              if (text && !/\\s$/.test(text) && !appendBounded(" ")) break;
+
+              const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+              let previousBoundary = null;
+              while (walker.nextNode() && text.length < PREVIEW_GATHER_LIMIT) {
+                const textNode = walker.currentNode;
+                const parent = textNode.parentElement;
+                if (!parent
+                    || !isRendered(parent)
+                    || parent.closest(RESPONSE_EXCLUDED_SELECTOR)) continue;
+                const boundary = parent.closest(
+                  'h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,table,td,th'
+                ) || node;
+                if (previousBoundary && previousBoundary !== boundary
+                    && text && !/\\s$/.test(text) && !appendBounded(" ")) break;
+                previousBoundary = boundary;
+                if (!appendBounded(textNode.nodeValue || "")) break;
+              }
+            }
+            text = text.replace(/[\\f\\n\\r\\t\\v ]+/g, " ").trim();
+            return {
+              version: 1,
+              documentToken: documentToken,
+              generating: false,
+              preview: text || null
+            };
+          };
+
           \(debugAssistantPointerClassifier)
         })();
         """
