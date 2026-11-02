@@ -2320,6 +2320,10 @@ final class ExternalShellTests: XCTestCase {
 
     func testResidentSlotPresentationStaysDirectWithoutRestoringState() throws {
         let (_, pool, controller, profile) = try makePhase6Harness(slotName: "Resident")
+        controller.handleSlotNavigationFinish(
+            slotID: profile.id,
+            runtimeIdentity: try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        )
 
         controller.showFloatTabs()
         drainMainThreadTurns()
