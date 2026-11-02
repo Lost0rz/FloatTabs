@@ -1,200 +1,209 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001-PHASE8-DESIGN`  
-**Title:** Adaptive Runtime Memory Budget + Background Efficiency — design freeze  
-**Status:** `COMPLETE / DESIGN FROZEN / WAITING FOR IMPLEMENTATION AUTHORIZATION`  
-**Mode:** `ARCHITECTURE / POLICY DESIGN / DOCUMENT ALIGNMENT`  
-**Task class:** `WEB RUNTIME / LIFECYCLE / MEMORY / PERFORMANCE`  
-**Baseline:** `main@2b414982710b3f042fc7d6e9c88eb2d7117b4e38`
+**Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001-PHASE8-PRESSURE-EFFICIENCY`  
+**Title:** Phase 8 measurement-independent continuation — pressure ladder + background efficiency  
+**Status:** `ACTIVE / AUTHORIZED / WAITING PR #190 CLOSEOUT MERGE BEFORE PRODUCT MUTATION`  
+**Mode:** `IMPLEMENTATION AFTER CLOSEOUT MERGE`  
+**Task class:** `WEB RUNTIME / LIFECYCLE / PERFORMANCE`  
+**Execution baseline:** `fresh main after PR #190 merge; must contain this task + re-scope contract`
 
-## Authorization state
+## Authorization
 
-The user explicitly authorized a redesign of FloatTabs performance/lifecycle policy after Phase 7 merge, with these goals:
+The user selected `D_COMBINE` on 2026-11-02 and explicitly asked to update repository Authority and issue a local construction card.
 
-1. replace the fixed normal resident-count policy (`2`) with a memory-budget-driven policy;
-2. let the user configure an approximate FloatTabs/WebKit memory budget rather than a maximum number of open pages;
-3. reclaim inactive Runtime progressively only when budget/system pressure requires it;
-4. preserve active/generating/fullscreen/media/materializing hard protections;
-5. keep the Phase 1-7 hibernate/restore/session/notification foundations;
-6. reassess background-generation thrift and other Chrome/open-source lifecycle mechanisms that Phase 7 does not yet implement;
-7. freeze the new plan and update documentation before any production-code construction.
+This task authorizes the measurement-independent continuation only:
 
-That design work is now complete. This task does **not** authorize `FloatTabs/**` production construction. A new bounded implementation authorization is required before Phase 8 WP0/WP1 mutation begins.
+1. progressive system-memory-pressure reclaim in the existing lifecycle owner;
+2. bounded host-side background observer/task/generation efficiency corrections.
+
+The aggregate-memory-budget track remains deferred/platform-blocked by Phase 8 Gate 0.
 
 ## Frozen authority
 
-Program contract:
+- Project rules: `AGENTS.md`
+- Program design: `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`
+- Original Phase 8 budget contract: `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md` — stopped at Gate 0 for budget construction
+- Gate 0 evidence: `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`
+- **Current implementation contract:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md`
+- Navigation: `docs/architecture/DOMAIN_MAP.md`, `docs/README.md`
 
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`
+The current implementation contract owns the bounded re-scope where it differs from the original Phase 8 budget sequence. V6 remains the long-term design direction; blocked budget semantics are not current implementation authorization.
 
-Phase 8 implementation contract:
+## Predecessor closeout gate
 
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md`
+PR #190 remains the WP0/reconciliation closeout vehicle. Product mutation under this task MUST NOT begin on the #190 branch.
 
-Historical Phase 7/V5 snapshot:
-
-`docs/architecture/archive/FloatTabs_Runtime_Lifecycle_Phase7_Closeout_Snapshot_2026-11-02.md`
-
-Navigation/status:
-
-- `docs/README.md`
-- `docs/architecture/README.md`
-- `docs/architecture/DOMAIN_MAP.md`
-
-## Current shipped vs target boundary
-
-Current shipped `main@2b414982...` still implements Phase 7 fixed-count tuning until Phase 8 lands:
+Required predecessor sequence:
 
 ```text
-normal Automatic target = 2
-inactive release path = 30s
-warning target = 1
-critical target = 0
+#190 literal new head required CI = PASS
+fresh #190 exact-diff / base-head / mergeability check = PASS
+#190 merge = COMPLETE
+fresh main contains this CURRENT_TASK + re-scope contract
+→ only then create/use one successor implementation branch/PR
 ```
 
-Frozen Phase 8 target:
+The previous pre-reconciliation #190 head `b775975968f7eecc46940ed69e1b2fab0e41cab3` already passed macOS CI run `41380640917`, but that does not satisfy the literal-head gate after these control/doc commits.
+
+## Scope A — progressive system-memory-pressure ladder
+
+Primary lifecycle owner: `FloatTabs/Web/SlotLifecycleCoordinator.swift`.
+
+Replace only the current pressure count targets (`warning=1`, `critical=0`) with progressive, one-at-a-time behavior driven by the existing supported memory-pressure state.
+
+Required semantics:
+
+### Warning
+
+- eligible inactive/unprotected `Automatic` only;
+- deterministic candidate ordering from current lifecycle facts;
+- `Keep Loaded` preserved;
+- active/presented, fullscreen, supplemental-visible, generating, protected background-media, restoring/materializing and other hard-protected Runtime untouched;
+- at most one reclaim transaction in flight;
+- after each completion, revalidate latest pressure + current Runtime/protection ownership before any continuation;
+- no precomputed multi-Runtime purge from one stale signal.
+
+### Critical
+
+- eligible Automatic first;
+- only after Automatic is exhausted may inactive/unprotected Keep Loaded be considered;
+- active/hard-protected Runtime remains untouched;
+- one Runtime at a time with current-state revalidation between steps.
+
+### Return to normal pressure
+
+- stop/cancel not-yet-started progressive continuation;
+- do not mass-restore reclaimed Runtime;
+- restore remains demand-driven through existing Slot materialization/restore behavior.
+
+## Scope B — background lifecycle efficiency
+
+Audit first; mutate only verified cost centers. Candidate areas include:
+
+- hidden `ChatGPTAttentionBridge` liveness/fallback work;
+- repeated detector scheduling/evaluation;
+- redundant response-identity work;
+- diagnostic/health probes continuing without need while hidden;
+- navigation/observer tasks surviving document/runtime generation changes;
+- presentation-only host work surviving detach/reclaim;
+- duplicate observer registration or uncancelled Swift concurrency tasks across hibernate/restore/rebuild.
+
+Allowed outcomes include event-first completion sensing, bounded/adaptive fallback, coalescing/suppressing redundant host work, prompt stale-task cancellation and exact-current ownership checks.
+
+Do not redesign provider semantics.
+
+## Explicitly out of scope / deferred
+
+Do NOT implement in this task:
+
+- aggregate FloatTabs/WebKit memory monitor as lifecycle input;
+- Auto/Custom/Unlimited memory budget;
+- budget watermarks;
+- memory-budget settings UI or persistence/backup schema;
+- aggregate-memory A/B acceptance claims;
+- best-effort WebContent/GPU process attribution;
+- healthy-state normal-policy redesign.
+
+Healthy/normal production behavior remains:
 
 ```text
-Memory Budget = Auto | Custom | Unlimited
-no normal fixed Runtime-count ceiling
-high watermark = 105%
-low watermark = 90%
-progressive one-at-a-time reclaim
-fresh resource remeasurement after each reclaim
-system memory pressure = independent ladder
-proactive long-idle cleanup = OFF by default
+normal Automatic resident target = 2
+Automatic inactive release path = 30s
 ```
 
-Initial Auto reference formula:
+Changing those two normal-policy semantics requires a new reconciliation.
+
+## Expected source/test boundary
+
+Inspect first:
 
 ```text
-clamp(physical RAM × 20%, 1.5 GiB, 6 GiB)
+FloatTabs/Web/SlotLifecycleCoordinator.swift
+FloatTabs/Web/WebViewPool.swift
+FloatTabs/Web/ChatGPTAttentionBridge.swift
+FloatTabsTests/WebViewPoolTests.swift
+FloatTabsTests/WebAttentionLifecycleTests.swift
+FloatTabsTests/ChatGPTAttentionBridgeTests.swift
 ```
 
-This formula is frozen as the first implementation assumption, not claimed as measured optimum. WP6 must validate/tune through Real-Mac A/B evidence before program-final acceptance.
+Mechanically related files are allowed only when Gate R0 proves the dependency and the change remains inside the current Web/runtime/Attention ownership boundary. `PanelController.swift` is conditional wiring only; it must not become a lifecycle writer.
 
-## Protection contract
+No Settings, Browser Profile, website-data, backup-schema or user-session migration path is authorized.
 
-Hard-protected Runtime:
+## Execution gates
 
-- active / actually presented;
-- fullscreen source;
-- supplemental visible Web surface;
-- Attention Generating;
-- active/pending allowed-background-media protection;
-- current materialization/restoring ownership.
+### Gate R0 — focused source reconciliation before product mutation
 
-Keep Loaded:
+Against fresh merged main:
 
-- excluded from normal budget reclaim;
-- may make the soft budget temporarily unsatisfied;
-- warning still prefers Automatic reclaim;
-- critical may reclaim inactive/unprotected Keep Loaded after eligible Automatic Runtime.
+- confirm `SlotLifecycleCoordinator` remains sole lifecycle writer;
+- confirm current pressure source/state path and reclaim boundary;
+- confirm current hard-protection/candidate facts;
+- confirm hidden generation observer/task ownership and exact tests;
+- compare against the WP0 owner map.
 
-## Background-generation contract
+If the owner map materially differs, STOP and update Authority before mutation.
 
-Generating remains hard-protected because arbitrary WKWebView JS/network work cannot be safely destroyed while generation must continue.
+### Gate R1 — pressure ladder focused verification
 
-Phase 8 may optimize:
+Must prove deterministic warning/critical injection, progressive one-at-a-time reclaim, Keep Loaded warning protection, critical ordering, hard protection, current-state revalidation and normal-state cancellation.
 
-- event-first sensing;
-- fallback watchdog cadence;
-- redundant hidden health/diagnostic probes;
-- response-identity work;
-- obsolete observer/task cancellation;
-- presentation-only hidden work.
+### Gate R2 — background-efficiency focused verification
 
-It must not claim deep renderer-memory freeze without a supported public WebKit mechanism.
+For each changed cost center, prove task/observer lifetime is bounded, stale work is cancelled/harmless, generation/completion routing remains correct, and intended probe/scheduling work is deterministically lower or bounded.
 
-After generation completes:
+### Gate R3 — broad machine verification
 
-```text
-Ready/unread + native notification survives
-→ generating protection ends
-→ normal budget lifecycle resumes
-```
+Required:
 
-The implementation contract sets an initial bounded 15s post-completion normal-budget recall grace; warning/critical may bypass it.
+- full XCTest PASS;
+- Debug arm64 build PASS;
+- Release arm64 build PASS;
+- native arm64 architecture PASS;
+- package lock unchanged unless separately authorized.
 
-## Resource-measurement Gate
+### Gate R4 — repository-host gate
 
-Phase 8 Gate 0 is mandatory before budget enforcement.
+Literal successor PR head must pass required `Build & Test (Apple Silicon arm64)` on `[self-hosted, macOS, ARM64, mac-mini-ci]`.
 
-It must prove a production-safe aggregate measurement mechanism for:
+### Gate R5 — fresh exact-diff / ownership audit
 
-```text
-FloatTabs host + FloatTabs-attributable WebKit helpers
-```
+Before merge readiness verify:
 
-Rules:
+- no aggregate/best-effort attribution;
+- no private WebKit SPI;
+- no second lifecycle writer;
+- healthy-state target=2 / 30s unchanged;
+- no destructive website/session coupling;
+- Phase 6 restore and generation protection preserved;
+- performance claims match actual measured/tested host-side behavior.
 
-- aggregate only; no exact per-Slot WebContent RSS claim;
-- read-only resource monitor; no direct kill/reload/reclaim;
-- explicit measurement-unavailable state;
-- no substitution of Runtime count for GiB;
-- no private WebKit SPI.
-
-If Gate 0 cannot be proven, STOP and reconcile before WP2.
-
-## Frozen work packages
-
-```text
-WP0 measurement feasibility + exact source audit
-WP1 additive budget configuration + passive resource monitor
-WP2 budget scheduler + progressive normal reclaim
-WP3 system-pressure ladder + anti-thrash integration
-WP4 Advanced → Runtime & Memory UI + persistence/backup
-WP5 background-generation / observer efficiency corrective
-WP6 Real-Mac + Phase7-vs-Phase8 identical-workload A/B acceptance
-```
-
-## Frozen acceptance principles
-
-Phase 8 must prove at minimum:
-
-1. 3+ Automatic Runtimes can remain resident beyond the old 30s window while under budget;
-2. budget crossing reclaims one Runtime at a time;
-3. each reclaim is followed by fresh measurement;
-4. reclaim stops at/below low watermark or no-candidate boundary;
-5. active/generating/fullscreen/media/restoring protections hold;
-6. Keep Loaded behavior remains explicit/honest when it blocks convergence;
-7. repeated switching does not cause reclaim/restore thrash;
-8. reclaim/restore preserves Browser Profile login/session and exact Slot identity;
-9. hidden completion still yields unread/native notification and later budget eligibility;
-10. Phase 7 baseline vs Phase 8 candidate is compared under an identical workload for aggregate memory, helper count, CPU, hibernate/restore cycles, resident switch latency and restore latency;
-11. required self-hosted Apple Silicon CI passes on literal merge head;
-12. fresh ownership/exact-diff audit finds no second lifecycle writer/private WebKit workaround/destructive data coupling.
-
-## Historical/document disposition
-
-V5 and the Phase 7 implementation contract are preserved unchanged as delivered historical evidence. They no longer define the future target policy.
-
-The old Phase 7 acceptance criterion that expected convergence to a fixed resident count is historical and must not be reused as Phase 8 success criteria.
+Human final runtime/UI acceptance remains program-final unless Authority later changes that gate.
 
 ## STOP conditions
 
-STOP before implementation if work would require:
+STOP and reconcile if:
 
-- deleting/resetting Browser Profile, cookies, session, website data, or user configuration;
-- a second canonical lifecycle writer;
-- private WebKit SPI;
-- exact per-Slot memory attribution as required policy truth;
-- a disguised fixed resident-count budget;
-- normal reclaim of active/generating/fullscreen/protected-media/current-restoring Runtime;
-- arbitrary reload/reset/restart as memory management;
-- product mutation before a new implementation task is authorized.
+- #190 is not merged cleanly with fresh required CI;
+- fresh main does not contain this exact task/re-scope Authority;
+- the current lifecycle owner map materially differs from WP0 evidence;
+- implementation requires private SPI, root, restricted entitlement or guessed/correlated attribution;
+- pressure progression cannot remain one-at-a-time with current-state revalidation;
+- normal target=2 / 30s must change;
+- generation correctness requires provider-semantic redesign;
+- Browser Profile/session/site data would be reset/migrated/destructively cleaned;
+- a required verification or repository-host gate fails.
 
 ## Current execution state
 
 ```text
-BASELINE_MAIN=2b414982710b3f042fc7d6e9c88eb2d7117b4e38
-PHASE7=MERGED
-V6=ACCEPTED_FROZEN
-PHASE8_CONTRACT=ACCEPTED_FROZEN
-DESIGN_DELIVERABLES=COMPLETE
-PRODUCT_MUTATION=NOT_AUTHORIZED
-TARGET_NORMAL_POLICY=MEMORY_BUDGET_DRIVEN
-FIXED_NORMAL_RESIDENT_COUNT=SUPERSEDED_TARGET
-NEXT_GATE=DESIGN_DOCS_MERGE_THEN_STOP
-NEXT_PRODUCT_WORK=REQUIRES_EXPLICIT_PHASE8_IMPLEMENTATION_AUTHORIZATION_STARTING_WITH_WP0
+USER_DECISION=D_COMBINE
+BUDGET_TRACK=DEFERRED_PLATFORM_BLOCKED
+CURRENT_SCOPE=PRESSURE_LADDER_PLUS_BACKGROUND_EFFICIENCY
+AUTHORIZATION=GRANTED_AFTER_PR190_CLOSEOUT_MERGE
+PRODUCT_MUTATION=NOT_STARTED
+NORMAL_POLICY_TARGET2_30S=PRESERVE
+BEST_EFFORT_ATTRIBUTION=FORBIDDEN
+FIRST_PRODUCT_GATE=R0_FOCUSED_SOURCE_RECONCILIATION
+NEXT_ACTION=PR190_LITERAL_HEAD_CI_AND_CLOSEOUT_MERGE
 ```
