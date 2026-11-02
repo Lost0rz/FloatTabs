@@ -14,6 +14,10 @@ Task branch:
 
 `codex/adaptive-lifecycle-restore-001`
 
+Draft PR:
+
+`#194 — design: adaptive lifecycle and restore performance`
+
 Execution baseline:
 
 `main@7e179aaf4dbf0c538c7c2221101fc74d16e49b98`
@@ -29,6 +33,7 @@ PR_193_SQUASH_MERGE=7E179AAF
 NOTIFICATION_HUMAN_ACCEPTANCE=PASS
 TASK=FT-ADAPTIVE-LIFECYCLE-RESTORE-001
 TASK_STATE=ACTIVE_WP0_AUTHORIZED
+PR_194=OPEN_DRAFT_UNMERGED
 PRODUCT_POLICY_MUTATION=BLOCKED_PENDING_WP0
 COLD_RESTORE_ROOT_CAUSE=UNKNOWN
 NORMAL_FIXED_TARGET_2=CURRENT_PRODUCTION_TRUTH_NOT_FINAL_PRODUCT_TARGET
@@ -135,7 +140,7 @@ Only WP0 is authorized now. Product lifecycle semantics must not change until WP
 ## Next gate
 
 ```text
-WP0
+WP0 on PR #194
 → characterize resident quick-revisit vs cold-reclaimed restore
 → measure shell/restoring/runtime/readiness timing
 → characterize detached idle / generating / media behavior
