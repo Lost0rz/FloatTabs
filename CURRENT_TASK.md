@@ -1,106 +1,118 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
-**Title:** Adaptive Runtime lifecycle + fast restore + background efficiency — WP1  
-**Status:** `COMPLETE / HUMAN ACCEPTED / MERGE CLOSEOUT ONLY`  
-**Mode:** `CLOSEOUT — NO FURTHER WP1 PRODUCT IMPLEMENTATION AUTHORIZED`  
-**Task class:** `WEB RUNTIME / LIFECYCLE / PERFORMANCE / RESTORE UX`  
-**Execution baseline:** `main@7e179aaf4dbf0c538c7c2221101fc74d16e49b98`  
-**Task branch:** `codex/adaptive-lifecycle-restore-001`
+**Task ID:** FT-ADAPTIVE-LIFECYCLE-RESTORE-001
+**Card ID:** FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001
+**Title:** Replace fixed-count normal Runtime reclaim with staged Automatic lifecycle
+**Status:** ACTIVE / WP2 CONTROL BOOTSTRAP
+**Mode:** CONTROL/DESIGN FIRST; SOURCE MUTATION GATED ON REMOTE VERIFICATION
+**Task class:** WEB RUNTIME / LIFECYCLE POLICY
+**Baseline:** origin/main@2a52800f770266f7c901eb612a0b319ddca142df
+**Branch:** codex/adaptive-lifecycle-wp2-policy
+**PR:** one new Draft PR after bootstrap; do not reuse PR #194
 
 ## Authorization
 
-WP1 is complete. The canonical cold-presentation gate, exact-Runtime readiness, navigation-failure truthfulness, unread readiness gating, rapid A→B→A re-entry, notification exact-Slot routing, and generation protection have passed machine verification, independent audit, and user-owned real-Mac acceptance.
+Implement WP2 staged Automatic lifecycle policy after completing and remotely verifying the control/design-only bootstrap in this branch. PR #194 is merged; WP1 is complete and accepted. This task does not reopen WP1 and does not authorize WP3 scheduling or WP4 integration work.
 
-This file authorizes **closeout only** for PR #194. No additional WP1 behavior change and no WP2 product mutation may be added to this branch.
+Durable policy authority: [Runtime Lifecycle Policy V7](docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md).
+WP1 regression authority: [Adaptive Lifecycle Restore Contract V2](docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md).
 
-Durable WP1 design authority:
+## Frozen product policy
 
-`docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`
+- Remove the fixed normal resident-count reclaim policy. Runtime count is never a normal reclaim reason or RAM estimate.
+- Keep Loaded / Pinned is never automatically reclaimed by normal, warning, or critical FloatTabs policy. Explicit user/config lifecycle actions retain their existing semantics; macOS external process termination is outside this policy.
+- Automatic inactivity stages: RECENT <30s; IDLE >=30s and <600s; LONG_IDLE >=600s. Thirty seconds is anti-thrash protection, not destructive lifetime. Six hundred seconds is an initial tunable implementation default.
+- Under normal pressure, RECENT and IDLE remain resident. An inactive, unprotected LONG_IDLE Automatic Runtime may hibernate exactly once for automatic_long_idle_expired.
+- Warning progressively reclaims eligible inactive/unprotected IDLE or LONG_IDLE Automatic Runtime only. RECENT and Keep Loaded remain protected.
+- Critical may bypass RECENT, but only inactive/unprotected Automatic Runtime are eligible. Keep Loaded/Pinned and all hard-protected Runtime are never candidates.
+- Pressure reclaim is oldest-first and progressive, with current pressure/identity/protection revalidation after each step. Pressure normalization cancels pending continuation and does not restore already-reclaimed Runtime.
+- SlotLifecycleCoordinator remains the sole lifecycle policy writer. Inactivity timers/plans are exact-token and generation bounded. Reactivation, visibility/current ownership, removal, or identity-invalidating change makes old callbacks no-ops. Protection end re-evaluates current facts with a fresh valid plan/token.
+- Preserve generation/Attention, active media, fullscreen, supplemental visibility, WP1 presentation/readiness, notification privacy/routing, and all Browser Profile/session/login/cookie data.
 
-## Final accepted evidence
+The full policy, boundaries, diagnostic requirements, and 15 required regression cases are frozen in Policy V7.
 
-Semantic implementation head:
+## Explicitly forbidden
 
-`e187f83fd2c4198d3e2baa64ef5074037c87c410`
+- Replacing target=2 with another fixed count;
+- automatic reclaim of Keep Loaded/Pinned;
+- inferring RAM from Runtime count;
+- private WebKit SPI or helper-process killing;
+- reload/reset/restart workarounds;
+- clearing Browser Profile, login, cookies, session, cache, or conversation data;
+- a second lifecycle policy writer or diagnostics as policy authority;
+- changes to WP1 restore/session mechanics beyond call adaptation strictly required by the new lifecycle trigger;
+- changes to generation detection, notification semantics, inactiveSchedulingPolicy, snapshots/screenshots, GiB budgets, or unrelated UI.
 
-Pre-closeout branch head with green machine gates:
+## Control-only bootstrap gate
 
-`1a77fae92c53708e2c6c373301c825187fdb1de4`
+Before product source mutation:
 
-Accepted machine evidence:
+1. Fetch origin and verify PR #194 merged, fresh origin/main contains the merge, and the new branch starts from that exact fresh main.
+2. Preserve the old WP1 branch/worktree and all unique local work.
+3. Reconcile CURRENT_STATUS.md and this file to WP2.
+4. Create Policy V7; update documentation routing and supersession notices only where needed.
+5. Commit and push only the control/design bootstrap; verify the remote branch contains that commit.
+6. Create one Draft PR separate from PR #194.
 
-```text
-focused affected suites = PASS (381 passed / 4 skipped / 0 failed)
-full XCTest = PASS (1153 passed / 4 skipped / 0 failed)
-Debug arm64 = PASS
-Release arm64 = PASS
-native arm64 verification = PASS
-package lock = unchanged
-implementation-head macOS CI = PASS (41464559708 / 125341924174)
-implementation-head QA DMG = PASS (41464559462)
-control-head macOS CI at 1a77fae = PASS (41466335384 / 125348105768)
-control-head QA DMG at 1a77fae = PASS (41466335512)
-independent exact-diff / ownership / data-safety audit = PASS
-```
+Product source mutation is authorized only after step 5 is remotely verified. The control bootstrap must not include source or test changes.
 
-Human acceptance:
+## Implementation boundary
 
-```text
-HUMAN_UI_ACCEPTANCE=PASS
-WP1_PRESENTATION=PASS
-WP1_EXACT_RUNTIME_READINESS=PASS
-WP1_NOTIFICATION_COLD_ROUTE=PASS
-WP1_RAPID_SWITCH_PRESENTATION=PASS
-WP1_DATA_SAFETY=PASS
-```
+Primary policy owner: FloatTabs/Web/SlotLifecycleCoordinator.swift. Inspect and adapt only the existing lifecycle policy/timer/pressure/diagnostic call paths needed for V7. Add or update focused lifecycle and integration regressions in current owning test files. WebViewPool remains mechanism-only and may change only for a call adaptation strictly required by the new trigger. Do not move policy into Panel, Tabs, notifications, or diagnostics.
 
-The user's acceptance log `FloatTabs-WP1-Human-20261102-231725.jsonl` shows 23 deferred cold materializations, 23 actually-visible restoring-surface events, 23 attachments, zero readiness failures, and the notification route using the canonical cold gate. The user explicitly requested WP1 closeout.
+## Required verification
 
-## Separate next-phase evidence — not WP1 work
+Focused suites: lifecycle; WebAttentionLifecycleTests; WebAttentionCrossFeatureTests; WebViewPool reclaim regressions; ExternalShell/WP1 presentation regressions; affected runtime diagnostic/privacy tests.
 
-The same run proves the shipped healthy-state lifecycle policy is too aggressive for legitimate multi-Slot usage: nine reconciliations in roughly 50 seconds observed `managed_resident_count=3`, fixed `target=2`, and `eviction_count=1` with `reason=reconcile`.
+Then full XCTest, Debug arm64, Release arm64, native arm64 verification, package-lock check, exact-head self-hosted macOS CI on [self-hosted, macOS, ARM64, mac-mini-ci], exact-head QA DMG, and a fresh independent exact-diff / ownership / data-safety audit. Do not infer exact-head evidence from earlier commits. Do not silently use hosted macOS CI.
 
-This is **WP2 lifecycle-policy evidence**, not a reason to reopen WP1.
-
-The next-phase design direction requested by the user is:
-
-```text
-NO_FIXED_NORMAL_RESIDENT_COUNT
-PINNED_KEEP_LOADED = NO_AUTOMATIC_EXIT
-AUTOMATIC = STAGED_AUTOMATIC_LIFECYCLE
-NORMAL_RECLAIM = TIME/STATE BASED, NOT TAB-COUNT BASED
-MEMORY_PRESSURE = PROGRESSIVE AUTOMATIC RECLAIM SIGNAL
-```
-
-This direction is not implementation authority on PR #194. It must be reconciled into a clean post-merge WP2 task/branch/PR before code changes.
-
-## Closeout gate
-
-Required closeout sequence:
-
-1. update `CURRENT_STATUS.md`, this task file, V2, and PR #194 description to final WP1 PASS;
-2. run/observe exact final control-head macOS CI and QA DMG;
-3. if both are green and PR identity is unchanged, mark PR #194 ready and merge using the repository's normal merge method;
-4. verify fresh `origin/main` contains the merge;
-5. only then create the clean WP2 task/branch/PR and new lifecycle-policy design authority.
+The 15 acceptance cases are enumerated in Policy V7. Stop after machine evidence and independent audit. Do not merge or release. HUMAN_UI_ACCEPTANCE=PENDING / USER_OWNED until the user validates integrated real-Mac multi-Slot use, long-idle restore through the WP1 gate, pinned retention, background generation protection, and intact login/session/conversation.
 
 ## STOP conditions
 
-- do not add WP2 code or policy changes to PR #194;
-- do not modify fixed `target=2`, 30-second reclaim, pressure ordering, Keep Loaded semantics, scheduling policy, or snapshot behavior during WP1 closeout;
-- do not merge if the exact final control-head machine gate is red or PR head moved unexpectedly;
-- do not release a public build as part of this closeout;
-- do not clear Browser Profile/cookies/session/cache/configuration;
-- do not infer a cause for the historical CI failures; it remains unknown.
+Stop if PR #194 is not merged or fresh main lacks it; an overlapping predecessor has unknown unique work; source requires another lifecycle writer; normal reclaim still depends on Runtime count; Keep Loaded can be pressure-reclaimed; a stale token can reclaim a reactivated/current Runtime; WP1 restore/readiness or generation/media/fullscreen protection regresses; user/session data is mutated; private SPI/helper kill/reload/reset workaround is required; or a WP2-attributable required machine gate fails.
 
-## Final state
+## Return contract
 
-```text
-WP1=COMPLETE
-HUMAN_UI_ACCEPTANCE=PASS
-PR_194=MERGE_CLOSEOUT
-WP2=NOT_STARTED
-WP3=NOT_STARTED
-WP4=NOT_STARTED
-```
+Return the verified values for:
+
+~~~text
+BASELINE_MAIN
+CONTROL_BOOTSTRAP_HEAD
+WP2_BRANCH
+WP2_DRAFT_PR
+FINAL_BRANCH_HEAD
+CHANGED_FILES
+REMOTE_DELIVERY
+FIXED_RESIDENT_COUNT_REMOVED
+AUTOMATIC_STAGE_MODEL
+RECENT_30S_RESULT
+IDLE_NORMAL_RESULT
+LONG_IDLE_RESULT
+PINNED_NORMAL_RESULT
+PINNED_WARNING_RESULT
+PINNED_CRITICAL_RESULT
+WARNING_PRESSURE_RESULT
+CRITICAL_PRESSURE_RESULT
+PROTECTION_RESULT
+STALE_PLAN_RESULT
+PRESSURE_NORMALIZATION_RESULT
+WP1_PRESENTATION_REGRESSION
+WP1_A_B_A_REGRESSION
+NOTIFICATION_REGRESSION
+GENERATION_PROTECTION_REGRESSION
+DATA_SAFETY_RESULT
+FOCUSED_TESTS
+FULL_XCTEST
+DEBUG_BUILD
+RELEASE_BUILD
+ARM64_VERIFICATION
+PACKAGE_LOCK
+CI_STATE
+QA_DMG_STATE
+INDEPENDENT_AUDIT
+HUMAN_UI_ACCEPTANCE=PENDING
+WP3_SCHEDULING_MUTATION=NOT_STARTED
+WP4_OTHER_MUTATION=NOT_STARTED
+PR_STATE
+~~~

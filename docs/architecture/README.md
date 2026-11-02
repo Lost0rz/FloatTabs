@@ -6,25 +6,26 @@ Read [`../README.md`](../README.md) first. It is the repository-wide documentati
 
 Current task:
 
-`FT-ADAPTIVE-LIFECYCLE-RESTORE-001`
+FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / WP2 card FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001
 
-Current contract:
+Current WP2 policy:
 
-- [`FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`](FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md) — **CURRENT / ACCEPTED / WP1 FROZEN / WP2–WP4 BLOCKED**.
+- [FloatTabs_Runtime_Lifecycle_Policy_V7.md](FloatTabs_Runtime_Lifecycle_Policy_V7.md) — FROZEN / WP2 POLICY; source follows remote control-bootstrap verification.
 
-Superseded:
+WP1 regression boundary:
 
-- [`FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md`](FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md) — historical WP0 evidence-gate authority only.
+- [FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md](FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md) — accepted and merged WP1 presentation/readiness contract.
+
+V1 remains historical/superseded.
 
 Current stage:
 
-```text
-controlled WP0 restore evidence reconciled
-→ WP1 unified cold-restore presentation gate AUTHORIZED
-→ machine verification + independent audit
-→ real-Mac human acceptance
-→ WP2–WP4 remain separately blocked
-```
+~~~text
+WP1 exact-Runtime cold-presentation gate = MERGED / COMPLETE
+→ WP2 control/design bootstrap and staged Automatic lifecycle = ACTIVE
+→ source mutation only after remote bootstrap verification
+→ WP3 scheduling and WP4 integration remain separate
+~~~
 
 ## Preserved lifecycle foundations
 
@@ -113,21 +114,20 @@ Resident ready Runtime keeps its existing fast path.
 
 The existing native restoring surface is preferred. No snapshot layer is authorized in WP1.
 
-## Current production tuning under review — unchanged during WP1
+## Current WP2 lifecycle policy
 
-Production still implements:
+Policy V7 owns current normal and pressure lifecycle eligibility:
 
-```text
-normal Automatic resident target = 2
-Automatic inactive release       = 30s
-```
+- no fixed-count normal reclaim;
+- Keep Loaded / Pinned is never automatically reclaimed by normal, warning, or critical FloatTabs policy;
+- Automatic progresses through RECENT (<30s), IDLE (30s to <600s), and LONG_IDLE (>=600s);
+- normal policy reclaims only inactive, unprotected LONG_IDLE Automatic;
+- warning reclaims eligible IDLE/LONG_IDLE Automatic progressively;
+- critical may bypass RECENT but still reclaims only unprotected Automatic;
+- pressure candidates are processed oldest-first with fresh-fact revalidation;
+- 30s is anti-thrash protection and 600s is an initial tunable default.
 
-Accepted design conclusions:
-
-- fixed target `2` is not final product truth;
-- `30s == mandatory destructive lifetime` is rejected as the final product invariant;
-- pressure-first + bounded long-idle cleanup is currently favored but not frozen;
-- WP2 lifecycle-policy implementation remains blocked.
+The V6 fixed target, Phase 7 30s destructive release, and Keep Loaded critical reclaim semantics are historical for this policy boundary. V6 remains useful for aggregate-memory feasibility and non-conflicting architecture boundaries.
 
 ## Public WebKit scheduling boundary
 
@@ -199,7 +199,8 @@ Treat as historical/deferred unless explicitly referenced by current Authority:
 - Phase 1–7 implementation contracts after delivered boundaries;
 - original Phase 8 adaptive GiB-budget implementation beyond its Gate-0 evidence;
 - V1–V5 lifecycle contracts;
+- fixed-count healthy-state policy and 30s destructive-release semantics in V6 / Phase 7 / Phase 8 pressure documents, superseded for WP2 by V7;
 - old Hot/Warm/Cold benchmark/policy documents;
-- documents that present fixed `target=2` or 30s destructive lifetime as permanent product truth.
+- documents that present fixed target=2 or 30s destructive lifetime as permanent product truth.
 
-Current mutation follows `CURRENT_TASK.md` plus the adaptive lifecycle/restore V2 contract.
+Current mutation follows CURRENT_TASK.md plus Runtime Lifecycle Policy V7. WP1 presentation/readiness regressions follow Adaptive Lifecycle Restore Contract V2.

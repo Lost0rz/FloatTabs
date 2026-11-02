@@ -21,25 +21,26 @@ Historical documents remain evidence only unless current Authority explicitly re
 
 Current mutation authority:
 
-`FT-ADAPTIVE-LIFECYCLE-RESTORE-001`
+FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / WP2 card FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001
 
-Current durable contract:
+Current durable policy contract:
 
-[`architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`](architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md)
+[architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md](architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md)
+
+WP1 presentation regression contract:
+
+[architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md](architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md)
 
 Current stage:
 
-```text
-WP0 restore evidence = reconciled / sufficient for WP1
-WP1 unified cold-restore presentation gate = AUTHORIZED
-WP2 adaptive healthy-state policy = BLOCKED
-WP3 background scheduling mutation = BLOCKED
-WP4 lifecycle integration mutation = BLOCKED
-```
-
-V1 is superseded and historical:
-
-[`architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md`](architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md)
+~~~text
+WP1 canonical cold-presentation gate = MERGED / COMPLETE
+WP2 staged Automatic lifecycle = ACTIVE
+WP2 control/design bootstrap = FIRST
+WP2 source mutation = GATED ON REMOTE BOOTSTRAP VERIFICATION
+WP3 scheduling mutation = NOT STARTED
+WP4 integration mutation = NOT STARTED
+~~~
 
 ## 3. Accepted current restore diagnosis
 
@@ -109,25 +110,20 @@ RuntimeDiagnostics
 
 No task may introduce a second canonical lifecycle or presentation writer.
 
-## 6. Current lifecycle tuning under review
+## 6. Current WP2 lifecycle policy
 
-Production still implements during WP1:
+Policy V7 is the current authority for normal lifecycle and pressure eligibility:
 
-```text
-Automatic normal resident target = 2
-Automatic inactive reclaim       = ~30s
-warning/critical pressure ladder = progressive
-Generating                       = hard-protected
-```
+- normal Runtime residency is independent of Runtime count;
+- Keep Loaded / Pinned is never automatically reclaimed by FloatTabs;
+- Automatic uses RECENT (<30s), IDLE (30s to <600s), and LONG_IDLE (>=600s);
+- normal long-idle reclaim is eligible only for inactive unprotected LONG_IDLE Automatic;
+- warning progressively reclaims eligible IDLE/LONG_IDLE Automatic;
+- critical may include RECENT Automatic, while preserving every hard protection;
+- 30s is anti-thrash protection; 600s is an initial tunable implementation default;
+- system-pressure continuation is progressive and revalidates fresh facts after each reclaim.
 
-Durable conclusions already accepted:
-
-- fixed normal `target=2` is not final product truth;
-- `30s == mandatory destructive lifetime` is not the final product invariant;
-- resident revisit has material UX value because observed cold restores were roughly 3–6 seconds while resident revisit was tens of milliseconds;
-- Runtime count is not a RAM budget.
-
-Current policy direction is **Option A favored, not frozen**: pressure-first + bounded long-idle cleanup. No WP2 implementation is authorized yet.
+The earlier fixed resident target and unconditional 30s release are historical baseline behavior. Runtime count is not a RAM budget.
 
 ## 7. WebKit inactive-scheduling boundary
 
@@ -206,9 +202,9 @@ WP1 may change only how the exact nonresident target is presented after routing;
 
 When historical material disagrees with current source/tests or current Authority:
 
-1. follow `CURRENT_TASK.md` plus `FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md` for current work;
+1. follow CURRENT_TASK.md plus Runtime Lifecycle Policy V7 for WP2 policy; use Adaptive Lifecycle Restore Contract V2 for WP1 presentation/readiness regressions;
 2. preserve Browser Profile/session/data-safety boundaries;
-3. preserve the delivered warning/critical pressure ladder unless current Authority explicitly changes it;
+3. apply V7 warning/critical eligibility and Keep Loaded protection;
 4. preserve the Phase-8 attribution boundary against fake GiB budgets;
-5. treat V1 as superseded historical evidence;
-6. keep WP2–WP4 blocked until separately reconciled.
+5. treat V1 and fixed-count lifecycle policy text as historical except where V7 retains a bounded prior mechanism;
+6. keep WP3 and WP4 mutation outside this task.

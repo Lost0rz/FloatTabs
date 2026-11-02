@@ -1,137 +1,66 @@
 # FloatTabs Current Status
 
-**Status date:** `2026-11-02`  
-**Repository:** `Lost0rz/FloatTabs`  
-**Default branch:** `main`
+**Status date:** 2026-11-02
+**Repository:** Lost0rz/FloatTabs
+**Default branch:** main
 
 ## Mode
 
-**MODE: ADAPTIVE LIFECYCLE + RESTORE PERFORMANCE — WP1 COMPLETE / MERGE CLOSEOUT**
+**MODE: ADAPTIVE LIFECYCLE — WP2 STAGED AUTOMATIC POLICY**
 
-Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` — **WP1 COMPLETE / HUMAN ACCEPTED / PR #194 MERGE-READY SUBJECT TO FINAL CONTROL-HEAD CHECKS**.
+Current task: FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / card FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001 — ACTIVE.
 
-Task branch:
+Execution branch:
 
-`codex/adaptive-lifecycle-restore-001`
-
-PR:
-
-`#194 — design: adaptive lifecycle and restore performance`
+codex/adaptive-lifecycle-wp2-policy
 
 Execution baseline:
 
-`main@7e179aaf4dbf0c538c7c2221101fc74d16e49b98`
+main@2a52800f770266f7c901eb612a0b319ddca142df
 
-WP1 semantic implementation head:
+Control/design authority:
 
-`e187f83fd2c4198d3e2baa64ef5074037c87c410`
+docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md
 
-Pre-closeout final branch head with green machine gates:
+## Verified repository state
 
-`1a77fae92c53708e2c6c373301c825187fdb1de4`
-
-## Repository / delivery state
-
-```text
-PUBLIC_RELEASE=v0.5.8
-PUBLIC_BUILD=26
-TASK=FT-ADAPTIVE-LIFECYCLE-RESTORE-001
-WP1_CANONICAL_COLD_PRESENTATION_GATE=COMPLETE
-WP1_EXACT_RUNTIME_READINESS=COMPLETE
-WP1_MACHINE_GATE=PASS
-WP1_INDEPENDENT_AUDIT=PASS
-WP1_HUMAN_UI_ACCEPTANCE=PASS
-WP1=COMPLETE
-PR_194=OPEN_UNMERGED_CLOSEOUT
-WP2_POLICY_MUTATION=NOT_STARTED
+~~~text
+PR_194=MERGED
+PR_194_MERGE_COMMIT=2a52800f770266f7c901eb612a0b319ddca142df
+ORIGIN_MAIN=2a52800f770266f7c901eb612a0b319ddca142df
+WP1=COMPLETE / HUMAN_ACCEPTED
+WP2=ACTIVE
+WP2_CONTROL_BOOTSTRAP=IN_PROGRESS
+WP2_SOURCE_MUTATION=NOT_STARTED
+WP2_DRAFT_PR=TO_BE_CREATED_AFTER_CONTROL_BOOTSTRAP_PUSH
+HUMAN_UI_ACCEPTANCE=PENDING / USER_OWNED
 WP3_SCHEDULING_MUTATION=NOT_STARTED
-WP4_INTEGRATION_MUTATION=NOT_STARTED
-PRIOR_CI_FAILURE_ROOT_CAUSE=UNKNOWN
-WEBKIT_FIRST_PIXEL=UNMEASURED
-AGGREGATE_GIB_BUDGET=DEFERRED_PLATFORM_BLOCKED
+WP4_OTHER_MUTATION=NOT_STARTED
 PRIVATE_WEBKIT_SPI=FORBIDDEN
-```
+~~~
 
-Current durable WP1 contract:
+The WP1 branch/worktree is preserved and not reused for WP2. The new WP2 worktree was created cleanly from the verified post-merge origin/main. Existing relevant worktrees had no local-only commits or uncommitted tracked/untracked changes at preflight; no existing branch or worktree was overwritten.
 
-`docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`
+## WP1 regression boundary
 
-V1 remains historical/superseded.
+PR #194 completed the canonical cold-presentation gate and exact-Runtime readiness. The accepted contract is [Adaptive Lifecycle Restore Contract V2](docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md). Its presentation, restore, focus, unread, notification-route, and data-safety behavior remains a WP2 regression boundary.
 
-## WP1 final evidence
+## WP2 policy
 
-WP1 Corrective-002 established exact-Runtime presentation readiness (`loading / ready / failed`) owned by `PanelController`, preserving the native `WebPanelContainerView` Restoring surface and resident-ready fast path.
+Normal residency no longer uses a fixed Runtime count. Keep Loaded / Pinned is never automatically reclaimed. Automatic Slots use RECENT (<30s), IDLE (30s to <600s), and LONG_IDLE (>=600s) stages. Under normal pressure, only an inactive unprotected LONG_IDLE Automatic Runtime may hibernate. Warning reclaims eligible IDLE/LONG_IDLE Automatic progressively; critical may include RECENT Automatic. Both pressure paths revalidate fresh facts after each step and exclude Keep Loaded and hard-protected Runtime.
 
-Machine and independent evidence:
+600s is an initial implementation default, not a permanent product invariant. The 30s boundary is anti-thrash protection, not destructive lifetime. SlotLifecycleCoordinator remains the sole lifecycle policy writer. Full requirements and regressions are in Policy V7 and CURRENT_TASK.md.
 
-```text
-focused affected suites = PASS (381 passed / 4 skipped / 0 failed)
-full XCTest = PASS (1153 passed / 4 skipped / 0 failed)
-Debug arm64 = PASS
-Release arm64 = PASS
-native arm64 verification = PASS
-package lock = unchanged
-implementation-head macOS CI = PASS (run 41464559708 / job 125341924174)
-implementation-head QA DMG = PASS (run 41464559462)
-control-head macOS CI at 1a77fae = PASS (run 41466335384 / job 125348105768)
-control-head QA DMG at 1a77fae = PASS (run 41466335512)
-fresh independent exact-diff / ownership / data-safety audit = PASS
-```
+The WP1 human run observed fixed-count normal eviction while three Automatic Runtime instances were in use. At the new baseline, lifecycle source still contains defaultManagedResidentTarget=2, count-based decisions, an approximately 30s release path, and a critical path that can reclaim inactive Keep Loaded. These are the WP2 baseline facts to replace.
 
-User-owned real-Mac acceptance on the exact WP1 build is **PASS**. The uploaded acceptance log `FloatTabs-WP1-Human-20261102-231725.jsonl` records:
+## Current gate
 
-- `23` `panel.materialization.deferred` events;
-- `23` `panel.restoring_surface.window_visible` events;
-- `23` `panel.materialization.attached` events;
-- `0` `panel.materialization.readiness_failed` events;
-- notification cold routing entering the canonical restoring/materialization path;
-- rapid switching exercising cancellation/re-entry without a reported WP1 blank/stale/focus defect.
+~~~text
+fresh post-WP1 main verified
+→ reconcile WP2 status/task + Policy V7
+→ push control/design-only commit and verify remote
+→ create one Draft PR separate from #194
+→ only then change lifecycle source/tests
+~~~
 
-The user reports the WP1 presentation/focus/notification behavior as acceptable and explicitly requested WP1 closeout.
-
-## Separate lifecycle-policy evidence for WP2
-
-The same human run confirms a **separate lifecycle-policy problem**, not a WP1 presentation failure.
-
-During a three-Runtime frequent-switch window, the log records nine `slot_lifecycle.runtime_budget` reconciliations in roughly 50 seconds with:
-
-```text
-managed_resident_count = 3
-target = 2
-eviction_count = 1
-reason = reconcile
-```
-
-Each reconciliation can immediately hibernate an Automatic Runtime and cause the next revisit to cold-restore. This proves the current normal-policy fixed resident count can create Runtime thrash for a legitimate multi-Slot working set.
-
-Durable product direction for the next lifecycle-policy work:
-
-- normal healthy-state lifecycle must **not** use a fixed resident-count cap as the reclaim trigger;
-- user-pinned / `Keep Loaded` Slots are a strong retention request and do not participate in automatic exit;
-- non-pinned `Automatic` Slots follow staged inactivity / pressure-driven automatic lifecycle rules;
-- time/state/pressure determine eligibility and reclaim; the number of currently resident Tabs is not itself a normal reclaim reason;
-- Browser Profile/session/configuration data safety and WP1 cold-presentation correctness remain regression boundaries.
-
-This evidence belongs to the next WP2 design/authorization. WP2 implementation has not started on PR #194.
-
-## Preserved boundaries
-
-- `SlotLifecycleCoordinator` remains the sole lifecycle/reclaim policy writer.
-- `WebViewPool` remains Runtime mechanism and identity owner.
-- `PanelController` remains presentation/materialization/readiness owner.
-- `WebAttentionCoordinator` remains generation/Attention protection authority.
-- Browser Profile/cookies/session/configuration are never cleared as lifecycle recovery.
-- notification exact-Slot/privacy semantics remain unchanged.
-- no private WebKit SPI, helper killing, reload/reset/restart workaround, or fake per-Slot/aggregate RAM attribution is authorized.
-
-## Next gate
-
-```text
-WP1 = COMPLETE
-→ finish PR #194 closeout on an exact control head
-→ merge #194 only after the final control-head checks are green
-→ create a clean post-merge WP2 lifecycle-policy task/branch/PR
-→ freeze WP2 staged lifecycle contract before product mutation
-```
-
-Do not add WP2 implementation to PR #194.
+No WP2 product source has changed yet. Do not merge the WP2 PR or release. Human UI acceptance remains user-owned and pending.

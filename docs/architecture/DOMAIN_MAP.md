@@ -4,13 +4,14 @@ This file is a **derived navigation map**. It does not replace `AGENTS.md`, `CUR
 
 ## Authority order
 
-1. `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`;
-2. `docs/README.md`;
-3. current task contract: `FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md`;
-4. `docs/architecture/README.md`;
-5. this map for navigation;
-6. production source/tests/fresh evidence;
-7. older lifecycle/notification contracts and archive material as bounded historical/delivered evidence.
+1. AGENTS.md, CURRENT_STATUS.md, CURRENT_TASK.md;
+2. docs/README.md;
+3. current WP2 policy: FloatTabs_Runtime_Lifecycle_Policy_V7.md;
+4. WP1 presentation/readiness regression contract: FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md;
+5. docs/architecture/README.md;
+6. this map for navigation;
+7. production source/tests/fresh evidence;
+8. older lifecycle/notification contracts and archive material as bounded historical/delivered evidence.
 
 ## Domain routes
 
@@ -19,81 +20,63 @@ This file is a **derived navigation map**. It does not replace `AGENTS.md`, `CUR
 | App Composition | dependency wiring, launch/termination, top-level services | `FloatTabs/App/AppCoordinator.swift`, `AppDelegate.swift`, `FloatTabsApp.swift` | composition only; not lifecycle policy |
 | Tabs & Profiles | persistent Slot identity, selection, ordering, Web App / Browser Profile config, `lastUsedAt`, `Automatic | Keep Loaded` preference | `FloatTabs/Tabs/TabStore.swift`, `WebAppProfile.swift`, `BrowserProfile.swift`, `WebRenderingProfile.swift` | persistent truth; does not decide Runtime reclaim |
 | Runtime Lifecycle | inactivity/protection policy, normal reclaim policy, system-pressure progression | `FloatTabs/Web/SlotLifecycleCoordinator.swift` | **sole canonical lifecycle writer**; primary owner for WP2/WP4 |
-| Web Runtime | WKWebView creation/reuse, Runtime identity, hibernate/restore/release, bridge/observer lifetime | `FloatTabs/Web/WebViewPool.swift`, `SlotNavigationObserver.swift` | mechanism owner; primary restore/resource evidence route for WP0/WP4 |
-| Web Runtime Configuration | supported WKWebView/WKPreferences configuration, rendering/UA | `FloatTabs/Web/WebViewFactory.swift` | mechanism only; any inactive-scheduling override needs WP0 evidence and lifecycle intent from coordinator |
-| Window / Panel / Restore Presentation | shell visibility, selected-Slot synchronization, deferred materialization, restoring surface, fullscreen hosting | `FloatTabs/Panel/PanelController.swift`, `FloatTabs/Web/WebViewContainer.swift`, `FloatingPanel.swift`, `FullscreenSourceHost.swift` | primary WP0/WP1 restore-first-frame route; no reclaim ownership |
+| Web Runtime | WKWebView creation/reuse, Runtime identity, hibernate/restore/release, bridge/observer lifetime | `FloatTabs/Web/WebViewPool.swift`, `SlotNavigationObserver.swift` | Runtime mechanism owner; supports WP1 restore and WP2 reclaim regressions |
+| Web Runtime Configuration | supported WKWebView/WKPreferences configuration, rendering/UA | `FloatTabs/Web/WebViewFactory.swift` | mechanism only; WP2 leaves inactive scheduling unchanged; future overrides require separate authority |
+| Window / Panel / Restore Presentation | shell visibility, selected-Slot synchronization, deferred materialization, restoring surface, fullscreen hosting | `FloatTabs/Panel/PanelController.swift`, `FloatTabs/Web/WebViewContainer.swift`, `FloatingPanel.swift`, `FullscreenSourceHost.swift` | WP1 restore-first-frame owner; no WP2 reclaim ownership |
 | Attention / Generation | ChatGPT generation sensing, native Attention state, liveness fallback | `ChatGPTAttentionBridge.swift`, `WebAttentionCoordinator.swift` | generation protection fact; must remain correct under any background scheduling policy |
 | Response / Unread / Notification | assistant semantics, unread truth, native completion projection | `ChatGPTResponseExtraction.swift`, `ChatGPTResponseBridge.swift`, `ChatGPTUnreadResponseCoordinator.swift`, `ChatGPTCompletionNotificationCoordinator.swift` | delivered #193 behavior is a regression boundary; current task does not redesign notification semantics |
 | Focus / Input / Commands | native/Web focus, shortcuts, command/event routing | `FloatTabs/Web/WebFocusRouter.swift`, `FloatTabs/Hotkeys/AppCommandController.swift`, `GlobalHotkeyController.swift` | cold/warm restore must not enable focus before exact-current readiness |
 | Persistence & Recovery | durable Slot/Profile state, preferences, backup/restore | `ProfileRepository.swift`, `AppPreferencesStore.swift`, `FloatTabsBackupService.swift` | no destructive session/config mutation; new policy persistence only after policy is authorized |
-| Diagnostics | diagnostic events, incidents, privacy filtering, long-term observation | `RuntimeDiagnostics.swift`, `RuntimeDiagnosticWriter.swift`, `RuntimeDiagnosticEvent.swift`, `LongTermPerformanceObservationCoordinator.swift` | evidence only; WP0 may add narrowly necessary timing events, never policy |
+| Diagnostics | diagnostic events, incidents, privacy filtering, long-term observation | `RuntimeDiagnostics.swift`, `RuntimeDiagnosticWriter.swift`, `RuntimeDiagnosticEvent.swift`, `LongTermPerformanceObservationCoordinator.swift` | evidence only; may record bounded WP2 stage/reclaim facts, never policy |
 | Website Cache / Storage | re-downloadable website-cache measurement/cleanup | `FloatTabs/Storage/WebsiteCacheCleanupCoordinator.swift`, `WebsiteCacheCleanupService.swift`, `WebsiteCachePolicy.swift` | cache cleanup is not Runtime memory lifecycle |
-| Tab Rail / Retention Projection | Automatic/Keep Loaded control, Browser Profile/media projection | `FloatTabs/UI/ExternalTabRail.swift` | retain current preference semantics during WP0 |
+| Tab Rail / Retention Projection | Automatic/Keep Loaded control, Browser Profile/media projection | `FloatTabs/UI/ExternalTabRail.swift` | preserve current preference semantics during WP2 |
 | Global Settings | app settings presentation | `FloatTabs/UI/GlobalSettingsController.swift`, `SettingsInformationArchitecture.swift` | no new lifecycle/memory settings until policy evidence is accepted |
 
-## Current task route
+## Current WP1 and WP2 routes
 
-```text
-user-observed restore/resource problem
-→ CURRENT_TASK / adaptive lifecycle contract
-→ WP0 evidence only
+WP1 accepted presentation route remains a regression boundary:
 
-WP0 restore route:
-PanelController summon/select
-→ selected Slot has resident Runtime?
-   YES → WebPanelContainerView reattach path
-   NO  → deferred materialization
-          → native Restoring… surface
-          → WebViewPool create/restore
-          → exact-current navigation/runtime readiness
-          → reveal/focus
+~~~text
+nonresident Slot presentation request
+→ exact target + restoring ownership
+→ visible native Restoring surface
+→ exact Runtime materialization/restore
+→ exact-current readiness
+→ ready Web surface reveal, focus, and readiness-gated acknowledgement
+~~~
 
-WP0 background route:
+WP2 policy route:
+
+~~~text
 SlotLifecycleCoordinator inactivity/protection facts
-→ WebPanelContainerView detach presentation
-→ resident WKWebView remains in WebViewPool
-→ WebKit public inactive scheduling behavior applies according to platform/activity
-→ later lifecycle policy may keep resident OR WebViewPool hibernate
-```
+→ exact-token Automatic stage plan
+→ normal: only unprotected LONG_IDLE Automatic may hibernate
+→ warning: oldest eligible IDLE/LONG_IDLE Automatic, progressively
+→ critical: oldest eligible inactive Automatic, RECENT may be bypassed
+→ revalidate pressure, Runtime identity, preference, and protections after each reclaim
+~~~
 
-## Current healthy-state production truth under review
+Keep Loaded / Pinned is never a FloatTabs automatic reclaim candidate. Runtime count is not a policy input. WP1 owns presentation/readiness; WebViewPool remains the Runtime mechanism.
 
-```text
-Automatic resident target = 2
-Automatic inactive grace  = 30s
-```
+## Current lifecycle policy and pressure route
 
-The new task explicitly rejects treating `2` as the final universal product target.
+~~~text
+RECENT    <30s       resident under normal; warning protected
+IDLE      30–<600s   resident under normal; warning eligible if unprotected Automatic
+LONG_IDLE >=600s     normal reclaim eligible if unprotected Automatic
+~~~
 
-WP0 must choose an evidence-backed replacement direction before product mutation:
+The 30s boundary is anti-thrash protection. The 600s long-idle threshold is an initial tunable implementation default. Reconcile, activation, deactivation, and presentation do not evict by resident count.
 
-```text
-A: pressure-first + bounded long-idle cleanup
-B: adaptive soft warm-set using machine class + recency/revisit facts
-C: narrowly evidenced hybrid
-```
+Memory pressure uses the existing signal and SlotLifecycleCoordinator:
 
-None may be described as an exact RAM/GiB budget.
+- warning: inactive, unprotected Automatic at IDLE or LONG_IDLE only;
+- critical: inactive, unprotected Automatic at any stage, including RECENT;
+- Keep Loaded / Pinned and every existing hard protection are excluded;
+- reclaim oldest-first, one transaction at a time, with fresh-fact revalidation;
+- pressure normal cancels pending continuation and does not mass-restore.
 
-## System-pressure route — preserved
-
-```text
-DispatchSourceMemoryPressure
-→ SlotLifecycleCoordinator
-
-warning
-→ progressive eligible inactive/unprotected Automatic reclaim
-
-critical
-→ Automatic first
-→ then inactive/unprotected Keep Loaded
-
-normal
-→ cancel pending continuation
-→ no mass restore
-```
-
-This route remains independent from any future healthy-state soft policy.
+Generation/Attention, active media, fullscreen, supplemental visibility, current/visible ownership, and restore/materialization protections remain authoritative. No Runtime-count-derived RAM estimate or aggregate GiB budget is introduced.
 
 ## WebKit inactive scheduling route
 
@@ -109,7 +92,7 @@ lifecycle decides resident vs hibernate
 → WebKit owns default scheduling mechanics
 ```
 
-An explicit `.suspend` / `.throttle` / `.none` override, if ever accepted, belongs to WebView configuration mechanism but must be driven by an accepted lifecycle intent and WP0 evidence. It must not become a second state writer.
+An explicit `.suspend` / `.throttle` / `.none` override, if ever accepted, belongs to WebView configuration mechanism but must be driven by an accepted lifecycle intent and evidence from a separately authorized phase. It must not become a second state writer.
 
 macOS 13 does not have the public inactive-scheduling API and must keep a supported fallback path.
 
@@ -134,7 +117,7 @@ new WKWebView
 → readiness
 ```
 
-The current task may investigate a bounded memory-only `WKWebView.takeSnapshot` visual continuity layer during WP0. A page image must never become persistent product state, diagnostics content or an interactive stale surface.
+WP2 does not change snapshot or screenshot behavior. Runtime restore continues through the existing exact Browser Profile data store and WP1 presentation/readiness gate.
 
 ## Aggregate-memory boundary
 
@@ -155,33 +138,17 @@ Forbidden as production policy input:
 - restricted entitlement dependencies;
 - destructive Browser Profile/session reset.
 
-## Current WP0 verification route
+## Current WP2 verification route
 
-Evidence scenarios:
-
-1. resident quick revisit;
-2. >30s/nonresident cold revisit;
-3. notification click to reclaimed Slot;
-4. rapid A↔B↔A switching;
-5. detached resident idle;
-6. hidden 60–120s generation;
-7. allowed background media when available;
-8. hibernated resource state;
-9. restoring state.
-
-Correlate:
-
-```text
-panel visibility/request
-panel.materialization.deferred / attached
-web_runtime.create.begin / created
-web_runtime.restore.completed or load path
-navigation commit/finish
-panel.materialization.readiness_completed / failed
-restoring surface show/hide
-```
-
-If first-visible boundaries are not observable, add only a narrow diagnostic timing seam in WP0; do not alter product policy.
+1. Multiple resident Automatic Runtime under normal pressure; count-only reconcile causes no reclaim.
+2. Exact 29s, 30s, and 600s inactivity boundaries.
+3. Normal long-idle reclaim exactly once and stale-token/reactivation safety.
+4. Keep Loaded retention through normal, warning, and critical pressure.
+5. Warning stage eligibility and critical RECENT bypass.
+6. Generation, media, fullscreen, supplemental-visibility, and WP1 restore protections.
+7. Progressive continuation cancellation on pressure normalization.
+8. WP1 cold restore, A→B→A, focus, unread, and notification regressions.
+9. Full XCTest, Debug/Release arm64, native architecture, package lock, exact-head CI/QA DMG, and independent exact-diff/data-safety audit.
 
 ## Delivered notification route — regression only
 

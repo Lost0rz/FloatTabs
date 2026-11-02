@@ -7,6 +7,8 @@
 **Supersedes:** `FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md` for future lifecycle/performance construction  
 **Preserves:** delivered Phase 1-7 architecture and user/session safety boundaries
 
+> **WP2 policy status (2026-11-02):** The fixed-count healthy-state lifecycle, 30s destructive-release semantics, and Keep Loaded critical-pressure reclaim rules below are historical and superseded for WP2 by [Runtime Lifecycle Policy V7](FloatTabs_Runtime_Lifecycle_Policy_V7.md). V6 remains reference authority for aggregate-memory feasibility and non-conflicting lifecycle architecture. The original pre-WP2 body is preserved in the architecture archive.
+
 ## 1. Why V6 exists
 
 Phase 7 successfully established the structural lifecycle foundation:
