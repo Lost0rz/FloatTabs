@@ -251,6 +251,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var externalMouseMonitor: Any?
     private var requestedVisibility = false
     private var pendingSlotSynchronization = false
+    private var suppressTabStoreSynchronization = false
     private var unreadPruneDiagnosticSuppressionIDs: Set<UUID> = []
     private var lastPresentationUptime: TimeInterval = -.infinity
     private var workspaceAutoHideSuppression = WorkspaceAutoHideSuppression()
@@ -1234,7 +1235,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.handleSlotNavigationFailure(slotID: slotID, runtimeIdentity: identity)
         }
         tabStore.onChange = { [weak self] in
-            self?.synchronizeSlotState()
+            guard let self, !self.suppressTabStoreSynchronization else { return }
+            self.synchronizeSlotState()
         }
         synchronizeSlotState()
     }
@@ -3049,6 +3051,16 @@ final class PanelController: NSObject, NSWindowDelegate {
             applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
         }
 
+        if let pending = pendingRuntimeMaterialization,
+           pending.slotID == activeProfile.id {
+            rootView.webPanelContainerView.showRestoringState()
+            webFocusRouter.setCurrentWebView(nil)
+            if requestedVisibility || panel.isVisible {
+                _ = makeRestoringSurfaceActuallyVisible(for: pending)
+            }
+            return
+        }
+
         if webViewPool.existingWebView(for: activeProfile.id) == nil,
            requestedVisibility || panel.isVisible {
             beginDeferredRuntimeMaterialization(for: activeProfile)
@@ -3221,6 +3233,14 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
+        guard makeRestoringSurfaceActuallyVisible(for: request) else {
+            cancelStaleRuntimeMaterialization(
+                request,
+                reason: "restoring_surface_not_visible"
+            )
+            return
+        }
+
         let webView: WKWebView
         do {
             webView = try webViewPool.webView(for: profile)
@@ -3239,6 +3259,31 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         attachDeferredRuntime(webView: webView, profile: profile, request: request)
+    }
+
+    /// The cold presentation transaction must own a visible native restoring
+    /// surface before WebKit creates or restores the target Runtime. The
+    /// source window's Web container is the existing presentation surface;
+    /// ordering it without a WebView does not transfer focus or expose a
+    /// not-yet-ready page.
+    private func makeRestoringSurfaceActuallyVisible(
+        for request: PendingRuntimeMaterialization
+    ) -> Bool {
+        guard isPendingRuntimeMaterializationCurrent(request),
+              pendingRuntimeMaterialization?.generation == request.generation,
+              rootView.webPanelContainerView.isShowingRestoringState else {
+            return false
+        }
+
+        sourceHostController.orderFrontAndFocus(nil)
+        recordRestoringSurfaceWindowVisibilityIfNeeded()
+
+        guard let surfaceWindow = rootView.webPanelContainerView.window else {
+            return false
+        }
+        return rootView.webPanelContainerView.isShowingRestoringState
+            && surfaceWindow.isVisible
+            && !surfaceWindow.isMiniaturized
     }
 
     private func attachDeferredRuntime(
@@ -3721,7 +3766,10 @@ final class PanelController: NSObject, NSWindowDelegate {
             trace: trace,
             fields: ["slot_id": .string(slotID.uuidString)]
         )
-        guard tabStore.select(id: slotID, trace: trace) else {
+        suppressTabStoreSynchronization = true
+        let selected = tabStore.select(id: slotID, trace: trace)
+        suppressTabStoreSynchronization = false
+        guard selected else {
             diagnostics.record(
                 event: "notification.route.unavailable",
                 level: .warning,
@@ -3730,6 +3778,12 @@ final class PanelController: NSObject, NSWindowDelegate {
                 fields: ["slot_id": .string(slotID.uuidString)]
             )
             return false
+        }
+        // A visible panel needs the target synchronized now. A hidden panel
+        // reaches the same gate from showFloatTabs after requested visibility
+        // is established, avoiding eager Runtime creation during selection.
+        if panel.isVisible {
+            synchronizeSlotState()
         }
         presentFloatTabs(trace: trace)
         acknowledgeUnreadAfterExplicitSelection(slotID: slotID, trace: trace)

@@ -6253,15 +6253,19 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.10 Phase 3 notification exact-Slot routing
 
-    /// Gate C1: the notification route selects the exact persistent Slot
-    /// BEFORE presenting FloatTabs, so the prior active Slot's runtime is not
-    /// re-materialized by the presentation path.
-    func testNotificationRouteSelectsExactSlotBeforePresentingIt() throws {
+    /// The notification route selects the exact persistent Slot without
+    /// allowing TabStore's intermediate change callback to eagerly create its
+    /// Runtime. Cold materialization starts only after the shared restoring
+    /// surface is visible.
+    func testNotificationRouteUsesCanonicalColdPresentationGate() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let (controller, _, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
                 spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
-            ]
+            ],
+            diagnostics: diagnostics
         )
         let slotA = try profile(named: "ChatA", in: store)
         let slotB = try profile(named: "ChatB", in: store)
@@ -6272,16 +6276,71 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         // re-materialize its runtime.
         pool.hibernate(slotID: slotA.id)
         XCTAssertNil(pool.existingWebView(for: slotA.id))
+        pool.hibernate(slotID: slotB.id)
+        XCTAssertNil(pool.existingWebView(for: slotB.id))
 
         let routed = controller.presentSlotFromCompletionNotification(slotB.id)
 
         XCTAssertTrue(routed)
         XCTAssertEqual(store.activeTabID, slotB.id)
-        XCTAssertNotNil(pool.existingWebView(for: slotB.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertNil(
+            pool.existingWebView(for: slotB.id),
+            "Notification selection must not eagerly create a Runtime before the cold gate"
+        )
         XCTAssertNil(
             pool.existingWebView(for: slotA.id),
             "Presentation must not re-materialize the previously active Slot"
         )
+
+        let visibilityRecorded = try await waitUntil(timeoutMilliseconds: 1000) {
+            writer.events.contains {
+                $0.event == "panel.restoring_surface.window_visible"
+                    && $0.fields["slot_id"] == .string(slotB.id.uuidString)
+            }
+        }
+        XCTAssertTrue(visibilityRecorded)
+        let visibleRestore = try XCTUnwrap(
+            writer.events.first {
+                $0.event == "panel.restoring_surface.window_visible"
+                    && $0.fields["slot_id"] == .string(slotB.id.uuidString)
+            }
+        )
+        XCTAssertEqual(visibleRestore.fields["surface_window_visible"], .bool(true))
+
+        let created = try await waitUntil(timeoutMilliseconds: 1000) {
+            pool.existingWebView(for: slotB.id) != nil
+        }
+        XCTAssertTrue(created)
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        let createBegin = try XCTUnwrap(
+            writer.events.last {
+                $0.event == "web_runtime.create.begin"
+                    && $0.fields["slot_id"] == .string(slotB.id.uuidString)
+            }
+        )
+        XCTAssertLessThan(visibleRestore.sequence, createBegin.sequence)
+
+        let attachedWebView = try XCTUnwrap(pool.existingWebView(for: slotB.id))
+        XCTAssertTrue(controller.presentSlotFromCompletionNotification(slotB.id))
+        XCTAssertTrue(
+            controller.debugIsShowingRestoringState,
+            "A duplicate exact-Slot route must retain restoring ownership while its Runtime is unready"
+        )
+        XCTAssertTrue(controller.debugPresentedWebView === attachedWebView)
+        XCTAssertEqual(
+            writer.events.filter {
+                $0.event == "panel.materialization.deferred"
+                    && $0.fields["slot_id"] == .string(slotB.id.uuidString)
+            }.count,
+            1,
+            "The existing pending generation must be reused for the same Slot"
+        )
+        controller.handleSlotNavigationFinish(
+            slotID: slotB.id,
+            runtimeIdentity: try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotB.id))
+        )
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
     }
 
     /// Gate C2: a stale/deleted target routes unavailable with no fallback
@@ -6378,7 +6437,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     /// lifecycle ownership into exactly one runtime, routing depends only on
     /// the persistent Slot UUID, and Slot/Browser Profile configuration is
     /// unchanged.
-    func testNonResidentNotificationTargetRestoresThroughExistingLifecyclePath() throws {
+    func testNonResidentNotificationTargetRestoresThroughExistingLifecyclePath() async throws {
         let (controller, _, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
@@ -6414,10 +6473,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertTrue(routed)
         XCTAssertEqual(store.activeTabID, slotB.id)
-        XCTAssertNotNil(
-            pool.existingWebView(for: slotB.id),
+        XCTAssertNil(pool.existingWebView(for: slotB.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        let restored = try await waitUntil(timeoutMilliseconds: 1000) {
+            pool.existingWebView(for: slotB.id) != nil
+        }
+        XCTAssertTrue(
+            restored,
             "The existing lifecycle path must restore the non-resident target runtime"
         )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
         XCTAssertEqual(store.profiles.map(\.id), profilesBefore)
         XCTAssertEqual(store.browserProfiles, browserProfilesBefore)
     }

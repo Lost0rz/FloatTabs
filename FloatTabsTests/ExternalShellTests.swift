@@ -2387,6 +2387,18 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(restoringSurface.fields["materialization_generation"], .integer(1))
         XCTAssertEqual(restoringSurface.fields["surface_window_visible"], .bool(true))
 
+        let createBegin = try XCTUnwrap(
+            writer.events.last {
+                $0.event == "web_runtime.create.begin"
+                    && $0.fields["slot_id"] == .string(profile.id.uuidString)
+            }
+        )
+        XCTAssertLessThan(
+            restoringSurface.sequence,
+            createBegin.sequence,
+            "The existing native restoring surface must be visible before Runtime creation"
+        )
+
         let webView = try XCTUnwrap(pool.existingWebView(for: profile.id))
         let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
         let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
@@ -2508,6 +2520,66 @@ final class ExternalShellTests: XCTestCase {
             runtimeIdentity: try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: secondProfile.id))
         )
         XCTAssertFalse(controller.debugIsShowingRestoringState)
+    }
+
+    func testExplicitNonresidentSelectionUsesVisibleRestoringGate() throws {
+        let store = TabStore(repository: MemoryProfileRepository())
+        let firstProfile = try XCTUnwrap(
+            store.add(
+                name: "ExplicitResident",
+                homeURL: URL(string: "https://explicit-resident.example.com")!
+            )
+        )
+        let secondProfile = try XCTUnwrap(
+            store.add(
+                name: "ExplicitCold",
+                homeURL: URL(string: "https://explicit-cold.example.com")!
+            )
+        )
+        XCTAssertTrue(store.select(id: firstProfile.id))
+
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
+        )
+        let controller = PanelController(
+            tabStore: store,
+            webViewPool: pool,
+            frameStore: PanelFrameStore(),
+            preferencesStore: AppPreferencesStore(),
+            diagnostics: diagnostics
+        )
+
+        controller.showFloatTabs()
+        drainMainThreadTurns()
+        XCTAssertNotNil(pool.existingWebView(for: firstProfile.id))
+        XCTAssertNil(pool.existingWebView(for: secondProfile.id))
+
+        XCTAssertTrue(store.select(id: secondProfile.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertNil(pool.existingWebView(for: secondProfile.id))
+
+        drainMainThreadTurns()
+        XCTAssertNotNil(pool.existingWebView(for: secondProfile.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        let visibleRestore = try XCTUnwrap(
+            writer.events.first {
+                $0.event == "panel.restoring_surface.window_visible"
+                    && $0.fields["slot_id"] == .string(secondProfile.id.uuidString)
+            }
+        )
+        let createBegin = try XCTUnwrap(
+            writer.events.last {
+                $0.event == "web_runtime.create.begin"
+                    && $0.fields["slot_id"] == .string(secondProfile.id.uuidString)
+            }
+        )
+        XCTAssertEqual(visibleRestore.fields["surface_window_visible"], .bool(true))
+        XCTAssertLessThan(visibleRestore.sequence, createBegin.sequence)
     }
 
     func testDismissalDuringPendingRestoreInvalidatesMaterialization() throws {
