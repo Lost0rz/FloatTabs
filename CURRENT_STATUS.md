@@ -6,11 +6,11 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 7 FINAL VERIFICATION**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 7 FINAL-CI TEST CORRECTIVE**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `V5 CONTRACT FROZEN / PHASE 6 MERGED / PHASE 7 PRODUCT + MACHINE CORRECTIVES COMPLETE / FINAL VERIFICATION ACTIVE`.
+Current execution state: `V5 CONTRACT FROZEN / PHASE 6 MERGED / PHASE 7 PRODUCT CORRECTIVE COMPLETE / FINAL-CI SINGLE TEST CORRECTIVE ACTIVE`.
 
 ## Canonical state
 
@@ -18,15 +18,6 @@ Current execution state: `V5 CONTRACT FROZEN / PHASE 6 MERGED / PHASE 7 PRODUCT 
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 JSC_ROOT_CAUSE=UNKNOWN
-
-PHASE_1_SAFE_HIBERNATE_RESTORE=COMPLETE / MERGED
-PHASE_2_READY_UNREAD_DECOUPLING=COMPLETE / MERGED
-PHASE_3_NATIVE_COMPLETION_NOTIFICATION=COMPLETE / MERGED
-PHASE_4_REFERENCE_DERIVED_RUNTIME_MANAGEMENT=DELIVERED FOUNDATION / TARGET POLICY SUPERSEDED BY V5 PHASE 7
-PHASE_5_BACKGROUND_GENERATION_THRIFT=COMPLETE / MERGED
-PHASE_6_PERCEIVED_FAST_RESTORE=COMPLETE / MERGED
-PHASE_6_PR=#187 MERGED
-PHASE_6_MERGE_COMMIT=54f2e43b0fbc224affa52d9662ac2ba5aa5b963c
 
 PROGRAM_CONTRACT=V5 ACCEPTED / FROZEN
 TARGET_POLICY=AUTOMATIC + KEEP_LOADED
@@ -39,13 +30,11 @@ PHASE_7_CONTRACT=ACCEPTED / FROZEN / RECONCILED
 PHASE_7_BRANCH=codex/ft-runtime-lifecycle-phase7-automatic-001
 PHASE_7_PR=#188 OPEN / DRAFT / UNMERGED
 PHASE_7_PRODUCT_CORRECTIVE=COMPLETE
-PHASE_7_MACHINE_TEST_CORRECTIVE=COMPLETE
-PHASE_7_TEST_CORRECTIVE_HEAD=cc924603e876edbc7f9789edc0e4a9180cfa8012
-PHASE_7_FULL_XCTEST=PASS / CORRECTIVE RUN 41366231928
-PHASE_7_NET_CORRECTIVE_DIFF=CONTROL DOCS + TESTS ONLY AFTER f3ac1d98
-PHASE_7_FINAL_LITERAL_CHECKS=REQUIRED ON CURRENT PR HEAD
+PHASE_7_FULL_XCTEST_CORRECTIVE_RUN_41366231928=PASS
+PHASE_7_QA_DMG_653=e1814064c4678efc66d1acf479c3f7e5af4f0439 / PASS
+PHASE_7_MACOS_CI_1334=e1814064c4678efc66d1acf479c3f7e5af4f0439 / FAIL / ONE TEST
+PHASE_7_FINAL_CI_TEST_CORRECTIVE=ACTIVE / TEST-ONLY
 PROGRAM_HUMAN_ACCEPTANCE=NOT_STARTED
-CI_RUNNER=macmini-floattabs-01 / self-hosted / macOS / ARM64 / mac-mini-ci
 ```
 
 ## Current authority
@@ -60,64 +49,72 @@ Phase 7 execution contract:
 
 `CURRENT_TASK.md` is the only active mutation authorization.
 
-## Phase 7 product state
+## Final-CI finding
 
-The bounded product corrective is complete:
+Literal head `e1814064...` passed:
 
-- current Hot/Warm/Cold keyboard shortcut bindings are removed;
-- Shortcuts Settings no longer exposes the retired Mode section;
-- Runtime Retention presents only Automatic / Keep Loaded;
-- dead Hot-only hidden WebView host ownership is removed;
-- production hidden-active grace no longer adds a historical 120-second retention layer;
-- legacy `setResidency` remains bounded compatibility input only and does not project current-product HUD semantics;
-- Runtime reclaim remains separate from website cache/session cleanup;
-- Browser Profile/session ownership and Phase 6 restore boundaries remain unchanged.
+- QA DMG #653;
+- package-lock verification;
+- Debug arm64 build;
+- Release arm64 build;
+- native Release architecture verification.
 
-## Machine-test corrective result
-
-CI run `1322` first exposed obsolete Hot/Warm/Cold tests. The corrective was intentionally test-only rather than restoring retired production APIs.
-
-Fresh diagnostics progressively reduced the suite to one final stale global-count assertion. Production inspection proved that `showFloatTabs()` calls `setPanelVisible(true, activeProfile:)` and current Slot activation cancels its own inactive plan; the observed remaining global plan belonged to a different inactive Slot. The final test therefore validates per-Slot plan ownership rather than total plan count.
-
-Final bounded corrective evidence:
+macOS CI #1334 then ran 1114 tests and produced exactly one failure:
 
 ```text
-CORRECTIVE_WORKFLOW_RUN=41366231928
-TEST_ONLY_SCOPE_GATE=PASS
-FULL_XCTEST=PASS
-TEMP_CORRECTIVE_HELPER=REMOVED
-TEMP_CORRECTIVE_WORKFLOW=REMOVED
-ACCIDENTAL_TEMP_REMOTE_BRANCHES=REMOVED
+WebAttentionCrossFeatureTests
+  testNonInteractivePresentationKeepsAutomaticLifecycleUntilInteractionReturns
+  line 2047: XCTAssertNotNil failed
 ```
 
-Net diff from product-corrective head `f3ac1d98...` to verified test head `cc924603...` contains only:
+Fresh production inspection proves this is not a lifecycle defect:
 
-- `CURRENT_STATUS.md`
-- `CURRENT_TASK.md`
-- eight `FloatTabsTests/*.swift` files
+1. `showFloatTabs()` calls `slotLifecycleCoordinator.setPanelVisible(true, activeProfile:)`;
+2. current selected Slot activation cancels that Slot's inactive plan;
+3. the test's `isAttentionUserVisible` fact is AppKit/test-environment dependent and is not the lifecycle ownership predicate;
+4. therefore the test must not infer current Slot inactive-plan ownership from Attention interaction visibility.
 
-No production file changed during the machine-test corrective.
-
-## Final execution order
+The canonical assertion is:
 
 ```text
-current control sync
-→ literal-head required macOS CI
-→ literal-head QA DMG
-→ bounded Real-Mac lifecycle evidence where remotely provable
-→ fresh exact-diff self-audit
+showFloatTabs() while ChatA selected
+→ ChatA inactive-plan token == nil
+
+select Plain
+→ ChatA inactive-plan token != nil
+```
+
+This remains a test-only corrective. No production mutation is authorized or required.
+
+## Exact-diff audit result
+
+Fresh production exact-diff audit found no new issue:
+
+- persistence authority is `runtimeRetentionPreference`;
+- legacy residency is bounded compatibility projection only;
+- Hot hidden host architecture is removed;
+- Cold Runtime release no longer triggers website-cache cleanup;
+- current UI/settings/shortcuts expose Automatic / Keep Loaded only;
+- lifecycle ownership remains `SlotLifecycleCoordinator` → `WebViewPool`;
+- Browser Profile/session data and Phase 6 restore boundaries are unchanged.
+
+## Current execution order
+
+```text
+single test-only assertion corrective
+→ full XCTest
+→ user-authored final-verification control sync
+→ literal-head macOS CI + QA DMG
+→ bounded Real-Mac evidence where independently available
 → merge-readiness decision
 ```
 
-The current PR head itself is the authority for literal-head CI/QA. A bot-generated intermediate head produced `action_required` check records with no jobs; those are trigger semantics, not code failures, and are superseded by the user-authored final-verification head.
-
 ## Safety boundary
 
-Final verification must not:
+The corrective must not:
 
+- modify production lifecycle/runtime code;
 - clear or migrate Browser Profile cookies/session/site data;
-- add a second lifecycle writer;
-- restore Hot/Warm/Cold as current product policy;
+- restore Hot/Warm/Cold current policy;
 - add hidden persistent WebViews;
-- modify release/version metadata;
-- treat intermediate-head CI/QA as evidence for a different literal head.
+- change release/version metadata.
