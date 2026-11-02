@@ -1810,7 +1810,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(SlotLifecycleCoordinator.defaultAutomaticReleaseDelay, 30)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay, 0)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultManagedResidentTarget, 2)
-        XCTAssertEqual(SlotLifecycleCoordinator.warningManagedResidentTarget, 1)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultPressureStepDelay, 0.5)
     }
 
     func testAutomaticLifecycleSchedulesSingleGraceAndReleases() async throws {

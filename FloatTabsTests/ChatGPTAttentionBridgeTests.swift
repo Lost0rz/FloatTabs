@@ -2382,6 +2382,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
     func testLongRunningHiddenWatchdogCadenceSelection() {
         let base = ChatGPTAttentionBridge.livenessWatchdogIntervalNanoseconds
         let thrift = ChatGPTAttentionBridge.hiddenLongRunningWatchdogIntervalNanoseconds
+        let sustained = ChatGPTAttentionBridge.sustainedHiddenWatchdogIntervalNanoseconds
 
         XCTAssertEqual(
             ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
@@ -2406,6 +2407,27 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         )
         XCTAssertEqual(
             ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                elapsed: ChatGPTAttentionBridge.sustainedHiddenGenerationThreshold - 0.001,
+                documentIsHidden: true
+            ),
+            thrift
+        )
+        XCTAssertEqual(
+            ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                elapsed: ChatGPTAttentionBridge.sustainedHiddenGenerationThreshold,
+                documentIsHidden: true
+            ),
+            sustained
+        )
+        XCTAssertEqual(
+            ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                elapsed: 600,
+                documentIsHidden: true
+            ),
+            sustained
+        )
+        XCTAssertEqual(
+            ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
                 elapsed: 120,
                 documentIsHidden: false
             ),
@@ -2417,6 +2439,43 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
                 documentIsHidden: nil
             ),
             base
+        )
+    }
+
+    /// Deterministic probe-cadence evidence for the sustained-hidden backoff
+    /// tier: across a fixed hidden generation window, the tiered schedule
+    /// strictly lowers the host-side fallback probe count versus the flat
+    /// long-running interval while every interval stays bounded.
+    func testSustainedHiddenBackoffTierLowersBoundedProbeCadence() {
+        func probeCount(
+            intervalForElapsed: (TimeInterval) -> UInt64
+        ) -> Int {
+            var count = 0
+            var elapsed: TimeInterval = 0
+            let horizon: TimeInterval = 600
+            while elapsed < horizon {
+                count += 1
+                elapsed += Double(intervalForElapsed(elapsed)) / 1_000_000_000
+            }
+            return count
+        }
+
+        let tiered = probeCount { elapsed in
+            ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                elapsed: elapsed,
+                documentIsHidden: true
+            )
+        }
+        let flatLongRunning = probeCount { elapsed in
+            elapsed >= ChatGPTAttentionBridge.longRunningGenerationThreshold
+                ? ChatGPTAttentionBridge.hiddenLongRunningWatchdogIntervalNanoseconds
+                : ChatGPTAttentionBridge.livenessWatchdogIntervalNanoseconds
+        }
+
+        XCTAssertLessThan(tiered, flatLongRunning)
+        XCTAssertLessThanOrEqual(
+            ChatGPTAttentionBridge.sustainedHiddenWatchdogIntervalNanoseconds,
+            ChatGPTAttentionBridge.hiddenLongRunningWatchdogIntervalNanoseconds * 2
         )
     }
 

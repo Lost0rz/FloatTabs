@@ -729,6 +729,13 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     static let livenessWatchdogIntervalNanoseconds: UInt64 = 2_000_000_000
     static let longRunningGenerationThreshold: TimeInterval = 30
     static let hiddenLongRunningWatchdogIntervalNanoseconds: UInt64 = 5_000_000_000
+    /// Sustained hidden generation backs the fallback watchdog off further.
+    /// The event bridge remains the primary completion signal; this only
+    /// lowers host-side probe/wakeup cadence while that fallback is unlikely
+    /// to be needed, and stays bounded so a missed completion can never leave
+    /// a Runtime protected forever.
+    static let sustainedHiddenGenerationThreshold: TimeInterval = 120
+    static let sustainedHiddenWatchdogIntervalNanoseconds: UInt64 = 10_000_000_000
     static let livenessConfirmationDelayNanoseconds: UInt64 = 250_000_000
     static let livenessProbeScript = "globalThis.__floatTabsAttentionProbeV1?.()"
     static let benchmarkSnapshotScript = "globalThis.__floatTabsAttentionBenchmarkSnapshotV1?.()"
@@ -737,11 +744,16 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         elapsed: TimeInterval,
         documentIsHidden: Bool?
     ) -> UInt64 {
-        guard documentIsHidden == true,
-              elapsed >= longRunningGenerationThreshold else {
+        guard documentIsHidden == true else {
             return livenessWatchdogIntervalNanoseconds
         }
-        return hiddenLongRunningWatchdogIntervalNanoseconds
+        if elapsed >= sustainedHiddenGenerationThreshold {
+            return sustainedHiddenWatchdogIntervalNanoseconds
+        }
+        if elapsed >= longRunningGenerationThreshold {
+            return hiddenLongRunningWatchdogIntervalNanoseconds
+        }
+        return livenessWatchdogIntervalNanoseconds
     }
 
     typealias LivenessProbeProvider = @MainActor (WKWebView) async -> Any?
@@ -2685,7 +2697,9 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             "slot_id": .string(slotID.uuidString),
             "watchdog_interval_ms": .integer(2_000),
             "long_running_threshold_ms": .integer(30_000),
-            "hidden_long_running_interval_ms": .integer(5_000)
+            "hidden_long_running_interval_ms": .integer(5_000),
+            "sustained_hidden_threshold_ms": .integer(120_000),
+            "sustained_hidden_interval_ms": .integer(10_000)
         ])
         livenessWatchdogTask = Task { [weak self, weak webView] in
             guard let self, let webView else { return }
