@@ -10,7 +10,6 @@ enum SlotMemoryPressureLevel {
 
 private struct RuntimeBudgetPolicy {
     static let defaultManagedResidentTarget = 2
-    static let warningManagedResidentTarget = 1
 
     struct Candidate {
         let slotID: UUID
@@ -26,10 +25,12 @@ private struct RuntimeBudgetPolicy {
         let oversubscribedBy: Int
     }
 
+    /// Normal (healthy-state) budget decision. This path is intentionally
+    /// count-based and does not participate in memory-pressure reclaim;
+    /// pressure uses `pressureCandidate(candidates:level:)` instead.
     static func decide(
         candidates: [Candidate],
-        target: Int,
-        critical: Bool = false
+        target: Int
     ) -> Decision {
         let normalizedTarget = max(target, 0)
         let automatic = candidates.filter { $0.retentionPreference == .automatic }
@@ -37,19 +38,9 @@ private struct RuntimeBudgetPolicy {
             .filter { !$0.isProtected }
             .sorted(by: evictionOrder)
         let requiredAutomaticEvictions = max(automatic.count - normalizedTarget, 0)
-        var evictSlotIDs = Array(
+        let evictSlotIDs = Array(
             eligibleAutomatic.prefix(requiredAutomaticEvictions).map(\.slotID)
         )
-
-        if critical {
-            let selected = Set(evictSlotIDs)
-            let remainingAutomatic = eligibleAutomatic.filter { !selected.contains($0.slotID) }
-            evictSlotIDs.append(contentsOf: remainingAutomatic.map(\.slotID))
-            let eligibleKeepLoaded = candidates
-                .filter { !$0.isProtected && $0.retentionPreference == .keepLoaded }
-                .sorted(by: evictionOrder)
-            evictSlotIDs.append(contentsOf: eligibleKeepLoaded.map(\.slotID))
-        }
 
         let selectedAutomaticCount = evictSlotIDs.reduce(into: 0) { count, slotID in
             if automatic.contains(where: { $0.slotID == slotID }) { count += 1 }
@@ -61,6 +52,29 @@ private struct RuntimeBudgetPolicy {
             evictSlotIDs: evictSlotIDs,
             oversubscribedBy: max(remainingAutomatic - normalizedTarget, 0)
         )
+    }
+
+    /// Progressive pressure reclaim selects at most one candidate per step.
+    ///
+    /// Warning: only eligible Automatic Runtime is a candidate.
+    /// Critical: eligible Automatic first; only when no eligible Automatic
+    /// remains may an inactive/unprotected Keep Loaded Runtime be selected.
+    /// Active/hard-protected Runtime is never a candidate (`isProtected`).
+    static func pressureCandidate(
+        candidates: [Candidate],
+        level: SlotMemoryPressureLevel
+    ) -> Candidate? {
+        let eligible = candidates
+            .filter { !$0.isProtected }
+            .sorted(by: evictionOrder)
+        let eligibleAutomatic = eligible.filter { $0.retentionPreference == .automatic }
+        if let oldest = eligibleAutomatic.first {
+            return oldest
+        }
+        guard level == .critical else { return nil }
+        return eligible
+            .filter { $0.retentionPreference == .keepLoaded }
+            .first
     }
 
     private static func evictionOrder(_ lhs: Candidate, _ rhs: Candidate) -> Bool {
@@ -78,10 +92,13 @@ final class SlotLifecycleCoordinator {
     nonisolated static let defaultColdReleaseDelay: TimeInterval = 30
     nonisolated static let defaultWarmReleaseDelay: TimeInterval = 120
     nonisolated static let defaultAutomaticReleaseDelay: TimeInterval = 30
-    nonisolated static let warningManagedResidentTarget = RuntimeBudgetPolicy.warningManagedResidentTarget
     nonisolated static let defaultHiddenActiveGraceDelay: TimeInterval = 0
     nonisolated static let defaultMediaProtectionPollDelay: TimeInterval = 10
     nonisolated static let defaultManagedResidentTarget = RuntimeBudgetPolicy.defaultManagedResidentTarget
+    /// Delay between progressive pressure-reclaim steps. Each continuation
+    /// revalidates the latest pressure state and current Runtime ownership
+    /// before reclaiming anything else.
+    nonisolated static let defaultPressureStepDelay: TimeInterval = 0.5
 
     typealias MediaPlayingQuery = (UUID, @escaping (Bool) -> Void) -> Void
     typealias MediaPauseAction = (UUID) -> Void
@@ -127,6 +144,12 @@ final class SlotLifecycleCoordinator {
     private var panelIsVisible = false
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     private var budgetEvaluationInProgress = false
+    private let pressureStepDelay: TimeInterval
+    /// Latest observed system memory-pressure level; `nil` means normal.
+    private var latestMemoryPressureLevel: SlotMemoryPressureLevel?
+    /// Pending progressive pressure-reclaim continuation. At most one is
+    /// ever scheduled; it is cancelled when pressure returns to normal.
+    private var pressureReclaimWorkItem: DispatchWorkItem?
 
     init(
         webViewPool: WebViewPool,
@@ -136,6 +159,7 @@ final class SlotLifecycleCoordinator {
         hiddenActiveGraceDelay: TimeInterval = SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay,
         mediaProtectionPollDelay: TimeInterval = SlotLifecycleCoordinator.defaultMediaProtectionPollDelay,
         managedResidentTarget: Int = SlotLifecycleCoordinator.defaultManagedResidentTarget,
+        pressureStepDelay: TimeInterval = SlotLifecycleCoordinator.defaultPressureStepDelay,
         mediaPlayingQuery: MediaPlayingQuery? = nil,
         mediaPauseAction: MediaPauseAction? = nil,
         onRuntimeReleased: @escaping RuntimeReleasedHandler = { _ in },
@@ -154,6 +178,7 @@ final class SlotLifecycleCoordinator {
         self.hiddenActiveGraceDelay = max(hiddenActiveGraceDelay, 0)
         self.mediaProtectionPollDelay = max(mediaProtectionPollDelay, 0.01)
         self.managedResidentTarget = max(managedResidentTarget, 0)
+        self.pressureStepDelay = max(pressureStepDelay, 0)
         self.mediaPlayingQuery = mediaPlayingQuery ?? { [weak webViewPool] slotID, completion in
             guard let webViewPool else {
                 completion(false)
@@ -413,6 +438,8 @@ final class SlotLifecycleCoordinator {
             trigger: level == .critical ? "critical" : "warning",
             startedAtUptime: ProcessInfo.processInfo.systemUptime
         )
+        let previousLevel = latestMemoryPressureLevel
+        latestMemoryPressureLevel = level
         var pressureFields = incidentContext.fields(phase: .trigger)
         pressureFields.merge([
             "level": .string(level == .critical ? "critical" : "warning"),
@@ -433,11 +460,21 @@ final class SlotLifecycleCoordinator {
             level: level,
             incidentContext: incidentContext
         )
-        enforceRuntimeBudget(
-            reason: level == .critical ? "memory_pressure_critical" : "memory_pressure_warning",
-            pressure: level,
-            incidentContext: incidentContext
-        )
+
+        if previousLevel != level {
+            // A changed pressure level (escalation/de-escalation) takes
+            // effect immediately and replaces any pending continuation.
+            pressureReclaimWorkItem?.cancel()
+            pressureReclaimWorkItem = nil
+            beginProgressivePressureReclaim(
+                level: level,
+                incidentContext: incidentContext
+            )
+        } else {
+            // Same level: idempotently reconsider against fresh facts
+            // without stacking a second transaction.
+            reconcileProgressivePressureIfNeeded()
+        }
 
         var completionFields = incidentContext.fields(phase: .closure)
         completionFields["incident_outcome"] = .string("evaluation_complete")
@@ -446,6 +483,24 @@ final class SlotLifecycleCoordinator {
             level: .notice,
             subsystem: "lifecycle",
             fields: completionFields
+        )
+    }
+
+    /// Pressure returned to normal: stop any not-yet-started progressive
+    /// continuation. Reclaimed Runtime is not restored; future restore stays
+    /// demand-driven by existing Slot selection/materialization.
+    func handleMemoryPressureNormalized() {
+        latestMemoryPressureLevel = nil
+        let hadPendingContinuation = pressureReclaimWorkItem != nil
+        pressureReclaimWorkItem?.cancel()
+        pressureReclaimWorkItem = nil
+        diagnostics.record(
+            event: "slot_lifecycle.memory_pressure.normal",
+            level: .notice,
+            subsystem: "lifecycle",
+            fields: [
+                "cancelled_pending_continuation": .bool(hadPendingContinuation)
+            ]
         )
     }
 
@@ -489,7 +544,7 @@ final class SlotLifecycleCoordinator {
 
     private func configureMemoryPressureSource() {
         let source = DispatchSource.makeMemoryPressureSource(
-            eventMask: [.warning, .critical],
+            eventMask: [.normal, .warning, .critical],
             queue: .main
         )
         memoryPressureSource = source
@@ -500,6 +555,8 @@ final class SlotLifecycleCoordinator {
                 self.handleMemoryPressure(.critical)
             } else if data.contains(.warning) {
                 self.handleMemoryPressure(.warning)
+            } else if data.contains(.normal) {
+                self.handleMemoryPressureNormalized()
             }
         }
         source.resume()
@@ -555,6 +612,10 @@ final class SlotLifecycleCoordinator {
         } else {
             scheduleRelease(for: profile, plan: plan)
         }
+        // A newly created inactive plan is the primary eligibility-increasing
+        // boundary; under sustained warning/critical pressure the ladder
+        // reconsiders it immediately instead of waiting for another event.
+        reconcileProgressivePressureIfNeeded()
     }
 
     private func evaluateMediaProtection(
@@ -598,6 +659,9 @@ final class SlotLifecycleCoordinator {
                 }
                 self.scheduleRelease(for: profile, plan: plan)
                 self.enforceRuntimeBudget(reason: "media_protection_ended")
+                // Media protection ending restores pressure eligibility for
+                // this Runtime; the ladder may resume under sustained pressure.
+                self.reconcileProgressivePressureIfNeeded()
             }
         }
     }
@@ -736,35 +800,81 @@ final class SlotLifecycleCoordinator {
         }
     }
 
-    private func budgetDecision(
-        for pressure: SlotMemoryPressureLevel? = nil
-    ) -> RuntimeBudgetPolicy.Decision {
-        let target: Int
-        switch pressure {
-        case .warning:
-            target = RuntimeBudgetPolicy.warningManagedResidentTarget
-        case .critical:
-            target = 0
-        case nil:
-            target = managedResidentTarget
-        }
-        return RuntimeBudgetPolicy.decide(
+    private func budgetDecision() -> RuntimeBudgetPolicy.Decision {
+        RuntimeBudgetPolicy.decide(
             candidates: budgetCandidates(),
-            target: target,
-            critical: pressure == .critical
+            target: managedResidentTarget
         )
     }
 
-    private func enforceRuntimeBudget(
-        reason: String,
-        pressure: SlotMemoryPressureLevel? = nil,
+    /// Idempotent pressure re-entry seam. Whenever a lifecycle boundary makes
+    /// a Runtime newly eligible (inactive plan created, media protection
+    /// ended, protection window closed) while the latest observed pressure is
+    /// still warning/critical, the progressive ladder is reconsidered from
+    /// fresh facts — without waiting for the system to re-send the same
+    /// pressure event and without stacking a second reclaim transaction.
+    private func reconcileProgressivePressureIfNeeded() {
+        guard let level = latestMemoryPressureLevel,
+              pressureReclaimWorkItem == nil else { return }
+        beginProgressivePressureReclaim(level: level)
+    }
+
+    /// Progressive memory-pressure reclaim: at most one Runtime is reclaimed
+    /// per step, and every step revalidates the latest pressure state plus
+    /// current Runtime identity/protection through fresh candidate facts.
+    /// A continuation is scheduled only while the latest observed pressure
+    /// remains warning/critical; a single stale event never causes a
+    /// precomputed multi-Runtime purge.
+    private func beginProgressivePressureReclaim(
+        level: SlotMemoryPressureLevel,
         incidentContext: RuntimeDiagnosticIncidentContext? = nil
     ) {
+        guard pressureReclaimWorkItem == nil else { return }
+        let candidate = RuntimeBudgetPolicy.pressureCandidate(
+            candidates: budgetCandidates(),
+            level: level
+        )
+        guard let candidate,
+              let plan = inactivePlans[candidate.slotID] else {
+            diagnostics.record(
+                event: "slot_lifecycle.memory_pressure.no_candidate",
+                level: .info,
+                subsystem: "lifecycle",
+                fields: [
+                    "level": .string(level == .critical ? "critical" : "warning")
+                ]
+            )
+            return
+        }
+
+        releaseInactiveSlot(
+            slotID: candidate.slotID,
+            expectedPlan: plan,
+            memoryPressureIncident: incidentContext,
+            releaseReason: level == .critical
+                ? "critical_pressure_eligible"
+                : "warning_pressure_eligible"
+        )
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pressureReclaimWorkItem = nil
+            guard let latestLevel = self.latestMemoryPressureLevel else { return }
+            self.beginProgressivePressureReclaim(level: latestLevel)
+        }
+        pressureReclaimWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + pressureStepDelay,
+            execute: workItem
+        )
+    }
+
+    private func enforceRuntimeBudget(reason: String) {
         guard !budgetEvaluationInProgress else { return }
         budgetEvaluationInProgress = true
         defer { budgetEvaluationInProgress = false }
 
-        let decision = budgetDecision(for: pressure)
+        let decision = budgetDecision()
         diagnostics.record(
             event: "slot_lifecycle.runtime_budget",
             level: decision.evictSlotIDs.isEmpty ? .info : .notice,
@@ -778,23 +888,12 @@ final class SlotLifecycleCoordinator {
             ]
         )
 
-        let pressureReleaseReason: String?
-        switch pressure {
-        case .critical:
-            pressureReleaseReason = "critical_pressure_eligible"
-        case .warning:
-            pressureReleaseReason = "warning_pressure_eligible"
-        case nil:
-            pressureReleaseReason = nil
-        }
-
         for slotID in decision.evictSlotIDs {
             guard let plan = inactivePlans[slotID] else { continue }
             releaseInactiveSlot(
                 slotID: slotID,
                 expectedPlan: plan,
-                memoryPressureIncident: incidentContext,
-                releaseReason: pressureReleaseReason ?? reason
+                releaseReason: reason
             )
         }
     }
@@ -803,8 +902,10 @@ final class SlotLifecycleCoordinator {
         level: SlotMemoryPressureLevel,
         incidentContext: RuntimeDiagnosticIncidentContext
     ) {
-        let decision = budgetDecision(for: level)
-        let selected = Set(decision.evictSlotIDs)
+        let selected = RuntimeBudgetPolicy.pressureCandidate(
+            candidates: budgetCandidates(),
+            level: level
+        )?.slotID
         let pressureLevel = level == .critical ? "critical" : "warning"
 
         for slotID in webViewPool.residentSlotIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
@@ -815,18 +916,26 @@ final class SlotLifecycleCoordinator {
                 ?? plan?.retentionPreference
                 ?? webViewPool.runtimeRetentionPreference(for: slotID)
             let managed = preference == .automatic
-            let selectedForRelease = selected.contains(slotID)
+            let selectedForRelease = selected == slotID
             let decisionName: String
             let releaseReason: String
-            if level == .warning && !selectedForRelease {
+            if selectedForRelease {
+                decisionName = "hibernate"
+                releaseReason = level == .critical
+                    ? "critical_pressure_eligible"
+                    : "warning_pressure_eligible"
+            } else if level == .warning {
                 decisionName = "observe"
                 releaseReason = "warning_diagnostics_only"
-            } else if selectedForRelease {
-                decisionName = "hibernate"
-                releaseReason = "runtime_budget"
+            } else if plan != nil
+                && !visible
+                && !protection.media
+                && !protection.attention {
+                decisionName = "observe"
+                releaseReason = "critical_pending_progression"
             } else {
                 decisionName = "keep"
-                releaseReason = "protected_or_within_target"
+                releaseReason = "protected_or_ineligible"
             }
 
             var fields = incidentContext.fields(phase: .trigger)
@@ -845,7 +954,7 @@ final class SlotLifecycleCoordinator {
                 "release_eligible": .bool(selectedForRelease),
                 "decision": .string(decisionName),
                 "release_reason": .string(releaseReason),
-                "budget_target": .integer(Int64(decision.target)),
+                "normal_managed_resident_target": .integer(Int64(managedResidentTarget)),
                 "web_process_resource_attribution": .string("unavailable_public_api")
             ]) { _, new in new }
             diagnostics.record(
