@@ -20,7 +20,7 @@ jobs:
       - name: Apply single authorized test correction
         shell: bash
         run: >-
-          python3 -c 'from pathlib import Path; p=Path("FloatTabsTests/WebAttentionCrossFeatureTests.swift"); t=p.read_text(); old="        if webInteractionRegained {\n              XCTAssertNil(controller.debugInactivePlanToken(slotID: slot.id))\n        } else {\n              XCTAssertNotNil(controller.debugInactivePlanToken(slotID: slot.id))\n        }"; new="        XCTAssertNil(controller.debugInactivePlanToken(slotID: slot.id))"; assert old in t, "expected environment-dependent inactive-plan assertion not found"; p.write_text(t.replace(old,new,1))'
+          python3 -c 'import re; from pathlib import Path; p=Path("FloatTabsTests/WebAttentionCrossFeatureTests.swift"); t=p.read_text(); pattern=r"        if webInteractionRegained \{\n\s*XCTAssertNil\(controller\.debugInactivePlanToken\(slotID: slot\.id\)\)\n\} else \{\n\s*XCTAssertNotNil\(controller\.debugInactivePlanToken\(slotID: slot\.id\)\)\n\}"; new="        XCTAssertNil(controller.debugInactivePlanToken(slotID: slot.id))"; updated,count=re.subn(pattern,new,t,count=1); assert count==1, f"expected one environment-dependent assertion block, found {count}"; p.write_text(updated)'
 
       - name: Verify one-test-file scope
         shell: bash
