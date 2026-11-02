@@ -6508,4 +6508,56 @@ extension WebAttentionCrossFeatureTests {
         XCTAssertEqual(projections[0].displayName, "ChatA")
         XCTAssertNil(projections[0].preview)
     }
+
+    /// A suspended one-shot preview provider cannot suppress the hidden
+    /// `.marked` notification projection; timeout supplies nil exactly once,
+    /// and a later provider result is ignored.
+    func testHiddenMarkedCompletionPreviewTimeoutStillProjectsExactlyOnce() async throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attention = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+        XCTAssertTrue(
+            responseBridge.debugReceiveDocumentReady(
+                documentToken: "completion-preview-timeout-doc-123456"
+            )
+        )
+
+        var lateProviderCompletion: (@MainActor (ChatGPTResponsePreviewSnapshot?) -> Void)?
+        responseBridge.debugSetResponsePreviewSnapshotProvider { _, _, completion in
+            lateProviderCompletion = completion
+        }
+        var projections: [(UUID, String?, String?)] = []
+        controller.onChatGPTUnreadCompletionMarked = { slotID, name, preview in
+            projections.append((slotID, name, preview))
+        }
+
+        completeGeneration(
+            bridge: attention,
+            webView: webView,
+            token: "completion-preview-timeout-generation"
+        )
+
+        let projected = try await waitUntil(timeoutMilliseconds: 3_000) {
+            projections.count == 1
+        }
+        XCTAssertTrue(projected, "preview timeout must not suppress notification projection")
+        XCTAssertEqual(projections.count, 1)
+        XCTAssertEqual(projections[0].0, slot.id)
+        XCTAssertEqual(projections[0].1, "ChatA")
+        XCTAssertNil(projections[0].2, "nil preview selects the generic notification body")
+
+        lateProviderCompletion?(
+            ChatGPTResponsePreviewSnapshot(
+                documentToken: "completion-preview-timeout-doc-123456",
+                generating: false,
+                previewText: "late preview"
+            )
+        )
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(projections.count, 1, "late provider result cannot project twice")
+    }
 }

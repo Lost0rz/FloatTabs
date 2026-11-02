@@ -308,6 +308,52 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         XCTAssertFalse(text.contains("color: red"))
     }
 
+    /// Excluded descendants are removed from allowed content nodes, while
+    /// nested selected blocks contribute their text only once.
+    func testPreviewSanitizesExcludedDescendantsAndDeduplicatesNestedBlocks() async throws {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <section data-message-author-role="assistant" data-message-id="sanitized-preview">
+          <p>Answer <button>Copy button secret</button> remains.</p>
+          <p>Answer <span role="button">Copy role secret</span> remains.</p>
+          <p>Answer <span aria-hidden="true">Hidden helper secret</span> remains.</p>
+          <p>Answer <span style="display:none">CSS hidden secret</span> remains.</p>
+          <p>Answer <span role="toolbar">Toolbar secret</span> remains.</p>
+          <p>Answer <span data-testid="response-action-toolbar">Action secret</span> remains.</p>
+          <ol><li><p>Nested list item.</p></li></ol>
+          <blockquote><p>Nested quoted paragraph.</p></blockquote>
+          <pre><code>let answer = 42</code></pre>
+          <p>Math <span role="math">x^2 + y^2</span> remains readable.</p>
+          <p>Legitimate final paragraph.</p>
+        </section>
+        <div data-message-author-role="user"><p>User prompt secret.</p></div>
+        """)
+        let ready = await page.waitForDocumentReady()
+        XCTAssertTrue(ready)
+
+        let previewValue = await page.previewSnapshot()
+        let preview = try XCTUnwrap(previewValue)
+        let text = try XCTUnwrap(preview.previewText)
+
+        for excluded in [
+            "Copy button secret",
+            "Copy role secret",
+            "Hidden helper secret",
+            "CSS hidden secret",
+            "Toolbar secret",
+            "Action secret",
+            "User prompt secret"
+        ] {
+            XCTAssertFalse(text.contains(excluded), "excluded preview text leaked: \(excluded)")
+        }
+        XCTAssertEqual(text.components(separatedBy: "Nested list item.").count - 1, 1)
+        XCTAssertEqual(text.components(separatedBy: "Nested quoted paragraph.").count - 1, 1)
+        XCTAssertTrue(text.contains("let answer = 42"))
+        XCTAssertTrue(text.contains("x^2 + y^2"))
+        XCTAssertTrue(text.contains("Legitimate final paragraph."))
+        XCTAssertTrue(text.contains("Answer remains."))
+    }
+
     /// N1-3: pathological whitespace inside the selected content collapses
     /// to readable single spacing, and Unicode is preserved safely.
     func testPreviewSnapshotNormalizesWhitespaceAndPreservesUnicode() async throws {

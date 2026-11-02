@@ -2,8 +2,8 @@
 
 **Task ID:** `FT-NOTIFICATION-RELIABILITY-RICH-PREVIEW-001`  
 **Title:** Native completion notification reliability + Slot name + assistant preview  
-**Status:** `ACTIVE / DESIGN FROZEN / READY FOR IMPLEMENTATION`  
-**Mode:** `IMPLEMENTATION AUTHORIZED / MERGE NOT AUTHORIZED UNTIL GATES COMPLETE`  
+**Status:** `ACTIVE / CORRECTIVE 001 AUTHORIZED`
+**Mode:** `CORRECTIVE IMPLEMENTATION AUTHORIZED / MERGE NOT AUTHORIZED`
 **Task class:** `APP / NATIVE NOTIFICATION / RESPONSE PROJECTION / UX RELIABILITY`  
 **Execution baseline:** `main@08831ad2cc3e7f18432b1a6ecdc983e849a992aa`  
 **Task branch:** `codex/notification-reliability-rich-preview-001`
@@ -21,6 +21,57 @@ Authorized objective:
 5. keep notification behavior compatible with the merged lightweight background-generation policy.
 
 This task does not reopen or modify the closed Phase 8 memory-budget work.
+
+## Corrective 001 — current execution authority
+
+The existing implementation is on the same task branch and PR; this is a corrective continuation, not a new task or a Phase 8 reopening.
+
+```text
+CARD_ID=FT-NOTIFICATION-RELIABILITY-RICH-PREVIEW-001-CORRECTIVE-001
+TARGET=Lost0rz/FloatTabs
+BRANCH=codex/notification-reliability-rich-preview-001
+PR=193
+PR_STATE=OPEN_DRAFT_MERGEABLE_UNMERGED
+AUDITED_BASE=08831ad2cc3e7f18432b1a6ecdc983e849a992aa
+AUDITED_HEAD=18161e9b91159acd4a164aca824cdedbd10d48ce
+INDEPENDENT_SEMANTIC_VERDICT=HOLD
+HUMAN_UI_ACCEPTANCE=PENDING_NOT_STARTED
+MERGE=NOT_AUTHORIZED
+```
+
+The audited head's literal-head Build & Test and QA DMG passed. Those results do not transfer to the corrective head.
+
+### Finding A — blocking timeout and exactly-once fallback
+
+The one-shot preview request can suspend forever and suppress the hidden `.marked` completion notification. Add a bounded one-shot provider-vs-timeout race. The first terminal result wins: provider success admits the current-document preview; provider failure/nil, timeout, or runtime/navigation invalidation completes exactly once with `nil`. Provider results after timeout or invalidation are ignored. Do not add periodic polling or completed-runtime residency protection.
+
+### Finding B — important DOM sanitization and deduplication
+
+An allowed selected node can contain excluded descendants, and nested selected nodes can project the same text twice. Exclude descendant button, `[role=button]`, `[aria-hidden=true]`, toolbar/action chrome, and other existing `RESPONSE_EXCLUDED_SELECTOR` matches from projected text. Deduplicate nested selected content such as `li > p` and `blockquote > p`, while preserving legitimate list/code/math/paragraph text. Preserve the existing assistant-root ownership and `RESPONSE_CONTENT_SELECTOR` / `RESPONSE_EXCLUDED_SELECTOR` policy; do not create a second root classifier.
+
+### Corrective scope and required regressions
+
+Production corrections are limited to the existing task paths:
+
+- `FloatTabs/Web/ChatGPTResponseBridge.swift`
+- `FloatTabs/Web/ChatGPTResponseExtraction.swift`
+- `FloatTabs/Panel/PanelController.swift` only if narrowly required for exactly-once fallback orchestration
+
+Focused tests belong in:
+
+- `FloatTabsTests/ChatGPTResponseBridgeTests.swift`
+- `FloatTabsTests/ChatGPTResponseExtractionTests.swift`
+- `FloatTabsTests/WebAttentionCrossFeatureTests.swift`
+
+Prove timeout → one `nil` callback; late provider → no duplicate; runtime/document invalidation → one `nil` callback and ignored late result; hidden `.marked` timeout → one generic notification projection; descendant button/role-button/aria-hidden/toolbar text exclusion; nested-node deduplication; legitimate assistant content preservation; prompt/user exclusion; bounded JavaScript and final host preview.
+
+Preserve notification trigger, exact-Slot routing, `userInfo` (`version / kind / slot_id`), generic fallback, sound, settings diagnostics, RuntimeDiagnosticPrivacy, and lifecycle policy. Slot name/preview remain unpersisted and unlogged. Do not change generation detection, Phase 8 watchdogs (2s/5s/10s), Generating protection, target=2, 30s grace, pressure ladder, or Browser Profile/session data.
+
+### Corrective verification and delivery
+
+Run focused Bridge, Extraction, notification/composition, exact-Slot routing, and lifecycle/background regressions; full XCTest; Debug arm64; Release arm64; native arm64 verification; package-lock unchanged check; exact-diff/privacy/ownership self-audit. Push only to the existing branch / PR #193. Obtain fresh literal-head self-hosted mac-mini-ci Build & Test and QA DMG if triggered; do not reuse evidence from `18161e9b`.
+
+After delivery, stop at `WAITING_FOR_FRESH_INDEPENDENT_WEB_AUDIT`. Do not request human notification acceptance until the corrective head passes that audit. Merge remains unauthorized.
 
 ## Authority
 
@@ -299,5 +350,7 @@ independent audit still required or complete as observed
 HUMAN_UI_ACCEPTANCE=PENDING
 MERGE=NOT_MERGED
 ```
+
+For Corrective 001, the immediate required stop is `WAITING_FOR_FRESH_INDEPENDENT_WEB_AUDIT`; human acceptance is not requested before that audit passes.
 
 Final merge requires the user’s explicit human notification acceptance plus fresh merge-boundary verification.

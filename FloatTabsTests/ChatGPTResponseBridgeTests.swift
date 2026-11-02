@@ -645,46 +645,54 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
 
 @MainActor
 private final class ResponsePreviewSnapshotProviderProbe {
-    private var pending: CheckedContinuation<ChatGPTResponsePreviewSnapshot?, Never>?
-    private var queued: ChatGPTResponsePreviewSnapshot?
+    private enum Resolution {
+        case snapshot(ChatGPTResponsePreviewSnapshot?)
+    }
+
+    private var pending: (@MainActor (ChatGPTResponsePreviewSnapshot?) -> Void)?
+    private var queued: Resolution?
     private(set) var requestCount = 0
     private(set) var lastScript: String?
 
     func provide(
         _ webView: WKWebView,
-        _ script: String
-    ) async -> ChatGPTResponsePreviewSnapshot? {
+        _ script: String,
+        completion: @escaping @MainActor (ChatGPTResponsePreviewSnapshot?) -> Void
+    ) {
         requestCount += 1
         lastScript = script
-        return await withCheckedContinuation { continuation in
-            if let queued {
-                self.queued = nil
-                continuation.resume(returning: queued)
-            } else {
-                pending = continuation
+        if let queued {
+            self.queued = nil
+            switch queued {
+            case let .snapshot(snapshot):
+                completion(snapshot)
             }
+        } else {
+            pending = completion
         }
     }
 
     func resolve(_ snapshot: ChatGPTResponsePreviewSnapshot?) {
         if let pending {
             self.pending = nil
-            pending.resume(returning: snapshot)
+            pending(snapshot)
         } else {
-            queued = snapshot
+            queued = .snapshot(snapshot)
         }
     }
 }
 
 extension ChatGPTResponseBridgeTests {
     private func makePreviewBridge(
-        probe: ResponsePreviewSnapshotProviderProbe
+        probe: ResponsePreviewSnapshotProviderProbe,
+        timeoutNanoseconds: UInt64 = 1_000_000_000
     ) -> (bridge: ChatGPTResponseBridge, webView: WKWebView) {
         let bridge = ChatGPTResponseBridge(
             slotID: UUID(),
-            responsePreviewSnapshotProvider: { webView, script in
-                await probe.provide(webView, script)
-            }
+            responsePreviewSnapshotProvider: { webView, script, completion in
+                probe.provide(webView, script, completion: completion)
+            },
+            previewSnapshotTimeoutNanoseconds: timeoutNanoseconds
         )
         let webView = WKWebView(
             frame: .zero,
@@ -760,20 +768,57 @@ extension ChatGPTResponseBridgeTests {
         )
     }
 
-    /// N1-6: a runtime/navigation replacement (document token change) during
-    /// the in-flight preview prevents the stale completion from being
-    /// admitted.
+    func testPreviewProviderSuccessBeforeTimeoutAdmitsCurrentDocumentSnapshot() async throws {
+        let probe = ResponsePreviewSnapshotProviderProbe()
+        let (bridge, retainedWebView) = makePreviewBridge(
+            probe: probe,
+            timeoutNanoseconds: 300_000_000
+        )
+        XCTAssertNotNil(retainedWebView)
+        let token = "preview-success-doc-12345678"
+        XCTAssertTrue(bridge.debugReceiveDocumentReady(documentToken: token))
+
+        var completed: ChatGPTResponsePreviewSnapshot?
+        var completionCount = 0
+        bridge.previewLatestAssistantResponse { snapshot in
+            completed = snapshot
+            completionCount += 1
+        }
+        for _ in 0..<100 where probe.requestCount == 0 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        probe.resolve(
+            ChatGPTResponsePreviewSnapshot(
+                documentToken: token,
+                generating: false,
+                previewText: "current assistant preview"
+            )
+        )
+
+        XCTAssertEqual(completed?.previewText, "current assistant preview")
+        XCTAssertEqual(completionCount, 1)
+        try await Task.sleep(nanoseconds: 350_000_000)
+        XCTAssertEqual(completionCount, 1, "provider success cancels its timeout")
+    }
+
+    /// A navigation replacement settles a pending preview once with nil;
+    /// the provider's late result is ignored.
     func testPreviewSnapshotInvalidatedByDocumentReplacementMidFlight() async throws {
         let probe = ResponsePreviewSnapshotProviderProbe()
-        let (bridge, retainedWebView) = makePreviewBridge(probe: probe)
+        let (bridge, retainedWebView) = makePreviewBridge(
+            probe: probe,
+            timeoutNanoseconds: 300_000_000
+        )
         XCTAssertNotNil(retainedWebView)
         XCTAssertTrue(
             bridge.debugReceiveDocumentReady(documentToken: "preview-original-doc-1234567")
         )
 
         var completed: ChatGPTResponsePreviewSnapshot?
+        var completionCount = 0
         bridge.previewLatestAssistantResponse { snapshot in
             completed = snapshot
+            completionCount += 1
         }
         for _ in 0..<100 where probe.requestCount == 0 {
             try? await Task.sleep(nanoseconds: 10_000_000)
@@ -784,6 +829,8 @@ extension ChatGPTResponseBridgeTests {
         XCTAssertTrue(
             bridge.debugReceiveDocumentReady(documentToken: "preview-replaced-doc-1234567")
         )
+        XCTAssertNil(completed)
+        XCTAssertEqual(completionCount, 1)
         probe.resolve(
             ChatGPTResponsePreviewSnapshot(
                 documentToken: "preview-original-doc-1234567",
@@ -794,6 +841,113 @@ extension ChatGPTResponseBridgeTests {
         try await Task.sleep(nanoseconds: 50_000_000)
 
         XCTAssertNil(completed, "stale-document preview must not be admitted")
+        XCTAssertEqual(completionCount, 1, "late provider result must not callback twice")
+    }
+
+    func testPreviewRuntimeReplacementCompletesPendingRequestExactlyOnceWithNil() async throws {
+        let probe = ResponsePreviewSnapshotProviderProbe()
+        let (bridge, retainedWebView) = makePreviewBridge(
+            probe: probe,
+            timeoutNanoseconds: 300_000_000
+        )
+        XCTAssertNotNil(retainedWebView)
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(documentToken: "preview-runtime-doc-1234567")
+        )
+
+        var completed: ChatGPTResponsePreviewSnapshot?
+        var completionCount = 0
+        bridge.previewLatestAssistantResponse { snapshot in
+            completed = snapshot
+            completionCount += 1
+        }
+        for _ in 0..<100 where probe.requestCount == 0 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(probe.requestCount, 1)
+
+        bridge.handleRuntimeReplacement()
+        XCTAssertNil(completed)
+        XCTAssertEqual(completionCount, 1)
+        probe.resolve(
+            ChatGPTResponsePreviewSnapshot(
+                documentToken: "preview-runtime-doc-1234567",
+                generating: false,
+                previewText: "late runtime preview"
+            )
+        )
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertNil(completed)
+        XCTAssertEqual(completionCount, 1)
+    }
+
+    func testPreviewProviderTimeoutCompletesExactlyOnceWithNilAndIgnoresLateResult() async throws {
+        let probe = ResponsePreviewSnapshotProviderProbe()
+        let (bridge, retainedWebView) = makePreviewBridge(
+            probe: probe,
+            timeoutNanoseconds: 100_000_000
+        )
+        XCTAssertNotNil(retainedWebView)
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(documentToken: "preview-timeout-doc-123456")
+        )
+
+        var completed: ChatGPTResponsePreviewSnapshot?
+        var completionCount = 0
+        bridge.previewLatestAssistantResponse { snapshot in
+            completed = snapshot
+            completionCount += 1
+        }
+        for _ in 0..<100 where probe.requestCount == 0 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(probe.requestCount, 1)
+        for _ in 0..<100 where completionCount == 0 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertNil(completed)
+        XCTAssertEqual(completionCount, 1, "timeout must settle the one-shot request once")
+        probe.resolve(
+            ChatGPTResponsePreviewSnapshot(
+                documentToken: "preview-timeout-doc-123456",
+                generating: false,
+                previewText: "late preview after timeout"
+            )
+        )
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertNil(completed)
+        XCTAssertEqual(completionCount, 1, "late provider result must be ignored")
+    }
+
+    func testPreviewProviderNilCompletesExactlyOnceBeforeTimeout() async throws {
+        let probe = ResponsePreviewSnapshotProviderProbe()
+        let (bridge, retainedWebView) = makePreviewBridge(
+            probe: probe,
+            timeoutNanoseconds: 300_000_000
+        )
+        XCTAssertNotNil(retainedWebView)
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(documentToken: "preview-nil-doc-12345678")
+        )
+
+        var completionCount = 0
+        var completed: ChatGPTResponsePreviewSnapshot?
+        bridge.previewLatestAssistantResponse { snapshot in
+            completed = snapshot
+            completionCount += 1
+        }
+        for _ in 0..<100 where probe.requestCount == 0 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        probe.resolve(nil)
+        for _ in 0..<100 where completionCount == 0 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertNil(completed)
+        XCTAssertEqual(completionCount, 1)
+        try await Task.sleep(nanoseconds: 350_000_000)
+        XCTAssertEqual(completionCount, 1, "provider nil and timeout must arbitrate once")
     }
 
     /// N1-6: an invalidated or document-less bridge admits no preview.
