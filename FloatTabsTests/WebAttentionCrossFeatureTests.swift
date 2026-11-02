@@ -1750,7 +1750,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         // Switching tabs drives the controller's own lifecycle coordinator:
         // deactivation creates the Cold plan immediately (no grace involved).
         try select(named: "Plain", in: store)
-        XCTAssertEqual(controller.debugPendingColdReleaseCount, 1)
+        XCTAssertEqual(controller.debugPendingWarmReleaseCount, 1)
         let planToken = try XCTUnwrap(controller.debugInactivePlanToken(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
 
@@ -1761,7 +1761,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
-        XCTAssertEqual(controller.debugPendingColdReleaseCount, 1)
+        XCTAssertEqual(controller.debugPendingWarmReleaseCount, 1)
         XCTAssertNotEqual(controller.debugInactivePlanToken(slotID: slot.id), planToken)
     }
 
@@ -1783,7 +1783,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         acceptBaseline(generating: true, bridge: bridge, webView: webView)
         try select(named: "Plain", in: store)
 
-        XCTAssertEqual(controller.debugPendingColdReleaseCount, 0)
+        XCTAssertEqual(controller.debugPendingWarmReleaseCount, 0)
         XCTAssertEqual(controller.debugPendingWarmReleaseCount, 0)
         XCTAssertTrue(pool.contains(slotID: slot.id))
 
@@ -1791,14 +1791,14 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
-        XCTAssertEqual(controller.debugPendingColdReleaseCount, 0)
+        XCTAssertEqual(controller.debugPendingWarmReleaseCount, 0)
         XCTAssertEqual(controller.debugPendingWarmReleaseCount, 0)
     }
 
     // MARK: 4.3 Warm generating → TTL/memory pressure → Ready (compressed-delay lifecycle
     // reading the SAME real authority the production chain drives)
 
-    func testWarmGeneratingSurvivesMemoryPressureAndBecomesReadyOffScreen() async throws {
+    func testAutomaticGeneratingSurvivesMemoryPressureAndBecomesReadyOffScreen() async throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatWarm", url: "https://chatgpt.com/chat-warm"),
@@ -1833,15 +1833,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         makeInactive(lifecycle, profile: chat)
         makeInactive(lifecycle, profile: ordinaryA)
         makeInactive(lifecycle, profile: ordinaryB)
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
-
-        // Warning pressure is diagnostics-only: it must not shorten the
-        // configured Warm deadline for any runtime.
-        lifecycle.handleMemoryPressure(.warning)
-        XCTAssertTrue(pool.contains(slotID: ordinaryA.id))
-        XCTAssertTrue(pool.contains(slotID: ordinaryB.id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 2)
+        XCTAssertEqual([ordinaryA, ordinaryB].filter { pool.contains(slotID: $0.id) }.count, 1)
         XCTAssertTrue(pool.contains(slotID: chat.id))
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
+
+        // Warning target is one Automatic runtime; generating protection wins.
+        lifecycle.handleMemoryPressure(.warning)
+        XCTAssertFalse(pool.contains(slotID: ordinaryA.id))
+        XCTAssertFalse(pool.contains(slotID: ordinaryB.id))
+        XCTAssertTrue(pool.contains(slotID: chat.id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
 
         // Critical pressure retains the bounded eviction boundary: ordinary
         // Warm runtimes release, but the Generating-protected runtime stays.
@@ -1889,7 +1890,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.4 Ready + memory pressure
 
-    func testReadyWarmCanBeReclaimedWhileUnreadSurvivesMemoryPressure() throws {
+    func testReadyAutomaticCanBeReclaimedWhileUnreadSurvivesMemoryPressure() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatReady", url: "https://chatgpt.com/chat-ready"),
@@ -1930,11 +1931,12 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         makeInactive(lifecycle, profile: ordinaryA)
         makeInactive(lifecycle, profile: ordinaryB)
+        XCTAssertEqual(pool.count, 2)
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: chat.id))
 
         lifecycle.handleMemoryPressure(.warning)
-        XCTAssertTrue(pool.contains(slotID: ordinaryA.id))
-        XCTAssertTrue(pool.contains(slotID: ordinaryB.id))
-        XCTAssertTrue(pool.contains(slotID: chat.id))
+        XCTAssertEqual(pool.count, 1)
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: chat.id))
 
         // Critical pressure evicts the Ready/unread runtime because Ready is
         // transient; the durable unread projection remains.
@@ -1968,7 +1970,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         acceptBaseline(generating: true, bridge: bridge, webView: webView)
         try select(named: "Plain", in: store)
         let oldToken = try XCTUnwrap(controller.debugInactivePlanToken(slotID: slot.id))
-        XCTAssertEqual(controller.debugPendingColdReleaseCount, 1)
+        XCTAssertEqual(controller.debugPendingWarmReleaseCount, 1)
 
         // WebContent termination routes through the real delegate → pool →
         // bridge → controller chain: protection ends, the runtime stays
@@ -1994,7 +1996,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
-        XCTAssertEqual(controller.debugPendingColdReleaseCount, 1)
+        XCTAssertEqual(controller.debugPendingWarmReleaseCount, 1)
         let newToken = try XCTUnwrap(controller.debugInactivePlanToken(slotID: slot.id))
         XCTAssertNotEqual(newToken, oldToken)
 
@@ -2011,7 +2013,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.6 Interaction-aware acknowledgement → later normal policy
 
-    func testNonInteractivePresentationDoesNotAcknowledgeReadyAndLaterDeactivationStartsFreshColdLifecycle() throws {
+    func testNonInteractivePresentationKeepsAutomaticLifecycleUntilInteractionReturns() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
@@ -2024,39 +2026,29 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let bridge = try attentionBridge(pool: pool, slot: slot)
         defer { controller.hideFloatTabs() }
 
-        // Hidden selected completion → Ready (never presented so far).
         acceptBaseline(generating: true, bridge: bridge, webView: webView)
         controller.hideFloatTabs()
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
 
-        // A non-visible acknowledgement must not clear Ready.
         controller.acknowledgeAttentionIfActuallyVisible(slotID: slot.id)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
 
-        // The test host's AppKit activation state is environment-dependent.
-        // Whatever the actual WebView window topology is, the controller's
-        // acknowledgement must agree with the same authoritative visibility
-        // decision used by the reducer.
         controller.showFloatTabs()
         let webInteractionRegained = controller.isAttentionUserVisible(slotID: slot.id)
-        XCTAssertEqual(
-            coordinator.state(for: slot.id),
-            webInteractionRegained ? .idle : .ready
-        )
-        // Presentation/focus acknowledgement belongs only to transient
-        // Attention Ready. Showing the shell is not unread acknowledgement.
+        XCTAssertEqual(coordinator.state(for: slot.id), webInteractionRegained ? .idle : .ready)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
-        // Acknowledgement itself never evicts: the runtime is still resident
-        // and no inactive plan exists while the Slot stays selected.
         XCTAssertTrue(pool.contains(slotID: slot.id))
-        XCTAssertEqual(controller.debugPendingColdReleaseCount, 0)
+        if webInteractionRegained {
+    XCTAssertNil(controller.debugInactivePlanToken(slotID: slot.id))
+} else {
+    XCTAssertNotNil(controller.debugInactivePlanToken(slotID: slot.id))
+}
 
-        // Only the later deactivation starts a fresh Cold lifecycle.
         try select(named: "Plain", in: store)
-        XCTAssertEqual(controller.debugPendingColdReleaseCount, 1)
+        XCTAssertEqual(controller.debugPendingWarmReleaseCount, 1)
         XCTAssertNotNil(controller.debugInactivePlanToken(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
     }
@@ -3624,7 +3616,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
         XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
-        XCTAssertEqual(controller.debugPendingColdReleaseCount, 0)
+        XCTAssertEqual(controller.debugPendingWarmReleaseCount, 0)
     }
 
     // MARK: 4.13 Production acknowledgement wiring

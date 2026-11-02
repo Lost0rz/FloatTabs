@@ -108,48 +108,21 @@ final class AppCommandControllerTests: XCTestCase {
         XCTAssertNil(defaultCommand(keyCode: 18, modifiers: [.command, .shift]))
     }
 
-    func testEveryPreviouslyFixedShortcutHasAnIndividualBinding() {
+    func testEveryCurrentShortcutHasAnIndividualBinding() {
         XCTAssertEqual(AppShortcutCatalog.slotBindings.count, 9)
         XCTAssertEqual(AppShortcutCatalog.navigationBindings.count, 7)
         XCTAssertEqual(AppShortcutCatalog.viewBindings.count, 4)
-        XCTAssertEqual(AppShortcutCatalog.residencyBindings.count, 3)
         XCTAssertEqual(AppShortcutCatalog.applicationBindings.count, 1)
-        XCTAssertEqual(AppShortcutCatalog.allBindings.count, 24)
-        XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 24)
+        XCTAssertEqual(AppShortcutCatalog.allBindings.count, 21)
+        XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 21)
     }
 
-    func testResidencyShortcutsSelectHotWarmAndCold() {
-        XCTAssertEqual(
-            defaultCommand(
-                keyCode: UInt16(KeyboardShortcuts.Key.h.rawValue),
-                modifiers: [.control, .option]
-            ),
-            .setResidency(.hot)
-        )
-        XCTAssertEqual(
-            defaultCommand(
-                keyCode: UInt16(KeyboardShortcuts.Key.w.rawValue),
-                modifiers: [.control, .option]
-            ),
-            .setResidency(.warm)
-        )
-        XCTAssertEqual(
-            defaultCommand(
-                keyCode: UInt16(KeyboardShortcuts.Key.c.rawValue),
-                modifiers: [.control, .option]
-            ),
-            .setResidency(.cold)
-        )
+    func testLegacyResidencyKeysAreNotCurrentUserShortcuts() {
+        XCTAssertNil(defaultCommand(keyCode: UInt16(KeyboardShortcuts.Key.h.rawValue), modifiers: [.control, .option]))
+        XCTAssertNil(defaultCommand(keyCode: UInt16(KeyboardShortcuts.Key.w.rawValue), modifiers: [.control, .option]))
+        XCTAssertNil(defaultCommand(keyCode: UInt16(KeyboardShortcuts.Key.c.rawValue), modifiers: [.control, .option]))
     }
 
-    func testStatusHUDDisplaysSelectedResidencyMode() {
-        let hud = StatusHUDView()
-
-        hud.show(residency: .warm)
-
-        XCTAssertFalse(hud.isHidden)
-        XCTAssertEqual(hud.displayedText, "Mode: Warm")
-    }
 
     func testConfiguredAddressShortcutReplacesDefaultCommandL() {
         let custom = KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .option])

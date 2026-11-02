@@ -1649,10 +1649,10 @@ final class WebViewPoolTests: XCTestCase {
         lifecycle.deactivate(profile: profile)
 
         XCTAssertTrue(pool.contains(slotID: profile.id))
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertFalse(pool.contains(slotID: profile.id))
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
     }
 
     func testColdLifecycleNotifiesOnlyAfterWebViewRuntimeIsReleased() async throws {
@@ -1682,24 +1682,26 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(poolWasStillResidentAtNotification)
     }
 
-    func testColdLifecycleActivationCancelsPendingRelease() async throws {
+    func testVisibleActivationCancelsPendingAutomaticRelease() async throws {
         let pool = makePool()
-        var profile = makeProfile(name: "ColdCancel")
-        profile.residencyPolicy = .cold
+        var profile = makeProfile(name: "AutomaticCancel")
+        profile.runtimeRetentionPreference = .automatic
         _ = try pool.webView(for: profile)
         let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: 0.01
+            coldReleaseDelay: 0.01,
+            warmReleaseDelay: 0.01,
+            installsMemoryPressureSource: false
         )
 
-        lifecycle.activate(profile: profile)
+        lifecycle.setPanelVisible(true, activeProfile: profile)
         lifecycle.deactivate(profile: profile)
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
 
         lifecycle.activate(profile: profile)
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
@@ -1725,11 +1727,11 @@ final class WebViewPoolTests: XCTestCase {
         lifecycle.activate(profile: companion)
         lifecycle.deactivate(profile: companion)
         lifecycle.activate(profile: source)
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
 
         lifecycle.beginSupplementalVisibility(profile: companion)
 
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertTrue(pool.contains(slotID: companion.id))
     }
@@ -1760,7 +1762,7 @@ final class WebViewPoolTests: XCTestCase {
 
         XCTAssertTrue(pausedIDs.isEmpty)
         XCTAssertFalse(lifecycle.isHiddenActiveGracePending)
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
         try await Task.sleep(nanoseconds: 70_000_000)
         XCTAssertTrue(pool.contains(slotID: source.id))
 
@@ -1799,35 +1801,37 @@ final class WebViewPoolTests: XCTestCase {
             prepareAsInactive: true
         )
 
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertFalse(pool.contains(slotID: companion.id))
     }
 
-    func testResourceLifecycleDefaultTimingsMatchAcceptedContract() throws {
-        XCTAssertEqual(SlotLifecycleCoordinator.defaultColdReleaseDelay, 30)
-        XCTAssertEqual(SlotLifecycleCoordinator.defaultWarmReleaseDelay, 120)
-        XCTAssertEqual(SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay, 120)
+    func testResourceLifecycleDefaultsMatchAutomaticContract() throws {
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultAutomaticReleaseDelay, 30)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay, 0)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultManagedResidentTarget, 2)
+        XCTAssertEqual(SlotLifecycleCoordinator.warningManagedResidentTarget, 1)
     }
 
-    func testWarmLifecycleDoesNotScheduleColdRelease() async throws {
+    func testAutomaticLifecycleSchedulesSingleGraceAndReleases() async throws {
         let pool = makePool()
-        var profile = makeProfile(name: "Warm")
-        profile.residencyPolicy = .warm
+        var profile = makeProfile(name: "Automatic")
+        profile.runtimeRetentionPreference = .automatic
         _ = try pool.webView(for: profile)
         let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: 0.01
+            coldReleaseDelay: 0.01,
+            warmReleaseDelay: 0.01,
+            installsMemoryPressureSource: false
         )
-
         lifecycle.activate(profile: profile)
         lifecycle.deactivate(profile: profile)
-
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
         try await Task.sleep(nanoseconds: 50_000_000)
-        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
     }
 
     func testWarmLifecycleReleasesAfterWarmTTL() async throws {
@@ -1852,7 +1856,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
-    func testThreeInactiveWarmRuntimesRemainUntilTTLWithoutMemoryPressure() throws {
+    func testThreeInactiveAutomaticRuntimesRespectNormalBudgetBeforeGrace() throws {
         let pool = makePool()
         let profiles = ["A", "B", "C"].enumerated().map { index, name in
             var profile = makeProfile(name: name)
@@ -1878,11 +1882,9 @@ final class WebViewPoolTests: XCTestCase {
             lifecycle.deactivate(profile: profile)
         }
 
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
-        XCTAssertEqual(pool.count, 3)
-        for profile in profiles {
-            XCTAssertTrue(pool.contains(slotID: profile.id))
-        }
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 2)
+        XCTAssertEqual(pool.count, 2)
+        XCTAssertEqual(profiles.filter { pool.contains(slotID: $0.id) }.count, 2)
     }
 
     func testBackgroundAudioPlayingProtectsColdUntilPlaybackStopsThenStartsFreshGrace() async throws {
