@@ -6,11 +6,11 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 7 FINAL-CI TEST CORRECTIVE**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 7 FINAL VERIFICATION**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `V5 CONTRACT FROZEN / PHASE 6 MERGED / PHASE 7 PRODUCT CORRECTIVE COMPLETE / FINAL-CI SINGLE TEST CORRECTIVE ACTIVE`.
+Current execution state: `V5 CONTRACT FROZEN / PHASE 7 PRODUCT + TEST CORRECTIVES COMPLETE / FINAL LITERAL-HEAD VERIFICATION ACTIVE`.
 
 ## Canonical state
 
@@ -30,10 +30,12 @@ PHASE_7_CONTRACT=ACCEPTED / FROZEN / RECONCILED
 PHASE_7_BRANCH=codex/ft-runtime-lifecycle-phase7-automatic-001
 PHASE_7_PR=#188 OPEN / DRAFT / UNMERGED
 PHASE_7_PRODUCT_CORRECTIVE=COMPLETE
-PHASE_7_FULL_XCTEST_CORRECTIVE_RUN_41366231928=PASS
-PHASE_7_QA_DMG_653=e1814064c4678efc66d1acf479c3f7e5af4f0439 / PASS
-PHASE_7_MACOS_CI_1334=e1814064c4678efc66d1acf479c3f7e5af4f0439 / FAIL / ONE TEST
-PHASE_7_FINAL_CI_TEST_CORRECTIVE=ACTIVE / TEST-ONLY
+PHASE_7_MACHINE_TEST_CORRECTIVE=COMPLETE
+PHASE_7_FINAL_SINGLE_TEST_CORRECTIVE=COMPLETE
+PHASE_7_FINAL_SINGLE_TEST_CORRECTIVE_HEAD=212546f692738b396f0e1cb14d6a43f66ac109e7
+PHASE_7_FINAL_CORRECTIVE_XCTEST=PASS / RUN 41367458150
+PHASE_7_EXACT_DIFF_AUDIT=PASS / NO NEW PRODUCTION ISSUE
+FINAL_LITERAL_HEAD=PAIRED_CONTROL_SYNC_HEAD
 PROGRAM_HUMAN_ACCEPTANCE=NOT_STARTED
 ```
 
@@ -49,72 +51,73 @@ Phase 7 execution contract:
 
 `CURRENT_TASK.md` is the only active mutation authorization.
 
-## Final-CI finding
+## Corrective closeout
 
-Literal head `e1814064...` passed:
+Phase 7 product corrective is complete and preserves the frozen product model:
 
-- QA DMG #653;
-- package-lock verification;
-- Debug arm64 build;
-- Release arm64 build;
-- native Release architecture verification.
+- current Runtime Retention is `Automatic` / `Keep Loaded` only;
+- new Slots default Automatic;
+- normal / warning / critical Automatic targets remain `2 / 1 / 0`;
+- Automatic inactivity grace remains 30 seconds;
+- Hot/Warm/Cold are compatibility-only and no longer current product UI/settings/shortcut policy;
+- Hot-only hidden WebView hosts are removed;
+- Runtime reclaim does not trigger legacy Cold website-cache cleanup;
+- Browser Profile/session data and Phase 6 restore ownership remain unchanged.
 
-macOS CI #1334 then ran 1114 tests and produced exactly one failure:
-
-```text
-WebAttentionCrossFeatureTests
-  testNonInteractivePresentationKeepsAutomaticLifecycleUntilInteractionReturns
-  line 2047: XCTAssertNotNil failed
-```
-
-Fresh production inspection proves this is not a lifecycle defect:
-
-1. `showFloatTabs()` calls `slotLifecycleCoordinator.setPanelVisible(true, activeProfile:)`;
-2. current selected Slot activation cancels that Slot's inactive plan;
-3. the test's `isAttentionUserVisible` fact is AppKit/test-environment dependent and is not the lifecycle ownership predicate;
-4. therefore the test must not infer current Slot inactive-plan ownership from Attention interaction visibility.
-
-The canonical assertion is:
+The final formal CI failure on earlier head `e1814064...` was reduced to one environment-sensitive test assertion. Production inspection proved selected-Slot lifecycle ownership was correct: `showFloatTabs()` marks the selected Slot presented and cancels its inactive plan independently of AppKit Attention interaction visibility. The bounded correction therefore changed only the test contract:
 
 ```text
-showFloatTabs() while ChatA selected
+showFloatTabs() with ChatA selected
 → ChatA inactive-plan token == nil
 
 select Plain
 → ChatA inactive-plan token != nil
 ```
 
-This remains a test-only corrective. No production mutation is authorized or required.
+Verified final corrective evidence:
 
-## Exact-diff audit result
+```text
+CORRECTIVE_RUN=41367458150
+SINGLE_TEST_FILE_SCOPE=PASS
+FULL_XCTEST=PASS
+TEMP_CORRECTIVE_WORKFLOW=REMOVED
+PRODUCTION_FILES_CHANGED_BY_FINAL_CORRECTIVE=0
+```
 
-Fresh production exact-diff audit found no new issue:
+## Fresh exact-diff audit
+
+Fresh code-level audit remains PASS:
 
 - persistence authority is `runtimeRetentionPreference`;
 - legacy residency is bounded compatibility projection only;
-- Hot hidden host architecture is removed;
-- Cold Runtime release no longer triggers website-cache cleanup;
-- current UI/settings/shortcuts expose Automatic / Keep Loaded only;
 - lifecycle ownership remains `SlotLifecycleCoordinator` → `WebViewPool`;
-- Browser Profile/session data and Phase 6 restore boundaries are unchanged.
+- no second lifecycle writer exists;
+- no hidden persistent Runtime continuity workaround remains;
+- no Cold→website-cache cleanup coupling remains;
+- current UI/settings/shortcuts do not restore Hot/Warm/Cold product controls;
+- Browser Profile/session safety is preserved;
+- Phase 6 restore boundary is not redesigned.
 
-## Current execution order
+## Final verification gate
 
-```text
-single test-only assertion corrective
-→ full XCTest
-→ user-authored final-verification control sync
-→ literal-head macOS CI + QA DMG
-→ bounded Real-Mac evidence where independently available
-→ merge-readiness decision
-```
+The paired `CURRENT_STATUS.md` / `CURRENT_TASK.md` control sync establishes the final user-authored PR head. No further repository mutation is authorized unless that exact head exposes a new defect.
+
+Merge-readiness requires the same final literal head to pass:
+
+1. `Build & Test (Apple Silicon arm64)` on the project self-hosted runner;
+2. QA DMG;
+3. fresh identity check showing PR head unchanged;
+4. exact-diff audit remains PASS.
+
+Phase 7 Real-Mac WP5 evidence remains independent: the existing benchmark harness is historical Hot/Warm/Cold Stage 5E and is not accepted as Phase 7 Automatic/Keep Loaded evidence. Human UI/runtime acceptance remains `NOT_STARTED`.
 
 ## Safety boundary
 
-The corrective must not:
+Do not:
 
-- modify production lifecycle/runtime code;
+- mutate production code unless final-head machine evidence proves a new defect and authority is reconciled first;
 - clear or migrate Browser Profile cookies/session/site data;
-- restore Hot/Warm/Cold current policy;
+- restore Hot/Warm/Cold as current policy;
 - add hidden persistent WebViews;
-- change release/version metadata.
+- change release/version metadata;
+- treat checks from any earlier head as evidence for the final literal head.
