@@ -6,11 +6,11 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 7 FINAL VERIFICATION**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 7 REAL-MAC ACCEPTANCE PREPARATION**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `V5 CONTRACT FROZEN / PHASE 7 PRODUCT + TEST CORRECTIVES COMPLETE / FINAL LITERAL-HEAD VERIFICATION ACTIVE`.
+Current execution state: `V5 CONTRACT FROZEN / PHASE 7 PRODUCT + TEST CORRECTIVES COMPLETE / FINAL MACHINE GATES PASS / REAL-MAC ACCEPTANCE PREPARATION ACTIVE`.
 
 ## Canonical state
 
@@ -31,93 +31,97 @@ PHASE_7_BRANCH=codex/ft-runtime-lifecycle-phase7-automatic-001
 PHASE_7_PR=#188 OPEN / DRAFT / UNMERGED
 PHASE_7_PRODUCT_CORRECTIVE=COMPLETE
 PHASE_7_MACHINE_TEST_CORRECTIVE=COMPLETE
-PHASE_7_FINAL_SINGLE_TEST_CORRECTIVE=COMPLETE
-PHASE_7_FINAL_SINGLE_TEST_CORRECTIVE_HEAD=212546f692738b396f0e1cb14d6a43f66ac109e7
-PHASE_7_FINAL_CORRECTIVE_XCTEST=PASS / RUN 41367458150
-PHASE_7_EXACT_DIFF_AUDIT=PASS / NO NEW PRODUCTION ISSUE
-FINAL_LITERAL_HEAD=PAIRED_CONTROL_SYNC_HEAD
+PHASE_7_FINAL_TEST_CORRECTIVE=COMPLETE
+PHASE_7_FINAL_MACHINE_HEAD=d401a156a9a1d8419221240f4a9b1d099e16db43
+PHASE_7_MACOS_CI_1343=PASS
+PHASE_7_QA_DMG_662=PASS
+PHASE_7_EXACT_DIFF_AUDIT=PASS
+PHASE_7_REAL_MAC_WP5=PREPARING
 PROGRAM_HUMAN_ACCEPTANCE=NOT_STARTED
 ```
 
-## Current authority
+## Machine verification closeout
 
-Program contract:
+The same literal head `d401a156a9a1d8419221240f4a9b1d099e16db43` passed all required machine gates:
 
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`
+- required self-hosted `Build & Test (Apple Silicon arm64)` / macOS CI #1343;
+- package-lock verification;
+- Debug arm64 build;
+- Release arm64 build;
+- native Release architecture verification;
+- Unit tests;
+- QA DMG #662;
+- fresh identity check and exact-diff audit.
 
-Phase 7 execution contract:
+No current machine evidence authorizes further production-runtime mutation.
 
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`
+## Current product truth
 
-`CURRENT_TASK.md` is the only active mutation authorization.
-
-## Corrective closeout
-
-Phase 7 product corrective is complete and preserves the frozen product model:
-
-- current Runtime Retention is `Automatic` / `Keep Loaded` only;
-- new Slots default Automatic;
-- normal / warning / critical Automatic targets remain `2 / 1 / 0`;
-- Automatic inactivity grace remains 30 seconds;
-- Hot/Warm/Cold are compatibility-only and no longer current product UI/settings/shortcut policy;
-- Hot-only hidden WebView hosts are removed;
-- Runtime reclaim does not trigger legacy Cold website-cache cleanup;
-- Browser Profile/session data and Phase 6 restore ownership remain unchanged.
-
-The final formal CI failure on earlier head `e1814064...` was reduced to one environment-sensitive test assertion. Production inspection proved selected-Slot lifecycle ownership was correct: `showFloatTabs()` marks the selected Slot presented and cancels its inactive plan independently of AppKit Attention interaction visibility. The bounded correction therefore changed only the test contract:
+Phase 7 current product lifecycle is:
 
 ```text
-showFloatTabs() with ChatA selected
-→ ChatA inactive-plan token == nil
-
-select Plain
-→ ChatA inactive-plan token != nil
+Slot/Profile/session persists
+→ runtimeRetentionPreference = Automatic | Keep Loaded
+→ Automatic inactivity grace = 30s
+→ normal / warning / critical Automatic targets = 2 / 1 / 0
+→ eligible inactive Runtime reclaimed by SlotLifecycleCoordinator → WebViewPool
+→ Phase 6 materialization/restore when selected again
 ```
 
-Verified final corrective evidence:
+Hard protections remain active/presented, fullscreen, supplemental visible surface, Attention Generating, active/pending allowed-background-media, and current materialization/restoring ownership.
+
+Hot/Warm/Cold remain bounded compatibility inputs/projections only. They are not current product policy, UI, settings, shortcuts or acceptance terminology.
+
+## Real-Mac acceptance gap
+
+The repository's existing benchmark runbook and lifecycle harness are historical Stage 5E artifacts built around Hot/Warm/Cold, separate Warm/Cold timers and the old hidden-active grace. They are not valid Phase 7 acceptance evidence.
+
+Phase 7 acceptance preparation must retire that current-use path and establish evidence for:
+
+1. Automatic active/inactive lifecycle and 30s grace;
+2. normal Automatic resident target `2` using at least three loaded Automatic Slots;
+3. deterministic LRU reclaim evidence;
+4. Keep Loaded behavior under ordinary reclaim;
+5. warning target `1` and critical target `0` where the existing debug control can safely and deterministically exercise memory-pressure policy;
+6. protection boundaries where independently observable;
+7. Phase 6 restore after reclaim;
+8. Browser Profile/login/Cookie/session continuity across Runtime reclaim/restore;
+9. process/RSS evidence without claiming unsupported exact per-Slot WebContent attribution.
+
+## Authorized acceptance-tooling scope
+
+Allowed mutation is limited to:
+
+- `CURRENT_STATUS.md`;
+- `CURRENT_TASK.md`;
+- `tools/benchmark/README.md`;
+- `tools/benchmark/floattabs_lifecycle_benchmark.py`;
+- `tools/benchmark/floattabs_benchmark.py` only when required to project canonical Phase 7 fields or commands;
+- acceptance/architecture documentation required to define the new Phase 7 Real-Mac procedure;
+- benchmark self-tests or test-only support required for the harness.
+
+Production `FloatTabs/**` lifecycle/runtime behavior is frozen during acceptance preparation. If the existing debug benchmark control cannot expose a required safe acceptance fact/trigger, STOP and reconcile before changing production/debug host code.
+
+## Current execution order
 
 ```text
-CORRECTIVE_RUN=41367458150
-SINGLE_TEST_FILE_SCOPE=PASS
-FULL_XCTEST=PASS
-TEMP_CORRECTIVE_WORKFLOW=REMOVED
-PRODUCTION_FILES_CHANGED_BY_FINAL_CORRECTIVE=0
+retire historical Hot/Warm/Cold acceptance path
+→ construct Phase 7 Automatic/Keep Loaded Real-Mac harness/runbook
+→ self-test / syntax verification
+→ machine CI/QA revalidation if repository head changes
+→ run bounded Real-Mac acceptance on exact acceptance head
+→ inspect evidence + user human acceptance
+→ fresh final audit
+→ merge-readiness decision for PR #188
 ```
-
-## Fresh exact-diff audit
-
-Fresh code-level audit remains PASS:
-
-- persistence authority is `runtimeRetentionPreference`;
-- legacy residency is bounded compatibility projection only;
-- lifecycle ownership remains `SlotLifecycleCoordinator` → `WebViewPool`;
-- no second lifecycle writer exists;
-- no hidden persistent Runtime continuity workaround remains;
-- no Cold→website-cache cleanup coupling remains;
-- current UI/settings/shortcuts do not restore Hot/Warm/Cold product controls;
-- Browser Profile/session safety is preserved;
-- Phase 6 restore boundary is not redesigned.
-
-## Final verification gate
-
-The paired `CURRENT_STATUS.md` / `CURRENT_TASK.md` control sync establishes the final user-authored PR head. No further repository mutation is authorized unless that exact head exposes a new defect.
-
-Merge-readiness requires the same final literal head to pass:
-
-1. `Build & Test (Apple Silicon arm64)` on the project self-hosted runner;
-2. QA DMG;
-3. fresh identity check showing PR head unchanged;
-4. exact-diff audit remains PASS.
-
-Phase 7 Real-Mac WP5 evidence remains independent: the existing benchmark harness is historical Hot/Warm/Cold Stage 5E and is not accepted as Phase 7 Automatic/Keep Loaded evidence. Human UI/runtime acceptance remains `NOT_STARTED`.
 
 ## Safety boundary
 
 Do not:
 
-- mutate production code unless final-head machine evidence proves a new defect and authority is reconciled first;
-- clear or migrate Browser Profile cookies/session/site data;
-- restore Hot/Warm/Cold as current policy;
-- add hidden persistent WebViews;
-- change release/version metadata;
-- treat checks from any earlier head as evidence for the final literal head.
+- mutate production lifecycle/runtime code during harness preparation;
+- clear, migrate or overwrite Browser Profile cookies/session/site data;
+- make reload/reset/restart a success criterion;
+- revive Hot/Warm/Cold as current acceptance policy;
+- claim exact per-Slot WebContent memory attribution when WebKit evidence cannot prove it;
+- merge PR #188 before Real-Mac/human acceptance is dispositioned.
