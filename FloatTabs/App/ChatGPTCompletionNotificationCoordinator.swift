@@ -49,6 +49,32 @@ struct ChatGPTCompletionNotificationRequest: Equatable {
     let payload: ChatGPTCompletionNotificationPayload
 }
 
+/// Bounded, normalized notification-settings facts used for preflight
+/// decisions and diagnostics. These are public-API enum projections only —
+/// never raw system objects, and never a Focus/DND claim.
+struct ChatGPTNotificationSettingsFacts: Equatable, Sendable {
+    static let authorized = "authorized"
+    static let denied = "denied"
+    static let notDetermined = "notDetermined"
+    static let provisional = "provisional"
+    static let ephemeral = "ephemeral"
+
+    let authorizationStatus: String
+    let alertSetting: String
+    let alertStyle: String
+    let notificationCenterSetting: String
+    let showPreviewsSetting: String
+
+    var maySubmit: Bool {
+        switch authorizationStatus {
+        case Self.authorized, Self.provisional, Self.ephemeral:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 /// The one seam between FloatTabs and the system notification center.
 ///
 /// Only the system implementation below may touch `UNUserNotificationCenter`;
@@ -56,6 +82,9 @@ struct ChatGPTCompletionNotificationRequest: Equatable {
 /// so tests can use a recording/fake backend instead of real system delivery.
 @MainActor
 protocol ChatGPTCompletionNotificationBackend: AnyObject {
+    /// Reads the current normalized notification settings facts.
+    func notificationSettings() async -> ChatGPTNotificationSettingsFacts
+
     /// Contextually requests `.alert` authorization. Returns true only when
     /// alert notifications may actually be presented.
     @discardableResult
@@ -80,6 +109,56 @@ protocol ChatGPTCompletionNotificationBackend: AnyObject {
 @MainActor
 final class SystemChatGPTCompletionNotificationBackend: ChatGPTCompletionNotificationBackend {
     private let center = UNUserNotificationCenter.current()
+
+    func notificationSettings() async -> ChatGPTNotificationSettingsFacts {
+        let settings = await center.notificationSettings()
+        return Self.facts(from: settings)
+    }
+
+    static func facts(from settings: UNNotificationSettings) -> ChatGPTNotificationSettingsFacts {
+        let authorization: String
+        switch settings.authorizationStatus {
+        case .authorized: authorization = ChatGPTNotificationSettingsFacts.authorized
+        case .denied: authorization = ChatGPTNotificationSettingsFacts.denied
+        case .notDetermined: authorization = ChatGPTNotificationSettingsFacts.notDetermined
+        case .provisional: authorization = ChatGPTNotificationSettingsFacts.provisional
+        case .ephemeral: authorization = ChatGPTNotificationSettingsFacts.ephemeral
+        @unknown default: authorization = "unknown"
+        }
+        let alertSetting = Self.settingName(settings.alertSetting)
+        let alertStyle: String
+        switch settings.alertStyle {
+        case .none: alertStyle = "none"
+        case .banner: alertStyle = "banner"
+        case .alert: alertStyle = "alert"
+        @unknown default: alertStyle = "unknown"
+        }
+        return ChatGPTNotificationSettingsFacts(
+            authorizationStatus: authorization,
+            alertSetting: alertSetting,
+            alertStyle: alertStyle,
+            notificationCenterSetting: Self.settingName(settings.notificationCenterSetting),
+            showPreviewsSetting: Self.showPreviewsSettingName(settings.showPreviewsSetting)
+        )
+    }
+
+    private static func settingName(_ setting: UNNotificationSetting) -> String {
+        switch setting {
+        case .notSupported: return "notSupported"
+        case .disabled: return "disabled"
+        case .enabled: return "enabled"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private static func showPreviewsSettingName(_ setting: UNShowPreviewsSetting) -> String {
+        switch setting {
+        case .always: return "always"
+        case .whenAuthenticated: return "whenAuthenticated"
+        case .never: return "never"
+        @unknown default: return "unknown"
+        }
+    }
 
     func requestAlertAuthorization() async -> Bool {
         do {
@@ -126,8 +205,10 @@ final class SystemChatGPTCompletionNotificationBackend: ChatGPTCompletionNotific
 @MainActor
 final class ChatGPTCompletionNotificationCoordinator: NSObject, UNUserNotificationCenterDelegate {
     static let notificationIdentifierPrefix = "floattabs.chatgpt-completion."
-    static let notificationTitle = "FloatTabs"
-    static let notificationBody = "A ChatGPT response is ready."
+    static let notificationTitleFallback = "ChatGPT"
+    static let notificationBodyFallback = "A ChatGPT response is ready."
+    static let titleCharacterLimit = 80
+    static let bodyCharacterLimit = 240
 
     /// Routes the exact persistent Slot UUID activated through a completion
     /// notification's default action. Dismissal and unrecognized payloads
@@ -159,22 +240,47 @@ final class ChatGPTCompletionNotificationCoordinator: NSObject, UNUserNotificati
     }
 
     /// Production entry point: one call per durable unread `.marked`
-    /// completion handoff. Authorization is requested contextually here —
-    /// never at app launch.
-    func notify(slotID: UUID) {
+    /// completion handoff. `displayName` and `assistantPreview` are ephemeral
+    /// projection input only — they are never persisted or logged. Missing or
+    /// untrusted input falls back to bounded generic content.
+    func notify(
+        slotID: UUID,
+        displayName: String?,
+        assistantPreview: String?
+    ) {
         Task { @MainActor [weak self] in
-            await self?.performNotify(slotID: slotID)
+            await self?.performNotify(
+                slotID: slotID,
+                displayName: displayName,
+                assistantPreview: assistantPreview
+            )
         }
     }
 
-    func performNotify(slotID: UUID) async {
+    func performNotify(
+        slotID: UUID,
+        displayName: String?,
+        assistantPreview: String?
+    ) async {
         diagnostics.record(
             event: "notification.requested",
             level: .info,
             subsystem: "notification",
-            fields: ["slot_id": .string(slotID.uuidString)]
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "has_preview": .bool(assistantPreview != nil)
+            ]
         )
-        guard await backend.requestAlertAuthorization() else {
+
+        var settings = await backend.notificationSettings()
+        if settings.authorizationStatus == ChatGPTNotificationSettingsFacts.notDetermined {
+            // Contextual authorization request — never at launch, and never
+            // repeated for already-authorized completions.
+            await backend.requestAlertAuthorization()
+            settings = await backend.notificationSettings()
+        }
+
+        guard settings.maySubmit else {
             // Denied/error/unavailable authorization is a projection failure
             // only: unread, sound, generation, Runtime and user data continue
             // unchanged.
@@ -184,18 +290,33 @@ final class ChatGPTCompletionNotificationCoordinator: NSObject, UNUserNotificati
                 subsystem: "notification",
                 fields: [
                     "slot_id": .string(slotID.uuidString),
-                    "reason": .string("authorization_unavailable")
+                    "reason": .string("authorization_unavailable"),
+                    "permission_status": .string(settings.authorizationStatus)
                 ]
             )
             return
         }
 
+        diagnostics.record(
+            event: "notification.settings",
+            level: .info,
+            subsystem: "notification",
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "permission_status": .string(settings.authorizationStatus),
+                "alert_setting": .string(settings.alertSetting),
+                "alert_style": .string(settings.alertStyle),
+                "notification_center_setting": .string(settings.notificationCenterSetting),
+                "show_previews_setting": .string(settings.showPreviewsSetting)
+            ]
+        )
+
         let identifier = Self.notificationIdentifier(for: slotID)
         await backend.withdraw(identifier: identifier)
         let request = ChatGPTCompletionNotificationRequest(
             identifier: identifier,
-            title: Self.notificationTitle,
-            body: Self.notificationBody,
+            title: Self.normalizedTitle(displayName),
+            body: Self.normalizedBody(assistantPreview),
             payload: ChatGPTCompletionNotificationPayload(
                 version: ChatGPTCompletionNotificationPayload.currentVersion,
                 kind: ChatGPTCompletionNotificationPayload.kind,
@@ -203,11 +324,20 @@ final class ChatGPTCompletionNotificationCoordinator: NSObject, UNUserNotificati
             )
         )
         if await backend.deliver(request) {
+            // Submission success means the system accepted the request — it
+            // does NOT prove a banner was visibly displayed. Alert style,
+            // Notification Center policy, preview policy and Focus/system
+            // policy can all affect what the user actually sees.
             diagnostics.record(
-                event: "notification.delivered",
+                event: "notification.submitted",
                 level: .notice,
                 subsystem: "notification",
-                fields: ["slot_id": .string(slotID.uuidString)]
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "alert_setting": .string(settings.alertSetting),
+                    "alert_style": .string(settings.alertStyle),
+                    "banner_expected": .bool(settings.alertSetting == "enabled")
+                ]
             )
         } else {
             diagnostics.record(
@@ -220,6 +350,51 @@ final class ChatGPTCompletionNotificationCoordinator: NSObject, UNUserNotificati
                 ]
             )
         }
+    }
+
+    /// Normalized notification title: trimmed Slot/Web App display name,
+    /// capped at 80 user-perceived characters, falling back to `ChatGPT`.
+    /// The value is projection-only input and is never logged.
+    static func normalizedTitle(_ displayName: String?) -> String {
+        let normalized = normalizeUserPerceivedText(
+            displayName,
+            limit: titleCharacterLimit
+        )
+        return normalized ?? notificationTitleFallback
+    }
+
+    /// Normalized notification body: bounded plain-text assistant preview,
+    /// capped at 240 user-perceived characters, falling back to the generic
+    /// completion body. The value is projection-only input and is never
+    /// logged.
+    static func normalizedBody(_ assistantPreview: String?) -> String {
+        normalizeUserPerceivedText(
+            assistantPreview,
+            limit: bodyCharacterLimit
+        ) ?? notificationBodyFallback
+    }
+
+    private static func normalizeUserPerceivedText(
+        _ value: String?,
+        limit: Int
+    ) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let collapsed = trimmed.replacingOccurrences(
+            of: #"\s+"#,
+            with: " ",
+            options: .regularExpression
+        )
+        guard !collapsed.isEmpty else { return nil }
+        guard limit > 0 else { return nil }
+        if collapsed.count <= limit {
+            return collapsed
+        }
+        let prefix = String(collapsed.prefix(limit))
+        return prefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? nil
+            : prefix.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Default-action routing decision. Only the exact default action with a

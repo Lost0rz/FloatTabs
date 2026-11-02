@@ -8,6 +8,16 @@ protocol ChatGPTResponseStatusSnapshotting: AnyObject {
     )
 }
 
+/// One bounded, ephemeral assistant-response preview projection. It carries
+/// no response identity, is never persisted, and exists only as notification
+/// body input. `previewText` is already a bounded plain-text window produced
+/// by the injected response script.
+struct ChatGPTResponsePreviewSnapshot: Equatable, Sendable {
+    let documentToken: String
+    let generating: Bool
+    let previewText: String?
+}
+
 /// Per-WebView bridge for response identity, status and trusted page input.
 /// Response body extraction and follow behavior are deliberately not owned here.
 @MainActor
@@ -15,6 +25,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     typealias TrustedInteractionHandler = @MainActor (UUID, ChatGPTTrustedPageInteractionKind, String) -> Void
     typealias TrustedInteractionEventHandler = @MainActor (UUID, ChatGPTTrustedInteractionEvent) -> Void
     typealias ResponseStatusSnapshotProvider = @MainActor (WKWebView, String) async -> ChatGPTResponseStatusSnapshot?
+    typealias ResponsePreviewSnapshotProvider = @MainActor (WKWebView, String) async -> ChatGPTResponsePreviewSnapshot?
 
     let slotID: UUID
     private let onTrustedInteraction: TrustedInteractionHandler
@@ -23,6 +34,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     private weak var userContentController: WKUserContentController?
     private var currentDocumentToken: String?
     private var responseStatusSnapshotProvider: ResponseStatusSnapshotProvider
+    private var responsePreviewSnapshotProvider: ResponsePreviewSnapshotProvider
 #if DEBUG
     private var debugLatestResponseStatusOverride: ChatGPTResponseStatusSnapshot?
 #endif
@@ -38,13 +50,17 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         slotID: UUID,
         onTrustedInteraction: @escaping TrustedInteractionHandler = { _, _, _ in },
         onTrustedInteractionEvent: TrustedInteractionEventHandler? = nil,
-        responseStatusSnapshotProvider: ResponseStatusSnapshotProvider? = nil
+        responseStatusSnapshotProvider: ResponseStatusSnapshotProvider? = nil,
+        responsePreviewSnapshotProvider: ResponsePreviewSnapshotProvider? = nil
     ) {
         self.slotID = slotID
         self.onTrustedInteraction = onTrustedInteraction
         self.onTrustedInteractionEvent = onTrustedInteractionEvent
         self.responseStatusSnapshotProvider = responseStatusSnapshotProvider ?? { webView, script in
             await Self.evaluateResponseStatusSnapshot(in: webView, script: script)
+        }
+        self.responsePreviewSnapshotProvider = responsePreviewSnapshotProvider ?? { webView, script in
+            await Self.evaluateResponsePreviewSnapshot(in: webView, script: script)
         }
         super.init()
     }
@@ -101,6 +117,43 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
                 return
             }
             let snapshot = await provider(webView, Self.snapshotLatestResponseStatusScript)
+            guard let self,
+                  !self.isInvalidated,
+                  self.webView === webView,
+                  ObjectIdentifier(webView) == webViewIdentity,
+                  self.currentDocumentToken == documentToken,
+                  let snapshot,
+                  snapshot.documentToken == documentToken else {
+                completion(nil)
+                return
+            }
+            completion(snapshot)
+        }
+    }
+
+    /// One-shot bounded assistant-response preview projection for native
+    /// notification body input. Deliberately separate from
+    /// `snapshotLatestResponseStatus` so ordinary status/acknowledgement
+    /// snapshots never carry response body text. The same current-WebView /
+    /// current-document invalidation rules apply: a runtime or navigation
+    /// replacement admits no stale preview. Never polled, never persisted.
+    func previewLatestAssistantResponse(
+        completion: @escaping @MainActor (ChatGPTResponsePreviewSnapshot?) -> Void
+    ) {
+        guard !isInvalidated,
+              let webView,
+              let documentToken = currentDocumentToken else {
+            completion(nil)
+            return
+        }
+        let webViewIdentity = ObjectIdentifier(webView)
+        let provider = responsePreviewSnapshotProvider
+        Task { @MainActor [weak self, weak webView] in
+            guard let webView else {
+                completion(nil)
+                return
+            }
+            let snapshot = await provider(webView, Self.previewLatestAssistantResponseScript)
             guard let self,
                   !self.isInvalidated,
                   self.webView === webView,
@@ -257,6 +310,12 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     ) {
         responseStatusSnapshotProvider = provider
     }
+
+    func debugSetResponsePreviewSnapshotProvider(
+        _ provider: @escaping ResponsePreviewSnapshotProvider
+    ) {
+        responsePreviewSnapshotProvider = provider
+    }
 #endif
 
     /// A navigation/runtime replacement invalidates the document identity but
@@ -364,6 +423,33 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     private static let snapshotLatestResponseStatusScript =
         "globalThis.__floatTabsChatGPTResponseIdentitySnapshotV1?.()"
 
+    private static let previewLatestAssistantResponseScript =
+        "globalThis.__floatTabsChatGPTResponsePreviewV1?.()"
+
+    static func parseResponsePreviewSnapshot(_ value: Any) -> ChatGPTResponsePreviewSnapshot? {
+        guard let body = value as? [String: Any],
+              body["version"] as? Int == 1,
+              let documentToken = body["documentToken"] as? String,
+              ChatGPTResponseProtocol.isOpaqueIdentifier(documentToken),
+              let generating = body["generating"] as? Bool else {
+            return nil
+        }
+        let previewText: String?
+        if let rawPreview = body["preview"] as? String {
+            previewText = rawPreview
+        } else if body["preview"] == nil || body["preview"] is NSNull {
+            previewText = nil
+        } else {
+            return nil
+        }
+        guard !generating else { return nil }
+        return ChatGPTResponsePreviewSnapshot(
+            documentToken: documentToken,
+            generating: generating,
+            previewText: previewText
+        )
+    }
+
     static func parseResponseStatusSnapshot(_ value: Any) -> ChatGPTResponseStatusSnapshot? {
         guard let body = value as? [String: Any],
               body["version"] as? Int == 1,
@@ -405,6 +491,25 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
                     return
                 }
                 continuation.resume(returning: parseResponseStatusSnapshot(value))
+            }
+        }
+    }
+
+    private static func evaluateResponsePreviewSnapshot(
+        in webView: WKWebView,
+        script: String
+    ) async -> ChatGPTResponsePreviewSnapshot? {
+        await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(
+                script,
+                in: nil,
+                in: ChatGPTResponseExtraction.contentWorld
+            ) { result in
+                guard case let .success(value) = result else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: parseResponsePreviewSnapshot(value))
             }
         }
     }

@@ -532,6 +532,47 @@ enum ChatGPTResponseExtraction {
             };
           };
 
+          // One-shot assistant-response preview projection. Reuses the same
+          // assistant-root/content/exclusion semantics as identity status; the
+          // gathered text is a bounded plain-text window only. No prompt/user
+          // or composer content is selected, and no raw HTML is returned.
+          const PREVIEW_GATHER_LIMIT = 600;
+          globalThis.__floatTabsChatGPTResponsePreviewV1 = () => {
+            const latestRoot = latestAssistantResponseRoot();
+            const generating = isGenerating();
+            if (!latestRoot || generating) {
+              return {
+                version: 1,
+                documentToken: documentToken,
+                generating: generating,
+                preview: null
+              };
+            }
+            const nodes = [];
+            if (latestRoot.matches && latestRoot.matches(RESPONSE_CONTENT_SELECTOR)) {
+              nodes.push(latestRoot);
+            }
+            nodes.push(...Array.from(latestRoot.querySelectorAll(
+              RESPONSE_CONTENT_SELECTOR
+            )));
+            let text = "";
+            for (const node of nodes) {
+              if (text.length >= PREVIEW_GATHER_LIMIT) break;
+              if (!isRendered(node)) continue;
+              if (node.closest(RESPONSE_EXCLUDED_SELECTOR)) continue;
+              const raw = node.innerText || node.textContent || "";
+              const chunk = raw.replace(/[\\f\\n\\r\\t\\v ]+/g, " ").trim();
+              if (!chunk) continue;
+              text = text ? text + " " + chunk : chunk;
+            }
+            return {
+              version: 1,
+              documentToken: documentToken,
+              generating: false,
+              preview: text ? text.slice(0, PREVIEW_GATHER_LIMIT) : null
+            };
+          };
+
           \(debugAssistantPointerClassifier)
         })();
         """

@@ -78,6 +78,14 @@ private final class ChatGPTResponsePageHarness {
         }
     }
 
+    func previewSnapshot() async -> ChatGPTResponsePreviewSnapshot? {
+        await withCheckedContinuation { continuation in
+            bridge.previewLatestAssistantResponse { snapshot in
+                continuation.resume(returning: snapshot)
+            }
+        }
+    }
+
     func replaceLatestAssistantNode(id: String = "reply-latest") async -> Bool {
         await withCheckedContinuation { continuation in
             webView.evaluateJavaScript(
@@ -256,4 +264,143 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         XCTAssertNotEqual(reloaded.documentToken, first.documentToken)
         XCTAssertEqual(reloaded.responseIdentity, first.responseIdentity)
     }
+
+    // MARK: Notification preview projection (one-shot, best-effort)
+
+    /// N1-1/N1-2/N1-3: the latest completed assistant response produces
+    /// bounded plain text that excludes prompt/user/composer/action content,
+    /// with whitespace normalized to readable single spacing.
+    func testPreviewSnapshotReturnsBoundedPlainTextFromLatestAssistantResponse() async throws {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="earlier-reply">
+          <p>Earlier assistant response.</p>
+        </div>
+        <section data-message-author-role="assistant" data-message-id="latest-reply">
+          <p>Line one
+             and   line two.</p>
+          <ul><li>Bullet item</li></ul>
+          <div role="toolbar"><button id="copy">Copy</button></div>
+          <button id="regen" aria-label="Regenerate">Regenerate</button>
+          <div aria-hidden="true"><p>Hidden helper text</p></div>
+          <style>.x { color: red }</style>
+        </section>
+        <div data-message-author-role="user"><p>Please summarise the report.</p></div>
+        <div><textarea id="composer">Draft prompt text</textarea></div>
+        """)
+        let ready = await page.waitForDocumentReady()
+        XCTAssertTrue(ready)
+
+        let previewValue = await page.previewSnapshot()
+        let preview = try XCTUnwrap(previewValue)
+        XCTAssertEqual(preview.generating, false)
+        let text = try XCTUnwrap(preview.previewText)
+        XCTAssertTrue(text.contains("Line one and line two."), "preview: \(text)")
+        XCTAssertTrue(text.contains("Bullet item"))
+        // Only the latest assistant response is projected.
+        XCTAssertFalse(text.contains("Earlier assistant response."))
+        // Prompt/user, composer, action, hidden and style content excluded.
+        XCTAssertFalse(text.contains("Please summarise the report."))
+        XCTAssertFalse(text.contains("Draft prompt text"))
+        XCTAssertFalse(text.contains("Copy"))
+        XCTAssertFalse(text.contains("Regenerate"))
+        XCTAssertFalse(text.contains("Hidden helper text"))
+        XCTAssertFalse(text.contains("color: red"))
+    }
+
+    /// N1-3: pathological whitespace inside the selected content collapses
+    /// to readable single spacing, and Unicode is preserved safely.
+    func testPreviewSnapshotNormalizesWhitespaceAndPreservesUnicode() async throws {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="unicode-reply">
+          <p> café — “ok” 😀 \u{00A0}\u{00A0} naïve </p>
+        </div>
+        """)
+        let ready = await page.waitForDocumentReady()
+        XCTAssertTrue(ready)
+
+        let previewValue = await page.previewSnapshot()
+        let preview = try XCTUnwrap(previewValue)
+        let text = try XCTUnwrap(preview.previewText)
+        XCTAssertTrue(text.contains("café — “ok” 😀"))
+        XCTAssertTrue(text.contains("naïve"))
+        XCTAssertFalse(text.contains("  "), "double spacing must collapse: \(text)")
+    }
+
+    /// N1-4: the gathered preview window is bounded before crossing the
+    /// native bridge.
+    func testPreviewSnapshotIsBoundedToTheGatherLimit() async throws {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="long-reply">
+          <p>\(String(repeating: "word ", count: 400))</p>
+        </div>
+        """)
+        let ready = await page.waitForDocumentReady()
+        XCTAssertTrue(ready)
+
+        let previewValue = await page.previewSnapshot()
+        let preview = try XCTUnwrap(previewValue)
+        let text = try XCTUnwrap(preview.previewText)
+        XCTAssertLessThanOrEqual(text.count, 600)
+    }
+
+    /// N1-5: no trustworthy preview while generating or without an assistant
+    /// root — the notification must fall back to the generic body.
+    func testPreviewSnapshotAbsentWhileGeneratingOrWithoutAssistantRoot() async throws {
+        let generatingPage = ChatGPTResponsePageHarness()
+        generatingPage.load("""
+        <div data-message-author-role="assistant" data-message-id="generating-reply">
+          <p>Partial response so far.</p>
+        </div>
+        <button data-testid="stop-button">Stop</button>
+        """)
+        let generatingReady = await generatingPage.waitForDocumentReady()
+        XCTAssertTrue(generatingReady)
+        let generatingPreview = await generatingPage.previewSnapshot()
+        XCTAssertNil(generatingPreview, "generating state must not admit a trusted preview")
+
+        let emptyPage = ChatGPTResponsePageHarness()
+        emptyPage.load("<div><p>No conversation here.</p></div>")
+        let emptyReady = await emptyPage.waitForDocumentReady()
+        XCTAssertTrue(emptyReady)
+        let emptyPreview = await emptyPage.previewSnapshot()
+        let noRootSnapshot = try XCTUnwrap(emptyPreview)
+        XCTAssertNil(noRootSnapshot.previewText)
+    }
+
+    /// N1-7: the ordinary status snapshot remains body-free — the preview
+    /// payload cannot leak response text through the status contract.
+    func testStatusSnapshotRemainsBodyFreeAlongsidePreviewAPI() async throws {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="status-reply">
+          <p>Status must stay metadata only.</p>
+        </div>
+        """)
+        let ready = await page.waitForDocumentReady()
+        XCTAssertTrue(ready)
+
+        let statusValue = await page.snapshotStatus()
+        let status = try XCTUnwrap(statusValue)
+        XCTAssertEqual(status.responseIdentity?.rawValue, "message:status-reply")
+        // The status snapshot type exposes no text payload by construction;
+        // assert its payload stays identity/status-only.
+        XCTAssertEqual(
+            ChatGPTResponseBridge.parseResponseStatusSnapshot([
+                "version": 1,
+                "documentToken": status.documentToken,
+                "responseIdentity": status.responseIdentity?.rawValue,
+                "generating": false,
+                "preview": "would-be response body text"
+            ]),
+            ChatGPTResponseStatusSnapshot(
+                documentToken: status.documentToken,
+                responseIdentity: status.responseIdentity,
+                generating: false
+            )
+        )
+    }
+
 }

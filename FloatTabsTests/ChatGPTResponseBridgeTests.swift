@@ -640,3 +640,205 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         ]
     }
 }
+
+// MARK: - One-shot assistant response preview snapshot
+
+@MainActor
+private final class ResponsePreviewSnapshotProviderProbe {
+    private var pending: CheckedContinuation<ChatGPTResponsePreviewSnapshot?, Never>?
+    private var queued: ChatGPTResponsePreviewSnapshot?
+    private(set) var requestCount = 0
+    private(set) var lastScript: String?
+
+    func provide(
+        _ webView: WKWebView,
+        _ script: String
+    ) async -> ChatGPTResponsePreviewSnapshot? {
+        requestCount += 1
+        lastScript = script
+        return await withCheckedContinuation { continuation in
+            if let queued {
+                self.queued = nil
+                continuation.resume(returning: queued)
+            } else {
+                pending = continuation
+            }
+        }
+    }
+
+    func resolve(_ snapshot: ChatGPTResponsePreviewSnapshot?) {
+        if let pending {
+            self.pending = nil
+            pending.resume(returning: snapshot)
+        } else {
+            queued = snapshot
+        }
+    }
+}
+
+extension ChatGPTResponseBridgeTests {
+    private func makePreviewBridge(
+        probe: ResponsePreviewSnapshotProviderProbe
+    ) -> (bridge: ChatGPTResponseBridge, webView: WKWebView) {
+        let bridge = ChatGPTResponseBridge(
+            slotID: UUID(),
+            responsePreviewSnapshotProvider: { webView, script in
+                await probe.provide(webView, script)
+            }
+        )
+        let webView = WKWebView(
+            frame: .zero,
+            configuration: WKWebViewConfiguration()
+        )
+        bridge.attach(to: webView)
+        return (bridge, webView)
+    }
+
+    /// N1 parse contract: valid completed previews parse; generating,
+    /// malformed and mismatched payloads never admit.
+    func testPreviewSnapshotParsingAdmitsOnlyCompletedBoundedResults() {
+        let token = "preview-document-token-12345678"
+        let valid = ChatGPTResponseBridge.parseResponsePreviewSnapshot([
+            "version": 1,
+            "documentToken": token,
+            "generating": false,
+            "preview": "Bounded assistant preview."
+        ])
+        XCTAssertEqual(
+            valid,
+            ChatGPTResponsePreviewSnapshot(
+                documentToken: token,
+                generating: false,
+                previewText: "Bounded assistant preview."
+            )
+        )
+        XCTAssertNil(
+            ChatGPTResponseBridge.parseResponsePreviewSnapshot([
+                "version": 1,
+                "documentToken": token,
+                "generating": true,
+                "preview": "Streaming text is not a completed preview."
+            ])
+        )
+        XCTAssertNil(
+            ChatGPTResponseBridge.parseResponsePreviewSnapshot([
+                "version": 2,
+                "documentToken": token,
+                "generating": false,
+                "preview": "text"
+            ])
+        )
+        XCTAssertNil(
+            ChatGPTResponseBridge.parseResponsePreviewSnapshot([
+                "version": 1,
+                "documentToken": "short",
+                "generating": false,
+                "preview": "text"
+            ])
+        )
+        XCTAssertNil(
+            ChatGPTResponseBridge.parseResponsePreviewSnapshot([
+                "version": 1,
+                "documentToken": token,
+                "generating": false,
+                "preview": 42
+            ])
+        )
+        let noPreview = ChatGPTResponseBridge.parseResponsePreviewSnapshot([
+            "version": 1,
+            "documentToken": token,
+            "generating": false,
+            "preview": NSNull()
+        ])
+        XCTAssertEqual(
+            noPreview,
+            ChatGPTResponsePreviewSnapshot(
+                documentToken: token,
+                generating: false,
+                previewText: nil
+            )
+        )
+    }
+
+    /// N1-6: a runtime/navigation replacement (document token change) during
+    /// the in-flight preview prevents the stale completion from being
+    /// admitted.
+    func testPreviewSnapshotInvalidatedByDocumentReplacementMidFlight() async throws {
+        let probe = ResponsePreviewSnapshotProviderProbe()
+        let (bridge, retainedWebView) = makePreviewBridge(probe: probe)
+        XCTAssertNotNil(retainedWebView)
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(documentToken: "preview-original-doc-1234567")
+        )
+
+        var completed: ChatGPTResponsePreviewSnapshot?
+        bridge.previewLatestAssistantResponse { snapshot in
+            completed = snapshot
+        }
+        for _ in 0..<100 where probe.requestCount == 0 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(probe.requestCount, 1)
+
+        // Navigation replacement lands while the provider is still in flight.
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(documentToken: "preview-replaced-doc-1234567")
+        )
+        probe.resolve(
+            ChatGPTResponsePreviewSnapshot(
+                documentToken: "preview-original-doc-1234567",
+                generating: false,
+                previewText: "stale response text"
+            )
+        )
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertNil(completed, "stale-document preview must not be admitted")
+    }
+
+    /// N1-6: an invalidated or document-less bridge admits no preview.
+    func testPreviewSnapshotRequiresValidCurrentDocument() async {
+        let probe = ResponsePreviewSnapshotProviderProbe()
+        let (bridge, retainedWebView) = makePreviewBridge(probe: probe)
+        XCTAssertNotNil(retainedWebView)
+
+        var noDocumentResult: ChatGPTResponsePreviewSnapshot?
+        bridge.previewLatestAssistantResponse { snapshot in
+            noDocumentResult = snapshot
+        }
+        XCTAssertNil(noDocumentResult)
+        XCTAssertEqual(probe.requestCount, 0)
+
+        bridge.invalidate()
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(documentToken: "preview-never-doc-12345678")
+                == false
+        )
+        var invalidatedResult: ChatGPTResponsePreviewSnapshot?
+        bridge.previewLatestAssistantResponse { snapshot in
+            invalidatedResult = snapshot
+        }
+        XCTAssertNil(invalidatedResult)
+        XCTAssertEqual(probe.requestCount, 0)
+    }
+
+    /// The preview projection uses its own one-shot script and never touches
+    /// the status snapshot script.
+    func testPreviewUsesDedicatedScriptSeparateFromStatusSnapshot() async throws {
+        let probe = ResponsePreviewSnapshotProviderProbe()
+        let (bridge, retainedWebView) = makePreviewBridge(probe: probe)
+        XCTAssertNotNil(retainedWebView)
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(documentToken: "preview-script-doc-12345678")
+        )
+
+        bridge.previewLatestAssistantResponse { _ in }
+        for _ in 0..<100 where probe.requestCount == 0 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(
+            probe.lastScript,
+            "globalThis.__floatTabsChatGPTResponsePreviewV1?.()"
+        )
+    }
+}
