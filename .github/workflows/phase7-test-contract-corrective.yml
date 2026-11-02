@@ -23,18 +23,25 @@ jobs:
           set -euo pipefail
           test "${GITHUB_REF_NAME}" = "codex/ft-runtime-lifecycle-phase7-automatic-001"
           test -f tools/phase7_test_contract_corrective.py
+          grep -q '^PHASE7_EXPANDED_TEST_CORRECTIVE = True$' tools/phase7_test_contract_corrective.py
 
       - name: Apply bounded test-contract corrective
         run: python3 tools/phase7_test_contract_corrective.py
 
-      - name: Verify diff hygiene and scope
+      - name: Verify diff hygiene and test-only scope
         shell: bash
         run: |
           set -euo pipefail
           git diff --check
           changed="$(git diff --name-only)"
           printf '%s\n' "$changed"
-          test "$changed" = $'FloatTabsTests/AppCommandControllerTests.swift\nFloatTabsTests/WebsiteCacheCleanupTests.swift'
+          test -n "$changed"
+          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^FloatTabsTests/(AppCommandControllerTests|BrowserProfileDuplicateTests|ExternalShellTests|WebAttentionCrossFeatureTests|WebAttentionLifecycleTests|WebViewFactoryTests|WebViewPoolTests|WebsiteCacheCleanupTests)\.swift$' || true)"
+          if [[ -n "$unexpected" ]]; then
+            echo "Unexpected corrective paths:" >&2
+            printf '%s\n' "$unexpected" >&2
+            exit 1
+          fi
 
       - name: Resolve Swift packages
         run: >-
