@@ -6,9 +6,9 @@
 
 ## Mode
 
-**MODE: ADAPTIVE LIFECYCLE + RESTORE PERFORMANCE — WP1 MACHINE CORRECTIVE**
+**MODE: ADAPTIVE LIFECYCLE + RESTORE PERFORMANCE — WP1 CORRECTIVE-002 + CI DIAGNOSIS**
 
-Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` — **ACTIVE / WP1 CORRECTIVE REQUIRED BEFORE HUMAN ACCEPTANCE**.
+Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` — **ACTIVE / WP1 MACHINE CORRECTIVE-002; HUMAN ACCEPTANCE BLOCKED**.
 
 Task branch:
 
@@ -22,9 +22,9 @@ Execution baseline:
 
 `main@7e179aaf4dbf0c538c7c2221101fc74d16e49b98`
 
-Latest implementation/audit evidence head:
+Latest implementation / fresh audit evidence head:
 
-`28dcfe420c5b262405de18aa1e40ca886dcf897d`
+`1a457adccf10fce3631963caad8aa5cfb30f4561`
 
 ## Repository / delivery state
 
@@ -33,12 +33,18 @@ PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 MAIN_BASELINE=7E179AAF
 TASK=FT-ADAPTIVE-LIFECYCLE-RESTORE-001
-TASK_STATE=ACTIVE_WP1_MACHINE_CORRECTIVE
+TASK_STATE=ACTIVE_WP1_CORRECTIVE_002_AND_CI_DIAGNOSIS
 PR_194=OPEN_DRAFT_UNMERGED
 WP1_CANONICAL_COLD_PRESENTATION_GATE=PARTIAL
-WP1_MACHINE_TESTS=PASS_AT_28DCFE42
-WP1_INDEPENDENT_AUDIT=FINDINGS_STOP
-HUMAN_UI_ACCEPTANCE=NOT_STARTED
+WP1_FINDING_A_NAVIGATION_FAILURE=CORRECTED_AT_1A457AD
+WP1_FINDING_B_COLD_UNREAD_READINESS=CORRECTED_AT_1A457AD
+WP1_FINDING_C_RAPID_SWITCH_READINESS=OPEN
+WP1_MACHINE_GATE=BLOCKED
+LOCAL_FULL_XCTEST=PASS_1149_4_SKIPPED_0_FAILED
+LITERAL_HEAD_CI=FAIL
+CI_ROOT_CAUSE=UNKNOWN
+QA_DMG=PASS
+HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
 WP2_POLICY_MUTATION=BLOCKED
 WP3_SCHEDULING_MUTATION=BLOCKED
 WP4_POLICY_INTEGRATION=BLOCKED
@@ -56,89 +62,123 @@ Current durable task contract:
 
 V1 remains historical/superseded.
 
-## WP1 implementation evidence at `28dcfe42…`
+## WP1 corrective evidence at `1a457ad…`
 
-Implemented paths now converge substantially on the `PanelController` cold-presentation gate:
+The first two independent-audit findings are corrected:
 
-- ordinary cold summon;
-- explicit cold Slot selection;
-- exact-Slot completion-notification route;
-- resident ready Runtime retains the fast path;
-- stale materialization generation and rapid target replacement have focused regression coverage.
+1. exact-current cold navigation failure transitions to the native bounded empty/failure presentation and does not promote the failed WebView to current/focus ownership;
+2. cold explicit/notification unread acknowledgement is retained as a bounded event-driven intent and completed only after exact-current readiness under normal presentation facts; stale replacement invalidates the old intent.
 
-Machine verification on the exact implementation head passed:
+Focused regressions for those corrections pass locally. Notification routing/privacy and generation-protection regressions remain green.
+
+Local machine verification on the literal source head:
 
 ```text
-focused regressions = PASS
-full XCTest = 1146 passed / 4 skipped / 0 failed
+focused corrective regressions = PASS
+full XCTest = 1149 passed / 4 skipped / 0 failed
 Debug arm64 = PASS
 Release arm64 = PASS
 native arm64 verification = PASS
 package lock = unchanged
-self-hosted macOS CI = PASS
 QA DMG = PASS
 ```
 
-The independent exact-diff audit returned **FINDINGS / STOP**. Human acceptance must not begin until both findings below are corrected and the exact corrective head is reverified.
+## Open WP1 finding C — Runtime residency is not presentation readiness
 
-## Corrective finding A — navigation failure presentation boundary
-
-Current `handleSlotNavigationFailure` clears pending materialization ownership, hides the native restoring surface, and then makes the failed WebView current.
-
-That violates the WP1 V2 invariant that an unready/failed fresh Web surface must never become the truthful user-facing presentation outside restoring/error ownership.
-
-Required corrective outcome:
+The fresh exact-diff audit found an A→B→A path that can still bypass the cold presentation gate:
 
 ```text
-exact-current cold navigation failure
-→ do not reveal failed/unready Web content as ready
-→ leave the cold transaction in an explicit truthful native failure/restoring state
-   or transition to the existing bounded native empty/error presentation
-→ no failed WebView focus/interaction ownership
-→ stale/foreign failure still ignored by existing identity gates
+A starts cold materialization
+→ exact A WebView is created/attached under Restoring ownership
+→ user selects B
+→ A's presentation/materialization generation is cancelled
+→ A WebView remains resident in WebViewPool
+→ user returns to A before A navigation readiness
+→ generic existing-WebView path treats residency as readiness
+→ A WebView can be shown/focused while still unready
+→ old A navigation-finish callback is ignored because its presentation generation is stale
 ```
 
-The corrective should reuse existing native presentation mechanisms. Do not introduce reload/reset/restart or a second presentation writer.
+This violates the V2 invariant that unready Web content must never become the user-facing surface.
 
-## Corrective finding B — unread acknowledgement after cold readiness
-
-Cold explicit/notification selection calls `acknowledgeUnreadAfterExplicitSelection` while the target is still restoring. Its current deferred retry runs only on the next main-queue turn. If the multi-second cold restore is still not presentation-ready, the attempt ends as `presentationNotReady` and is not retried when exact-current navigation readiness later succeeds.
-
-Required corrective outcome:
+Durable correction direction:
 
 ```text
-cold selected unread Slot
-→ selection may record a pending acknowledgement intent
-→ no acknowledgement while presentation is unready
-→ exact-current readiness for the same Slot/materialization/Runtime
-→ retry/complete acknowledgement exactly once under normal visibility/readiness facts
-→ stale target replacement cancels/invalidates the old pending intent
+RUNTIME_RESIDENCY != PRESENTATION_READINESS
+EXISTING_WEBVIEW != READY_TO_REVEAL
 ```
 
-Do not weaken unread visibility/readiness rules merely to clear the marker.
+`PanelController` must own exact-Runtime presentation-readiness state. `WebViewPool` continues to own Runtime existence/identity only; `SlotLifecycleCoordinator` remains the sole lifecycle/reclaim writer.
 
-## Preserved WP1 boundaries
+For an exact Runtime identity, presentation readiness must distinguish at least:
 
-- `PanelController` remains the canonical presentation/materialization coordinator.
-- `WebPanelContainerView` remains native Web/restoring/error-surface mechanism owner.
-- `WebViewPool` remains Runtime mechanism owner.
+```text
+loading
+ready
+failed
+```
+
+Required semantics:
+
+- cold attach records the exact Runtime identity as loading;
+- navigation finish/failure may update readiness for that exact still-current pool Runtime even if an older presentation generation was cancelled;
+- only the currently selected exact presentation transaction may reveal/focus or mutate current UI;
+- returning to a resident loading Runtime must re-enter Restoring around that same Runtime rather than expose it or create a duplicate Runtime;
+- returning to a resident ready Runtime preserves the fast path;
+- returning to a resident failed Runtime presents the truthful native failure/empty state without Web focus;
+- Runtime identity replacement invalidates stale readiness state;
+- Runtime residency alone never authorizes reveal or focus.
+
+Do not solve this presentation race by releasing/hibernating A. Runtime teardown/reclaim is lifecycle policy/mechanism and is outside WP1 corrective scope.
+
+## Literal-head CI blocker
+
+The literal-head self-hosted macOS CI for `1a457ad…` failed twice while the same source passed the full local XCTest suite. The reported failures are broad and concentrated in WebKit focus/page-load/geometry tests; the new WP1 corrective tests themselves passed.
+
+Current classification:
+
+```text
+CI_FAILURE=REAL_GATE_BLOCKER
+CI_ROOT_CAUSE=UNKNOWN
+TASK_ATTRIBUTION=UNPROVEN
+```
+
+A local green run does not override the literal-head CI gate, and a broad CI failure must not be dismissed as infrastructure flakiness without evidence.
+
+The next implementation head receives one clean literal-head CI run after the rapid-switch correction. If broad failure persists, stop implementation and return a bounded failure taxonomy before any further rerun:
+
+- run/job IDs;
+- first 10 failing test names;
+- grouped failure signatures;
+- whether focused/new tests passed;
+- whether repeated attempts fail the same tests/signatures;
+- local full-XCTest result;
+- observable runner/host preconditions relevant to the failures.
+
+No destructive runner cleanup, Browser Profile/session deletion, or blind rerun loop is authorized.
+
+## Preserved boundaries
+
+- `PanelController` owns presentation/materialization/readiness policy.
+- `WebPanelContainerView` owns native Web/restoring/error surfaces.
+- `WebViewPool` owns Runtime create/reuse/hibernate/restore/release and exact Runtime identity, not readiness-to-present policy.
 - `SlotLifecycleCoordinator` remains the sole lifecycle/reclaim writer.
-- `TabStore` remains persistent Slot selection/configuration owner.
+- `TabStore` owns persistent Slot selection/configuration only.
 - `WebAttentionCoordinator` remains generation protection authority.
 - Browser Profile/cookies/session/configuration are not cleared or reset.
-- notification preview/privacy/exact-Slot contract remains unchanged.
-- fixed `target=2`, 30-second reclaim semantics, pressure ordering, inactive scheduling and snapshot policy are out of WP1 corrective scope.
+- notification preview/privacy/exact-Slot behavior is unchanged.
+- fixed `target=2`, 30-second reclaim semantics, pressure ordering, inactive scheduling, long-idle policy and snapshot policy remain out of WP1 scope.
 
 ## Next gate
 
 ```text
-WP1 corrective A + B on existing PR #194
-→ focused regressions for failure boundary + readiness-time unread acknowledgement
-→ affected notification/presentation/Attention regressions
-→ full XCTest
-→ Debug/Release arm64 + native architecture verification
-→ exact-head self-hosted macOS CI + QA DMG
-→ fresh independent exact-diff audit
+WP1 Corrective-002: exact-Runtime presentation readiness + A→B→A safety
+→ focused rapid-switch/readiness regressions
+→ full local machine gate
+→ push exact head
+→ one clean literal-head self-hosted macOS CI + QA DMG
+→ if CI fails broadly again: STOP for CI evidence taxonomy / diagnosis
+→ if CI passes: fresh independent exact-diff / ownership / data-safety audit
 → only if audit PASS: user real-Mac human acceptance
 → no merge before human acceptance
 
