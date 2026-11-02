@@ -6,87 +6,132 @@
 
 ## Mode
 
-**MODE: NATIVE COMPLETION NOTIFICATION — MACHINE + INDEPENDENT AUDIT + HUMAN ACCEPTANCE COMPLETE / MERGE AUTHORIZED**
+**MODE: ADAPTIVE LIFECYCLE + RESTORE PERFORMANCE — WP1 COMPLETE / MERGE CLOSEOUT**
 
-Current task: `FT-NOTIFICATION-RELIABILITY-RICH-PREVIEW-001` — **COMPLETE / MERGE AUTHORIZED**.
+Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` — **WP1 COMPLETE / HUMAN ACCEPTED / PR #194 MERGE-READY SUBJECT TO FINAL CONTROL-HEAD CHECKS**.
 
 Task branch:
 
-`codex/notification-reliability-rich-preview-001`
+`codex/adaptive-lifecycle-restore-001`
 
-Implementation/audit head before this control-only closeout:
+PR:
 
-`97eb588ffec370332b7115a9735594a92f6080c3`
+`#194 — design: adaptive lifecycle and restore performance`
+
+Execution baseline:
+
+`main@7e179aaf4dbf0c538c7c2221101fc74d16e49b98`
+
+WP1 semantic implementation head:
+
+`e187f83fd2c4198d3e2baa64ef5074037c87c410`
+
+Pre-closeout final branch head with green machine gates:
+
+`1a77fae92c53708e2c6c373301c825187fdb1de4`
 
 ## Repository / delivery state
 
 ```text
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
-TASK=FT-NOTIFICATION-RELIABILITY-RICH-PREVIEW-001
-PR_193=OPEN_DRAFT_MERGEABLE_UNMERGED_AT_CLOSEOUT_START
-IMPLEMENTATION_HEAD=97eb588ffec370332b7115a9735594a92f6080c3
-CORRECTIVE_A_TIMEOUT_EXACTLY_ONCE=PASS
-CORRECTIVE_B_DOM_SANITIZATION_DEDUP=PASS
-FOCUSED_CORRECTIVE_REGRESSIONS=PASS_197_OF_197
-FULL_XCTEST=PASS_1148_OF_1148
-DEBUG_ARM64_BUILD=PASS
-RELEASE_ARM64_BUILD=PASS
-NATIVE_ARM64=PASS
-PACKAGE_LOCK=UNCHANGED
-LITERAL_HEAD_CI=PASS_RUN_41405393738
-QA_DMG=PASS_RUN_41405393795
-INDEPENDENT_AUDIT=PASS
-BLOCKING_FINDINGS=0
-IMPORTANT_FINDINGS=0
-HUMAN_UI_ACCEPTANCE=PASS
-MERGE_AUTHORIZED=YES
+TASK=FT-ADAPTIVE-LIFECYCLE-RESTORE-001
+WP1_CANONICAL_COLD_PRESENTATION_GATE=COMPLETE
+WP1_EXACT_RUNTIME_READINESS=COMPLETE
+WP1_MACHINE_GATE=PASS
+WP1_INDEPENDENT_AUDIT=PASS
+WP1_HUMAN_UI_ACCEPTANCE=PASS
+WP1=COMPLETE
+PR_194=OPEN_UNMERGED_CLOSEOUT
+WP2_POLICY_MUTATION=NOT_STARTED
+WP3_SCHEDULING_MUTATION=NOT_STARTED
+WP4_INTEGRATION_MUTATION=NOT_STARTED
+PRIOR_CI_FAILURE_ROOT_CAUSE=UNKNOWN
+WEBKIT_FIRST_PIXEL=UNMEASURED
+AGGREGATE_GIB_BUDGET=DEFERRED_PLATFORM_BLOCKED
+PRIVATE_WEBKIT_SPI=FORBIDDEN
 ```
 
-## Human acceptance evidence
+Current durable WP1 contract:
 
-The user validated the installed QA build from implementation head `97eb588f...` on real macOS:
+`docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`
 
-1. a hidden ChatGPT response of about 1m20s produced the expected native notification;
-2. notification content was correct;
-3. the generating Slot remained lifecycle-protected while the response was active;
-4. after completion the Slot entered `Automatic` inactive state and later emitted `slot_lifecycle.hibernate` with `release_reason=automatic_grace_expired`;
-5. resident-budget reclaim was observed separately with `target=2 / resident=3 / eviction=1`;
-6. clicking the notification opened the exact intended Slot after that Runtime had been reclaimed;
-7. the Browser Profile/session and conversation restored correctly.
+V1 remains historical/superseded.
 
-This completes the notification task's required human acceptance and also provides real-runtime evidence that notification routing remains compatible with hibernation/materialization.
+## WP1 final evidence
 
-## Ownership / privacy result
+WP1 Corrective-002 established exact-Runtime presentation readiness (`loading / ready / failed`) owned by `PanelController`, preserving the native `WebPanelContainerView` Restoring surface and resident-ready fast path.
 
-- `ChatGPTCompletionNotificationCoordinator` remains the sole native notification projection owner.
-- `ChatGPTResponseExtraction` remains the assistant-response DOM semantic source.
-- `ChatGPTResponseBridge` owns bounded one-shot preview extraction and current Runtime/document validity.
-- `PanelController` owns hidden-completion handoff and exact-Slot presentation routing.
-- `SlotLifecycleCoordinator` remains the sole lifecycle writer.
-- routing `userInfo` remains exactly `version / kind / slot_id`.
-- Slot name and assistant preview are not persisted or logged by FloatTabs.
-- notification preview never creates a new lifecycle residency requirement.
+Machine and independent evidence:
 
-## Previous lifecycle program state
+```text
+focused affected suites = PASS (381 passed / 4 skipped / 0 failed)
+full XCTest = PASS (1153 passed / 4 skipped / 0 failed)
+Debug arm64 = PASS
+Release arm64 = PASS
+native arm64 verification = PASS
+package lock = unchanged
+implementation-head macOS CI = PASS (run 41464559708 / job 125341924174)
+implementation-head QA DMG = PASS (run 41464559462)
+control-head macOS CI at 1a77fae = PASS (run 41466335384 / job 125348105768)
+control-head QA DMG at 1a77fae = PASS (run 41466335512)
+fresh independent exact-diff / ownership / data-safety audit = PASS
+```
 
-Phase 8 remains closed/merged. The following behavior remains current:
+User-owned real-Mac acceptance on the exact WP1 build is **PASS**. The uploaded acceptance log `FloatTabs-WP1-Human-20261102-231725.jsonl` records:
 
-- Automatic inactive release uses a 30s grace;
-- normal Automatic resident target is currently 2;
-- warning pressure progressively reclaims eligible Automatic Runtime;
-- critical pressure reclaims Automatic first, then inactive/unprotected Keep Loaded;
-- generating Runtime remains hard-protected;
-- aggregate FloatTabs/WebContent/GPU memory attribution is still not considered deterministic enough to drive a byte-budget scheduler.
+- `23` `panel.materialization.deferred` events;
+- `23` `panel.restoring_surface.window_visible` events;
+- `23` `panel.materialization.attached` events;
+- `0` `panel.materialization.readiness_failed` events;
+- notification cold routing entering the canonical restoring/materialization path;
+- rapid switching exercising cancellation/re-entry without a reported WP1 blank/stale/focus defect.
 
-The user has now identified a separate next lifecycle/performance problem set: cold-restore latency, the rigidity of the fixed normal resident target, and the need to evaluate a layered Active/Warm/Hibernated resource model. That work is not part of PR #193 and must open as a new task after #193 merge.
+The user reports the WP1 presentation/focus/notification behavior as acceptable and explicitly requested WP1 closeout.
+
+## Separate lifecycle-policy evidence for WP2
+
+The same human run confirms a **separate lifecycle-policy problem**, not a WP1 presentation failure.
+
+During a three-Runtime frequent-switch window, the log records nine `slot_lifecycle.runtime_budget` reconciliations in roughly 50 seconds with:
+
+```text
+managed_resident_count = 3
+target = 2
+eviction_count = 1
+reason = reconcile
+```
+
+Each reconciliation can immediately hibernate an Automatic Runtime and cause the next revisit to cold-restore. This proves the current normal-policy fixed resident count can create Runtime thrash for a legitimate multi-Slot working set.
+
+Durable product direction for the next lifecycle-policy work:
+
+- normal healthy-state lifecycle must **not** use a fixed resident-count cap as the reclaim trigger;
+- user-pinned / `Keep Loaded` Slots are a strong retention request and do not participate in automatic exit;
+- non-pinned `Automatic` Slots follow staged inactivity / pressure-driven automatic lifecycle rules;
+- time/state/pressure determine eligibility and reclaim; the number of currently resident Tabs is not itself a normal reclaim reason;
+- Browser Profile/session/configuration data safety and WP1 cold-presentation correctness remain regression boundaries.
+
+This evidence belongs to the next WP2 design/authorization. WP2 implementation has not started on PR #194.
+
+## Preserved boundaries
+
+- `SlotLifecycleCoordinator` remains the sole lifecycle/reclaim policy writer.
+- `WebViewPool` remains Runtime mechanism and identity owner.
+- `PanelController` remains presentation/materialization/readiness owner.
+- `WebAttentionCoordinator` remains generation/Attention protection authority.
+- Browser Profile/cookies/session/configuration are never cleared as lifecycle recovery.
+- notification exact-Slot/privacy semantics remain unchanged.
+- no private WebKit SPI, helper killing, reload/reset/restart workaround, or fake per-Slot/aggregate RAM attribution is authorized.
 
 ## Next gate
 
 ```text
-PR_193_CONTROL_ONLY_CLOSEOUT
-→ final literal-head merge-boundary check
-→ merge #193
-→ refresh main
-→ open separate adaptive lifecycle / restore-latency audit + design task
+WP1 = COMPLETE
+→ finish PR #194 closeout on an exact control head
+→ merge #194 only after the final control-head checks are green
+→ create a clean post-merge WP2 lifecycle-policy task/branch/PR
+→ freeze WP2 staged lifecycle contract before product mutation
 ```
+
+Do not add WP2 implementation to PR #194.

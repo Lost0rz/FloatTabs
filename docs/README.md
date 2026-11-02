@@ -1,6 +1,6 @@
 # FloatTabs Documentation Authority / Status Index
 
-> Current document-routing index. Read this before using any document under `docs/` for implementation decisions.
+> Current document-routing index. Read this before relying on documents under `docs/` for implementation decisions.
 
 ## 1. Authority order
 
@@ -9,7 +9,8 @@ AGENTS.md
 → CURRENT_STATUS.md
 → CURRENT_TASK.md
 → this docs/README.md routing index
-→ current design/architecture contract explicitly linked by current Authority
+→ current task design/architecture contract explicitly linked by Authority
+→ docs/architecture/README.md
 → docs/architecture/DOMAIN_MAP.md for navigation only
 → current production source + regression tests + fresh runtime/repository evidence
 ```
@@ -18,156 +19,168 @@ Historical documents remain evidence only unless current Authority explicitly re
 
 ## 2. Current active task
 
-Current mutation authority is:
+Current mutation authority:
 
-`FT-NOTIFICATION-RELIABILITY-RICH-PREVIEW-001`
+`FT-ADAPTIVE-LIFECYCLE-RESTORE-001`
 
-Current accepted/frozen task contract:
+Current durable contract:
 
-[`architecture/FloatTabs_Native_Completion_Notification_Reliability_Rich_Preview_Contract_V1.md`](architecture/FloatTabs_Native_Completion_Notification_Reliability_Rich_Preview_Contract_V1.md)
+[`architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`](architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md)
 
-The task changes only the native ChatGPT completion-notification projection and the bounded one-shot response-preview seam needed by that projection.
-
-Current target behavior:
+Current stage:
 
 ```text
-valid hidden completion
-→ durable unread .marked
-→ one-shot assistant preview extraction
-→ native notification
-   title = Slot/Web App name
-   body  = bounded assistant preview or generic fallback
-→ default-action click routes exact persistent Slot UUID
-→ existing presentation / Runtime restore path
+WP0 restore evidence = reconciled / sufficient for WP1
+WP1 unified cold-restore presentation gate = AUTHORIZED
+WP2 adaptive healthy-state policy = BLOCKED
+WP3 background scheduling mutation = BLOCKED
+WP4 lifecycle integration mutation = BLOCKED
 ```
 
-The routing `userInfo` privacy boundary remains `version / kind / slot_id` only.
+V1 is superseded and historical:
 
-## 3. Notification authority relationship
+[`architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md`](architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md)
 
-The delivered Phase 3 document:
+## 3. Accepted current restore diagnosis
 
-`architecture/FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V2.md`
+Controlled real-Mac evidence on PR #194 established:
 
-is historical/delivered evidence. Its exact-Slot routing, unread trigger and notification ownership remain valid where not superseded.
+- resident short revisit remains effectively immediate (roughly tens of milliseconds);
+- cold `WKWebView` creation is only tens of milliseconds and is not the dominant multi-second cost;
+- ordinary cold summon can keep the source window — and therefore the existing native `Restoring…` surface — hidden until readiness, producing shell/frame + empty center;
+- notification cold routing can expose a fresh source WebView before navigation/readiness, producing a blank Web page;
+- generation protection, exact notification Slot routing, Browser Profile/session/conversation restoration and notification privacy remain correct.
 
-The new notification contract supersedes only the old generic-content/system-diagnostics assumptions needed for this task:
-
-- notification title may now use the Slot/Web App display name;
-- notification body may now use an ephemeral bounded assistant-response preview;
-- preview/name remain out of routing `userInfo`, app persistence and diagnostics;
-- system submission is distinguished from visible banner presentation;
-- current public macOS notification settings are read through the existing injectable system seam.
-
-Do not restore the old prohibition on all response text as current product truth for this task.
-
-## 4. Current notification ownership
+Current classification:
 
 ```text
-ChatGPTAttentionBridge / WebAttentionCoordinator
-→ generation truth
-
-ChatGPTUnreadResponseCoordinator / UnreadResponseStore
-→ durable unread truth
-
-ChatGPTResponseExtraction
-→ semantic assistant-response DOM ownership
-
-ChatGPTResponseBridge
-→ bounded one-shot preview snapshot + document/WebView validity
-
-PanelController
-→ hidden-completion handoff + presentation facts + exact Slot route
-
-ChatGPTCompletionNotificationCoordinator
-→ notification authorization/settings/submission/replacement + native delegate
-
-AppCoordinator
-→ composition only
+COLD_RESTORE_PRESENTATION_ROOT_CAUSE=KNOWN
+COLD_RESTORE_LATENCY_ROOT_CAUSE=NARROWED
+WEBKIT_FIRST_PIXEL=UNMEASURED
 ```
 
-No notification component becomes a second Tab, unread, generation or Runtime lifecycle writer.
+The current correction is therefore **one canonical nonresident presentation gate**, not a snapshot feature and not a WebKit process hack.
 
-## 5. Current reliability / privacy boundary
-
-Public `UNNotificationSettings` may be used to record bounded enum state for:
-
-- authorization;
-- alert setting;
-- alert style;
-- Notification Center setting;
-- show-previews setting.
-
-Do not use private APIs or claim that FloatTabs can prove active Focus/DND suppression.
-
-`UNUserNotificationCenter.add(...)` success means the system accepted the notification request; it does not prove that the user visibly saw a banner.
-
-Do not persist/log notification preview text or Slot display name.
-
-## 6. Background / lifecycle compatibility
-
-The completed Phase 8 pressure + efficiency work remains merged and unchanged.
-
-Current hidden-generation fallback:
+## 4. Current WP1 route
 
 ```text
-<30s       → 2s
-30–120s    → 5s
->=120s     → 10s
+nonresident presentation request
+→ exact target + restoring ownership
+→ native Restoring… surface actually visible
+→ fresh exact Runtime create/restore underneath
+→ exact-current readiness
+→ ready Web surface reveal
+→ focus / interaction / unread acknowledgement
 ```
 
-Generating Runtime remains protected. Notification preview extraction is one-shot after hidden `.marked` completion and must not add polling or a long-lived Runtime protection.
+The following paths must converge:
 
-Healthy lifecycle still preserves:
+- menu-bar summon;
+- global-hotkey summon;
+- explicit switch to a nonresident Slot;
+- completion-notification exact-Slot route.
+
+Resident ready Runtime keeps its fast path.
+
+## 5. Runtime ownership
+
+```text
+SlotLifecycleCoordinator
+→ sole lifecycle policy / reclaim writer
+
+WebViewPool
+→ WKWebView create / reuse / hibernate / restore / release mechanism
+
+WebViewFactory
+→ WKWebView configuration mechanism, not lifecycle policy
+
+PanelController + WebPanelContainerView
+→ shell / selected-Slot presentation / restoring surface / readiness orchestration
+
+WebAttentionCoordinator + ChatGPTAttentionBridge
+→ generation protection facts
+
+TabStore / WebAppProfile / Browser Profiles
+→ persistent Slot/config/session identity, not Runtime lifecycle
+
+RuntimeDiagnostics
+→ evidence only
+```
+
+No task may introduce a second canonical lifecycle or presentation writer.
+
+## 6. Current lifecycle tuning under review
+
+Production still implements during WP1:
 
 ```text
 Automatic normal resident target = 2
-Automatic inactive release = 30s
+Automatic inactive reclaim       = ~30s
+warning/critical pressure ladder = progressive
+Generating                       = hard-protected
 ```
 
-System-pressure behavior remains progressive and unchanged.
+Durable conclusions already accepted:
 
-## 7. Deferred aggregate-memory track
+- fixed normal `target=2` is not final product truth;
+- `30s == mandatory destructive lifetime` is not the final product invariant;
+- resident revisit has material UX value because observed cold restores were roughly 3–6 seconds while resident revisit was tens of milliseconds;
+- Runtime count is not a RAM budget.
 
-Still platform-blocked until a supported deterministic production measurement capability exists:
+Current policy direction is **Option A favored, not frozen**: pressure-first + bounded long-idle cleanup. No WP2 implementation is authorized yet.
 
-- aggregate FloatTabs/WebKit memory monitor as lifecycle input;
-- Auto / Custom / Unlimited GiB budget;
-- budget watermarks;
-- budget Settings/persistence/backup projection;
-- aggregate-memory A/B claims requiring attributable FloatTabs/WebKit working-set evidence.
+## 7. WebKit inactive-scheduling boundary
 
-Do not substitute correlation attribution, guessed per-tab memory, Runtime count, private SPI, root-only tools or restricted entitlements.
+Current `WebViewFactory` does not override `WKPreferences.inactiveSchedulingPolicy`.
 
-## 8. Current implementation route
+On macOS 14+, Apple's public API documents the default as `suspend` for an idle detached WebView. Media/loading/interactive activity may be exempt.
+
+The M4/macOS 26 host confirms the fresh public configuration default value, but controlled detached idle/generation/media resource characterization remains incomplete.
+
+Therefore WP1 must not add explicit scheduling overrides. macOS 13 remains `NOT_TESTED` for this evidence set.
+
+## 8. Aggregate-memory boundary
+
+Prior Phase-8 evidence remains binding:
 
 ```text
-current task branch
-→ N0 fresh notification/response source reconciliation
-→ one-shot preview extraction + tests
-→ notification content + settings preflight diagnostics + tests
-→ production hidden-completion composition
-→ exact-Slot/non-resident routing regression
-→ background/lifecycle regression
-→ full XCTest + Debug/Release arm64 + architecture
-→ same task Draft PR
-→ literal-head self-hosted macOS CI + QA DMG
-→ independent exact-diff / ownership / privacy review
-→ HUMAN_UI_ACCEPTANCE=PENDING
-→ user validates native notification UX
-→ merge decision
+host footprint                         = measurable
+some development/root-only correlation = benchmark evidence only
+FloatTabs-attributable WebContent/GPU  = not deterministic ordinary production truth
 ```
 
-## 9. Current Runtime Lifecycle / Memory authority
+Still forbidden as production truth:
 
-The lifecycle/performance program is delivered/closed for its Phase 8 re-scope:
+- GiB budget reconstructed from Runtime count;
+- exact per-Slot WebContent RSS claims;
+- private WebKit SPI;
+- root-only/restricted attribution dependency.
 
-- [`architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`](architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md) — long-term accepted design authority;
-- [`architecture/FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md) — original Phase 8 budget contract / stopped at Gate 0;
-- [`architecture/FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md) — Gate 0 platform-boundary evidence;
-- [`architecture/FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md) — delivered pressure ladder + background efficiency contract.
+Relevant evidence:
 
-These do not authorize new mutation for the current notification task except as preserved regression boundaries.
+- [`architecture/FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md)
+- [`architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`](architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md)
+- [`architecture/FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md)
+
+## 9. Delivered notification task
+
+PR #193 is **MERGED / HUMAN ACCEPTED** at `main@7e179aaf...`.
+
+Preserve:
+
+```text
+valid hidden ChatGPT completion
+→ unread .marked
+→ bounded assistant preview
+→ native macOS notification
+→ exact persistent Slot UUID click route
+```
+
+Contract:
+
+[`architecture/FloatTabs_Native_Completion_Notification_Reliability_Rich_Preview_Contract_V1.md`](architecture/FloatTabs_Native_Completion_Notification_Reliability_Rich_Preview_Contract_V1.md)
+
+WP1 may change only how the exact nonresident target is presented after routing; notification content/privacy/routing truth remains unchanged.
 
 ## 10. Other bounded current contracts
 
@@ -193,9 +206,9 @@ These do not authorize new mutation for the current notification task except as 
 
 When historical material disagrees with current source/tests or current Authority:
 
-1. follow `CURRENT_TASK.md` plus the current notification contract for authorized mutation;
-2. preserve exact-Slot routing and existing lifecycle ownership;
-3. treat the old Phase 3 generic-content restriction as superseded for notification title/body only;
-4. preserve the routing-payload privacy boundary;
-5. preserve the Phase 8 platform boundary and background/lifecycle behavior;
-6. update this routing index when current-sounding wording could mislead future work.
+1. follow `CURRENT_TASK.md` plus `FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md` for current work;
+2. preserve Browser Profile/session/data-safety boundaries;
+3. preserve the delivered warning/critical pressure ladder unless current Authority explicitly changes it;
+4. preserve the Phase-8 attribution boundary against fake GiB budgets;
+5. treat V1 as superseded historical evidence;
+6. keep WP2–WP4 blocked until separately reconciled.

@@ -2,176 +2,204 @@
 
 Read [`../README.md`](../README.md) first. It is the repository-wide documentation authority/status index.
 
-## Current Runtime Lifecycle / Memory authority
+## Current active lifecycle/performance authority
 
-For the current lifecycle/performance program:
+Current task:
 
-- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md) — **CURRENT / ACCEPTED / FROZEN LONG-TERM DESIGN AUTHORITY**;
-- [`FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md) — **ORIGINAL PHASE 8 BUDGET CONTRACT / STOPPED AT GATE 0; budget construction deferred**;
-- [`FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md) — **WP0 COMPLETE / GATE 0 FAIL: aggregate WebContent/GPU attribution not provable with supported public production APIs**;
-- [`FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md) — **CURRENT IMPLEMENTATION CONTRACT / ACCEPTED / FROZEN / D_COMBINE**;
-- `CURRENT_STATUS.md` — verified current state;
-- `CURRENT_TASK.md` — only active mutation authorization;
-- [`DOMAIN_MAP.md`](DOMAIN_MAP.md) — derived navigation/current-source routing.
+`FT-ADAPTIVE-LIFECYCLE-RESTORE-001`
 
-## Phase 1-7 delivered foundations
+Current contract:
 
-Phase 1-7 remain delivered and reusable:
+- [`FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`](FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md) — **CURRENT / ACCEPTED / WP1 FROZEN / WP2–WP4 BLOCKED**.
 
-- persistent Slot/Profile/session lifetime is separate from disposable `WKWebView` Runtime lifetime;
-- Ready/unread is decoupled from Runtime residency;
-- native completion routing survives Runtime reclaim;
-- `SlotLifecycleCoordinator` is the lifecycle writer;
-- `WebViewPool` owns Runtime create/hibernate/restore/release mechanics;
-- hidden generation remains protected while bounded host-side work may be reduced;
-- Phase 6 perceived-fast restore remains the restore path;
-- Phase 7 `Automatic | Keep Loaded` is current shipped retention configuration.
+Superseded:
 
-Current shipped healthy/normal tuning remains:
+- [`FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md`](FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md) — historical WP0 evidence-gate authority only.
+
+Current stage:
 
 ```text
-normal Automatic target = 2
-inactive Automatic release path = 30s
+controlled WP0 restore evidence reconciled
+→ WP1 unified cold-restore presentation gate AUTHORIZED
+→ machine verification + independent audit
+→ real-Mac human acceptance
+→ WP2–WP4 remain separately blocked
 ```
 
-The current re-scope deliberately preserves those two healthy-state semantics.
+## Preserved lifecycle foundations
 
-## Gate 0 platform boundary
+- persistent Slot/Profile/session state is separate from disposable `WKWebView` Runtime lifetime;
+- `SlotLifecycleCoordinator` is the sole lifecycle policy/reclaim writer;
+- `WebViewPool` owns Runtime create/reuse/hibernate/restore/release mechanics;
+- `PanelController` owns selected-Slot presentation/materialization;
+- `WebPanelContainerView` owns native restoring/Web surface mechanics;
+- `WebAttentionCoordinator` owns generation protection truth;
+- Browser Profile/session data survives Runtime reclaim;
+- notification/unread truth does not require completed Runtime residency;
+- system warning/critical pressure reclaim is progressive;
+- `Automatic | Keep Loaded` remains the shipped per-Slot retention preference.
 
-Phase 8 WP0 proved that production can read per-process footprint and deterministically attribute the Networking helper, but cannot use supported public APIs to determine which dominant WebContent/GPU XPC instances belong to the FloatTabs host.
+## Accepted cold-restore evidence
 
-Therefore:
+Controlled evidence on PR #194 head `0cc2c2a1…` established:
 
 ```text
-aggregate FloatTabs/WebKit working-set budget input = NOT PROVABLE
-memory-budget enforcement = DEFERRED / PLATFORM-BLOCKED
-best-effort/correlation attribution = FORBIDDEN
-Runtime-count substitution = FORBIDDEN
+resident short revisit ≈ tens of milliseconds
+cold restore observed  ≈ 3–6 seconds
+fresh WKWebView create ≈ tens of milliseconds
 ```
 
-The V6 adaptive budget remains a future architecture direction only. Reopening it requires new supported deterministic attribution evidence.
+Therefore fresh WKWebView object construction is not the dominant multi-second cost.
 
-## User reconciliation — D_COMBINE
+### Normal cold summon defect
 
-The user selected on 2026-11-02:
+Current sequence can be:
 
 ```text
-B now
-→ execute measurement-independent pressure + efficiency work
-
-A later
-→ revisit aggregate memory budget only when the platform exposes a safe deterministic capability
+shell visible
+→ restoring requested inside source-owned Web surface
+→ source window remains hidden
+→ fresh Runtime navigates/restores for seconds
+→ readiness
+→ source window finally ordered front
 ```
 
-No best-effort `C` path is accepted.
+Result: shell/colored frame is visible while the truthful restoring surface is not.
 
-## Current implementation architecture
+### Notification cold-route defect
 
-### R1 — progressive system-memory-pressure ladder
-
-Primary owner: `SlotLifecycleCoordinator`.
+Current sequence can be:
 
 ```text
-warning
-→ eligible inactive Automatic only
-→ one Runtime at a time
-→ Keep Loaded preserved
-→ revalidate latest pressure + current ownership/protection between steps
-
-critical
-→ Automatic first
-→ then inactive/unprotected Keep Loaded if still required
-→ active/hard-protected untouched
-→ one Runtime at a time
-
-normal pressure
-→ stop/cancel pending progression
-→ no mass restore
-→ restore remains demand-driven
+notification exact-Slot route
+→ Slot selection eagerly recreates Runtime
+→ panel presentation begins
+→ source window ordered front while fresh WebView is blank
+→ navigation continues afterward
 ```
 
-The pressure path must use the existing supported system memory-pressure signal. It does not use an aggregate FloatTabs memory estimate.
+Result: blank Web page is visible before useful content.
 
-### R2 — background lifecycle efficiency
-
-Current allowed architecture is host-side only:
-
-- event-first completion sensing where current ownership permits;
-- bounded/adaptive hidden fallback probing;
-- suppression/coalescing of redundant hidden host work;
-- prompt cancellation of stale observer/tasks across document/runtime generation changes;
-- prevention of duplicate observer/task registration across hibernate/restore/rebuild;
-- exact-current ownership validation before stale callbacks mutate state.
-
-Required semantic chain remains:
+Current classification:
 
 ```text
-Generating
-→ hard Runtime protection
-→ completion sensing
-→ Ready/unread + native notification
-→ generating protection ends
-→ existing normal lifecycle resumes
+COLD_RESTORE_PRESENTATION_ROOT_CAUSE=KNOWN
+COLD_RESTORE_LATENCY_ROOT_CAUSE=NARROWED
+WEBKIT_FIRST_PIXEL=UNMEASURED
 ```
 
-No provider-semantic redesign, invasive page mutation, private freeze SPI, or renderer-memory claim is authorized.
+## WP1 accepted design
+
+All selected nonresident presentation requests must converge on one gate:
+
+```text
+nonresident presentation request
+→ exact target + restoring ownership
+→ native Restoring… surface actually visible
+→ fresh exact Runtime materializes/restores underneath
+→ exact-current readiness
+→ ready Web surface reveal
+→ focus / interaction / unread acknowledgement
+```
+
+Paths that must converge:
+
+- menu-bar summon;
+- global-hotkey summon;
+- explicit switch to a nonresident Slot;
+- completion-notification exact-Slot route.
+
+Resident ready Runtime keeps its existing fast path.
+
+The existing native restoring surface is preferred. No snapshot layer is authorized in WP1.
+
+## Current production tuning under review — unchanged during WP1
+
+Production still implements:
+
+```text
+normal Automatic resident target = 2
+Automatic inactive release       = 30s
+```
+
+Accepted design conclusions:
+
+- fixed target `2` is not final product truth;
+- `30s == mandatory destructive lifetime` is rejected as the final product invariant;
+- pressure-first + bounded long-idle cleanup is currently favored but not frozen;
+- WP2 lifecycle-policy implementation remains blocked.
+
+## Public WebKit scheduling boundary
+
+`WebViewFactory` does not currently override `WKPreferences.inactiveSchedulingPolicy`.
+
+On macOS 14+, public WebKit documents the default policy as `suspend` for an idle detached WebView; media/loading/interactive activity may be exempt.
+
+The M4/macOS 26 host confirms the fresh public configuration default value, but actual detached idle/generation/media resource characterization remains incomplete.
+
+Therefore WP1 must not add scheduling overrides. macOS 13 remains `NOT_TESTED` for this evidence set.
+
+## Aggregate-memory platform boundary
+
+The prior measurement-feasibility result remains current:
+
+- [`FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md) — dominant WebContent/GPU attribution to FloatTabs is not deterministic ordinary production truth.
+
+Therefore a production GiB budget remains deferred/platform-blocked. Runtime count must not be relabeled as RAM.
+
+Long-term design evidence:
+
+- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md).
+
+Delivered pressure/background evidence:
+
+- [`FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md).
+
+## Current conceptual lifecycle facts
+
+```text
+ACTIVE_OR_PROTECTED
+RESIDENT_BACKGROUND
+NO_RUNTIME_WITH_RESTORE_STATE
+RESTORING
+```
+
+`RESIDENT_BACKGROUND` does not automatically mean a guaranteed product-level `FROZEN` state.
 
 ## Current ownership
 
-- `WebViewPool` — live Runtime creation/hibernate/restore/rebuild/release mechanism;
-- `SlotLifecycleCoordinator` — sole Runtime lifecycle executor and pressure-policy writer;
-- `TabStore` / `WebAppProfile` — persistent Slot configuration and per-Slot Automatic/Keep Loaded preference;
-- `WebAttentionCoordinator` — native Attention authority;
-- `ChatGPTAttentionBridge` — provider sensing / bounded liveness fallback;
-- `PanelController` — presentation truth + restore orchestration, not a second lifecycle writer;
-- Website Cache domain — cache cleanup only, not Runtime lifecycle;
-- `RuntimeDiagnostics` — evidence only.
+- `SlotLifecycleCoordinator` — sole Runtime lifecycle decision/reclaim writer;
+- `WebViewPool` — live Runtime and transient restore-state mechanism;
+- `WebViewFactory` — supported WKWebView configuration mechanism;
+- `PanelController` / `WebPanelContainerView` — restoring/presentation ownership;
+- `TabStore` / `WebAppProfile` — persistent Slot configuration and retention preference;
+- `WebAttentionCoordinator` / `ChatGPTAttentionBridge` — generation protection facts;
+- Runtime Diagnostics — evidence only;
+- Website Cache domain — re-downloadable cache cleanup only.
 
-No current owner exists for a production aggregate-memory budget input because Gate 0 failed.
-
-## Current construction sequence
+## WP1 verification route
 
 ```text
-PR #190 WP0/reconciliation closeout
-→ literal new head required self-hosted macOS CI
-→ exact-diff/base-head/mergeability check
-→ merge #190
-→ fresh main
-→ one successor implementation branch/PR
-→ Gate R0 focused source reconciliation
-→ R1 pressure ladder + focused tests
-→ R2 background efficiency + focused tests
-→ full XCTest + Debug/Release arm64 + native architecture
-→ literal-head self-hosted macOS CI
-→ fresh exact-diff/ownership audit
-→ merge-readiness decision
+implement unified cold presentation gate
+→ focused presentation/materialization/notification regressions
+→ full XCTest
+→ Debug + Release arm64
+→ literal-head macOS CI + QA DMG
+→ fresh independent exact-diff / ownership / data-safety audit
+→ real-Mac human acceptance
 ```
 
-No `FloatTabs/**` mutation belongs on the #190 closeout branch.
+Human acceptance must prove normal cold summon and notification cold route no longer expose unexplained blank states while resident quick revisit remains fast.
 
-## Deferred architecture
+## Historical/deferred routing
 
-The following V6 target concepts remain documented but are not executable under the current task:
+Treat as historical/deferred unless explicitly referenced by current Authority:
 
-```text
-Memory Budget: Auto / Custom / Unlimited
-aggregate working-set observation
-high/low watermarks
-budget-driven normal reclaim
-memory-budget Settings/persistence
-aggregate-memory A/B acceptance
-```
+- Adaptive Lifecycle Restore Contract V1 after its WP0 evidence-gate role;
+- Phase 1–7 implementation contracts after delivered boundaries;
+- original Phase 8 adaptive GiB-budget implementation beyond its Gate-0 evidence;
+- V1–V5 lifecycle contracts;
+- old Hot/Warm/Cold benchmark/policy documents;
+- documents that present fixed `target=2` or 30s destructive lifetime as permanent product truth.
 
-If the platform boundary changes in the future, those concepts require a fresh task reconciliation before implementation.
-
-## Historical routing
-
-Treat as historical/deferred for current construction:
-
-- `FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`;
-- `FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`;
-- `FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md` beyond its recorded Gate 0 evidence/STOP boundary;
-- V1-V4 lifecycle contracts;
-- old fixed-count/residency plans and Hot/Warm/Cold benchmark material.
-
-Preserve them as evidence. Current mutation follows `CURRENT_TASK.md` plus the pressure/efficiency re-scope contract.
+Current mutation follows `CURRENT_TASK.md` plus the adaptive lifecycle/restore V2 contract.

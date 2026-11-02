@@ -251,6 +251,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var externalMouseMonitor: Any?
     private var requestedVisibility = false
     private var pendingSlotSynchronization = false
+    private var suppressTabStoreSynchronization = false
     private var unreadPruneDiagnosticSuppressionIDs: Set<UUID> = []
     private var lastPresentationUptime: TimeInterval = -.infinity
     private var workspaceAutoHideSuppression = WorkspaceAutoHideSuppression()
@@ -280,6 +281,26 @@ final class PanelController: NSObject, NSWindowDelegate {
     private struct PendingRuntimeMaterialization {
         let generation: UInt64
         let slotID: UUID
+        let surface: RuntimePresentationSurface
+        var didRecordRestoringSurfaceWindowVisibility = false
+    }
+    private enum RuntimePresentationSurface: Equatable {
+        case standard
+        case fullscreenCompanion
+    }
+    private enum RuntimeReadinessState: String, Equatable {
+        case loading
+        case ready
+        case failed
+    }
+    private struct RuntimeReadinessRecord {
+        let identity: WebRuntimeDiagnosticIdentity
+        let state: RuntimeReadinessState
+    }
+    private struct PendingColdUnreadAcknowledgement {
+        let slotID: UUID
+        let materializationGeneration: UInt64
+        let trace: RuntimeDiagnosticTrace
     }
     private var runtimeMaterializationGeneration: UInt64 = 0
     private var pendingRuntimeMaterialization: PendingRuntimeMaterialization?
@@ -287,6 +308,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// pending materialization. Correlates the Outcome-A navigation finish to
     /// this exact Runtime before restoring UI may disappear.
     private var pendingRuntimeMaterializationIdentity: WebRuntimeDiagnosticIdentity?
+    private var pendingColdUnreadAcknowledgement: PendingColdUnreadAcknowledgement?
+    /// Exact Runtime readiness is a PanelController presentation fact. Pool
+    /// residency and Slot identity alone never authorize Web content reveal.
+    private var runtimeReadinessBySlot: [UUID: RuntimeReadinessRecord] = [:]
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
     private var debugInteractionSurfaceFactOverrides: [UUID: Bool] = [:]
@@ -1233,7 +1258,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.handleSlotNavigationFailure(slotID: slotID, runtimeIdentity: identity)
         }
         tabStore.onChange = { [weak self] in
-            self?.synchronizeSlotState()
+            guard let self, !self.suppressTabStoreSynchronization else { return }
+            self.synchronizeSlotState()
         }
         synchronizeSlotState()
     }
@@ -1331,6 +1357,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.orderFrontRegardless()
         activateFloatTabs(trace: trace)
         panel.makeKeyAndOrderFront(nil)
+        recordRestoringSurfaceWindowVisibilityIfNeeded()
         beginPresentationFocusHandshake(
             trace: trace,
             webFocusOwner: webFocusOwner
@@ -2568,6 +2595,19 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.webPanelContainerView.currentWebView
     }
 
+    var debugCurrentWebFocusWebView: WKWebView? {
+        webFocusRouter.currentWebView
+    }
+
+    var debugRuntimeReadiness: String? {
+        guard let activeSlotID = tabStore.activeTabID else { return nil }
+        return runtimeReadinessState(for: activeSlotID)?.rawValue ?? "unknown"
+    }
+
+    func debugRuntimeReadiness(for slotID: UUID) -> String {
+        runtimeReadinessState(for: slotID)?.rawValue ?? "unknown"
+    }
+
     var debugPendingWarmReleaseCount: Int {
         slotLifecycleCoordinator.pendingWarmReleaseCount
     }
@@ -2994,9 +3034,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         synchronizeBrowserProfileMenuPresentation()
         let orderedProfiles = tabStore.orderedProfiles
+        let validSlotIDs = Set(orderedProfiles.map(\.id))
+        pruneRuntimeReadiness(validSlotIDs: validSlotIDs)
         let unreadBeforePrune = unreadResponseCoordinator.unreadSlotIDs
         unreadResponseCoordinator.prune(
-            validSlotIDs: Set(orderedProfiles.map(\.id))
+            validSlotIDs: validSlotIDs
         )
         let suppressedIDs = unreadPruneDiagnosticSuppressionIDs
         for slotID in unreadBeforePrune.subtracting(
@@ -3022,8 +3064,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeDurableUnreadPresentation()
         synchronizeResidentIndicators()
         slotLifecycleCoordinator.reconcile(profiles: orderedProfiles)
+        pruneRuntimeReadiness(validSlotIDs: validSlotIDs)
 
         guard let activeProfile = tabStore.activeProfile else {
+            pendingColdUnreadAcknowledgement = nil
             if let previous = lastSynchronizedActiveProfile {
                 slotLifecycleCoordinator.deactivate(profile: previous)
             }
@@ -3047,15 +3091,57 @@ final class PanelController: NSObject, NSWindowDelegate {
             applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
         }
 
+        if let pending = pendingRuntimeMaterialization,
+           pending.slotID == activeProfile.id {
+            container(for: pending.surface).showRestoringState()
+            webFocusRouter.setCurrentWebView(nil)
+            if requestedVisibility || panel.isVisible {
+                _ = makeRestoringSurfaceActuallyVisible(for: pending)
+            }
+            return
+        }
+
+        if runtimeReadinessState(for: activeProfile.id) == .failed {
+            slotLifecycleCoordinator.activate(profile: activeProfile)
+            webFocusRouter.setCurrentWebView(nil)
+            rootView.webPanelContainerView.showEmptyState()
+            lastSynchronizedActiveID = activeProfile.id
+            lastSynchronizedActiveProfile = activeProfile
+            onSelectedSlotPresentationChange?(
+                activeProfile.name,
+                faviconURL(for: activeProfile)
+            )
+            synchronizeResidentIndicators()
+            return
+        }
+
         if webViewPool.existingWebView(for: activeProfile.id) == nil,
            requestedVisibility || panel.isVisible {
             beginDeferredRuntimeMaterialization(for: activeProfile)
             return
         }
 
+        if webViewPool.existingWebView(for: activeProfile.id) != nil,
+           runtimeReadinessState(for: activeProfile.id) != .ready {
+            if requestedVisibility || panel.isVisible {
+                beginDeferredRuntimeMaterialization(for: activeProfile)
+            } else {
+                rootView.webPanelContainerView.showEmptyState()
+                webFocusRouter.setCurrentWebView(nil)
+                slotLifecycleCoordinator.activate(profile: activeProfile)
+                lastSynchronizedActiveID = activeProfile.id
+                lastSynchronizedActiveProfile = activeProfile
+                onSelectedSlotPresentationChange?(
+                    activeProfile.name,
+                    faviconURL(for: activeProfile)
+                )
+            }
+            return
+        }
+
         let webView: WKWebView
         do {
-            webView = try webViewPool.webView(for: activeProfile)
+            webView = try webViewForPanelController(activeProfile)
         } catch {
             webFocusRouter.setCurrentWebView(nil)
             if let profileName = Self.unsupportedBrowserProfileName(
@@ -3070,6 +3156,19 @@ final class PanelController: NSObject, NSWindowDelegate {
             } else {
                 rootView.webPanelContainerView.showEmptyState()
             }
+            synchronizeResidentIndicators()
+            return
+        }
+        guard runtimeReadinessState(for: activeProfile.id) == .ready else {
+            rootView.webPanelContainerView.showEmptyState()
+            webFocusRouter.setCurrentWebView(nil)
+            slotLifecycleCoordinator.activate(profile: activeProfile)
+            lastSynchronizedActiveID = activeProfile.id
+            lastSynchronizedActiveProfile = activeProfile
+            onSelectedSlotPresentationChange?(
+                activeProfile.name,
+                faviconURL(for: activeProfile)
+            )
             synchronizeResidentIndicators()
             return
         }
@@ -3122,29 +3221,108 @@ final class PanelController: NSObject, NSWindowDelegate {
         return true
     }
 
+    private func container(for surface: RuntimePresentationSurface) -> WebPanelContainerView {
+        switch surface {
+        case .standard:
+            return rootView.webPanelContainerView
+        case .fullscreenCompanion:
+            return sourceHostController.companionContainer
+        }
+    }
+
+    private func runtimeReadinessState(for slotID: UUID) -> RuntimeReadinessState? {
+        guard let currentIdentity = webViewPool.runtimeDiagnosticIdentity(for: slotID) else {
+            runtimeReadinessBySlot.removeValue(forKey: slotID)
+            return nil
+        }
+        guard let record = runtimeReadinessBySlot[slotID],
+              record.identity == currentIdentity else {
+            runtimeReadinessBySlot.removeValue(forKey: slotID)
+            return nil
+        }
+        return record.state
+    }
+
+    private func pruneRuntimeReadiness(validSlotIDs: Set<UUID>) {
+        for slotID in Array(runtimeReadinessBySlot.keys) {
+            guard let record = runtimeReadinessBySlot[slotID],
+                  validSlotIDs.contains(slotID),
+                  webViewPool.runtimeDiagnosticIdentity(for: slotID) == record.identity else {
+                runtimeReadinessBySlot.removeValue(forKey: slotID)
+                continue
+            }
+        }
+    }
+
+    private func webViewForPanelController(_ profile: WebAppProfile) throws -> WKWebView {
+        let previousIdentity = webViewPool.runtimeDiagnosticIdentity(for: profile.id)
+        let webView = try webViewPool.webView(for: profile)
+        guard let currentIdentity = webViewPool.runtimeDiagnosticIdentity(for: profile.id),
+              webViewPool.existingWebView(for: profile.id) === webView else {
+            runtimeReadinessBySlot.removeValue(forKey: profile.id)
+            return webView
+        }
+
+        if previousIdentity != currentIdentity {
+            runtimeReadinessBySlot[profile.id] = RuntimeReadinessRecord(
+                identity: currentIdentity,
+                state: .loading
+            )
+        } else if runtimeReadinessBySlot[profile.id]?.identity != currentIdentity {
+            // An already resident Runtime without controller-owned provenance
+            // remains unknown until its exact navigation callback arrives.
+            runtimeReadinessBySlot.removeValue(forKey: profile.id)
+        }
+        return webView
+    }
+
+    private func exactReadyWebView(for slotID: UUID) -> WKWebView? {
+        guard runtimeReadinessState(for: slotID) == .ready,
+              let webView = webViewPool.existingWebView(for: slotID),
+              webViewPool.runtimeDiagnosticIdentity(for: slotID)
+                == runtimeReadinessBySlot[slotID]?.identity else {
+            return nil
+        }
+        return webView
+    }
+
     private func isPendingRuntimeMaterializationCurrent(
         _ request: PendingRuntimeMaterialization
     ) -> Bool {
-        Self.runtimeMaterializationRequestIsValid(
-            requestGenerationMatches: pendingRuntimeMaterialization?.generation
-                == request.generation,
-            requestSlotID: request.slotID,
-            activeSlotID: tabStore.activeTabID,
-            presentationRequested: requestedVisibility || panel.isVisible,
-            sessionLocked: sourceHostController.isSessionLocked
-        )
+        guard pendingRuntimeMaterialization?.generation == request.generation,
+              request.slotID == tabStore.activeTabID,
+              requestedVisibility || panel.isVisible else {
+            return false
+        }
+        switch request.surface {
+        case .standard:
+            return !sourceHostController.isSessionLocked
+        case .fullscreenCompanion:
+            return sourceHostController.isSessionLocked
+                && sourceHostController.sessionState == .fullscreen
+        }
     }
 
-    private func beginDeferredRuntimeMaterialization(for profile: WebAppProfile) {
-        if let pending = pendingRuntimeMaterialization, pending.slotID == profile.id {
-            rootView.webPanelContainerView.showRestoringState()
+    private func beginDeferredRuntimeMaterialization(
+        for profile: WebAppProfile,
+        surface: RuntimePresentationSurface = .standard
+    ) {
+        if let pending = pendingRuntimeMaterialization,
+           pending.slotID == profile.id,
+           pending.surface == surface {
+            container(for: surface).showRestoringState()
+            recordRestoringSurfaceWindowVisibilityIfNeeded()
             return
+        }
+        if pendingRuntimeMaterialization != nil {
+            cancelPendingRuntimeMaterialization(reason: "presentation_surface_replaced")
         }
 
         runtimeMaterializationGeneration += 1
         let request = PendingRuntimeMaterialization(
             generation: runtimeMaterializationGeneration,
-            slotID: profile.id
+            slotID: profile.id,
+            surface: surface
         )
         pendingRuntimeMaterialization = request
         pendingRuntimeMaterializationIdentity = nil
@@ -3152,7 +3330,20 @@ final class PanelController: NSObject, NSWindowDelegate {
             profile.name,
             faviconURL(for: profile)
         )
-        rootView.webPanelContainerView.showRestoringState()
+        if surface == .fullscreenCompanion {
+            rootView.installFullscreenCompanionContainer(
+                sourceHostController.companionContainer
+            )
+            companionActiveProfile = profile
+            slotLifecycleCoordinator.beginSupplementalVisibility(profile: profile)
+        } else {
+            // The selected Runtime becomes active when this presentation
+            // generation is established, before deferred WebKit work. This
+            // cancels only its existing inactive plan; it does not reclaim or
+            // recreate a resident Runtime.
+            slotLifecycleCoordinator.activate(profile: profile)
+        }
+        container(for: surface).showRestoringState()
         // Restoring is a native-only interaction boundary. The previous Slot
         // must not remain the canonical focus target while a reclaimed Runtime
         // is being materialized under the overlay.
@@ -3168,9 +3359,47 @@ final class PanelController: NSObject, NSWindowDelegate {
                 "materialization_generation": .integer(Int64(request.generation))
             ]
         )
+        recordRestoringSurfaceWindowVisibilityIfNeeded()
         DispatchQueue.main.async { [weak self] in
             self?.performDeferredRuntimeMaterialization(request)
         }
+    }
+
+    /// Records when the restoring surface is attached to the currently visible
+    /// window that owns its container. This is a presentation boundary, not
+    /// proof that pixels have reached the display compositor.
+    private func recordRestoringSurfaceWindowVisibilityIfNeeded() {
+        guard let currentRequest = pendingRuntimeMaterialization else { return }
+        let surface = container(for: currentRequest.surface)
+        let surfaceWindow = surface.window
+        guard var request = pendingRuntimeMaterialization,
+              !request.didRecordRestoringSurfaceWindowVisibility,
+              surface.isShowingRestoringState,
+              let surfaceWindow,
+              surfaceWindow.isVisible,
+              !surfaceWindow.isMiniaturized else {
+            return
+        }
+
+        request.didRecordRestoringSurfaceWindowVisibility = true
+        pendingRuntimeMaterialization = request
+        let surfaceWindowRole = surfaceWindow === panel
+            ? "panel"
+            : surfaceWindow === sourceHostController.window ? "source" : "other"
+        diagnostics.record(
+            event: "panel.restoring_surface.window_visible",
+            level: .notice,
+            subsystem: "panel",
+            fields: [
+                "slot_id": .string(request.slotID.uuidString),
+                "materialization_generation": .integer(Int64(request.generation)),
+                "panel_window_visible": .bool(panel.isVisible),
+                "panel_window_key": .bool(panel.isKeyWindow),
+                "surface_window_role": .string(surfaceWindowRole),
+                "surface_window_visible": .bool(surfaceWindow.isVisible),
+                "surface_window_key": .bool(surfaceWindow.isKeyWindow)
+            ]
+        )
     }
 
     private func performDeferredRuntimeMaterialization(
@@ -3182,9 +3411,17 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
+        guard makeRestoringSurfaceActuallyVisible(for: request) else {
+            cancelStaleRuntimeMaterialization(
+                request,
+                reason: "restoring_surface_not_visible"
+            )
+            return
+        }
+
         let webView: WKWebView
         do {
-            webView = try webViewPool.webView(for: profile)
+            webView = try webViewForPanelController(profile)
         } catch {
             finishPendingRuntimeMaterializationAsFailed(
                 profile: profile,
@@ -3202,12 +3439,43 @@ final class PanelController: NSObject, NSWindowDelegate {
         attachDeferredRuntime(webView: webView, profile: profile, request: request)
     }
 
+    /// The cold presentation transaction must own a visible native restoring
+    /// surface before WebKit creates or restores the target Runtime. The
+    /// source window's Web container is the existing presentation surface;
+    /// ordering it without a WebView does not transfer focus or expose a
+    /// not-yet-ready page.
+    private func makeRestoringSurfaceActuallyVisible(
+        for request: PendingRuntimeMaterialization
+    ) -> Bool {
+        guard isPendingRuntimeMaterializationCurrent(request),
+              pendingRuntimeMaterialization?.generation == request.generation,
+              container(for: request.surface).isShowingRestoringState else {
+            return false
+        }
+
+        switch request.surface {
+        case .standard:
+            sourceHostController.orderFrontAndFocus(nil)
+        case .fullscreenCompanion:
+            panel.orderFrontRegardless()
+        }
+        recordRestoringSurfaceWindowVisibilityIfNeeded()
+
+        let surface = container(for: request.surface)
+        guard let surfaceWindow = surface.window else {
+            return false
+        }
+        return surface.isShowingRestoringState
+            && surfaceWindow.isVisible
+            && !surfaceWindow.isMiniaturized
+    }
+
     private func attachDeferredRuntime(
         webView: WKWebView,
         profile: WebAppProfile,
         request: PendingRuntimeMaterialization
     ) {
-        rootView.webPanelContainerView.show(
+        container(for: request.surface).show(
             webView: webView,
             slotID: profile.id,
             residencyPolicy: profile.residencyPolicy
@@ -3217,7 +3485,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
         // Attachment is not readiness. Keep focus/input and Attention closed
         // until the exact current Runtime emits the accepted Outcome-A finish.
-        slotLifecycleCoordinator.activate(profile: profile)
         WebViewFactory.configureHiddenScrollers(in: webView)
         sourceHostController.observeFullscreenState(of: webView)
 
@@ -3234,13 +3501,22 @@ final class PanelController: NSObject, NSWindowDelegate {
             subsystem: "panel",
             fields: fields
         )
+        if runtimeReadinessState(for: profile.id) == .ready,
+           let runtimeIdentity = pendingRuntimeMaterializationIdentity
+                ?? webViewPool.runtimeDiagnosticIdentity(for: profile.id) {
+            completePendingRuntimeMaterialization(
+                request,
+                runtimeIdentity: runtimeIdentity
+            )
+        }
     }
 
     private func cancelPendingRuntimeMaterialization(reason: String) {
         guard let pending = pendingRuntimeMaterialization else { return }
+        clearPendingColdUnreadAcknowledgement(for: pending)
         pendingRuntimeMaterialization = nil
         pendingRuntimeMaterializationIdentity = nil
-        rootView.webPanelContainerView.hideRestoringState()
+        container(for: pending.surface).hideRestoringState()
         diagnostics.record(
             event: "panel.materialization.cancelled",
             level: .notice,
@@ -3259,9 +3535,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     ) {
         let currentGeneration = pendingRuntimeMaterialization?.generation
         if currentGeneration == request.generation {
+            clearPendingColdUnreadAcknowledgement(for: request)
             pendingRuntimeMaterialization = nil
             pendingRuntimeMaterializationIdentity = nil
-            rootView.webPanelContainerView.hideRestoringState()
+            container(for: request.surface).hideRestoringState()
         }
         diagnostics.record(
             event: "panel.materialization.cancelled",
@@ -3278,24 +3555,43 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
+    private func clearPendingColdUnreadAcknowledgement(
+        for materialization: PendingRuntimeMaterialization
+    ) {
+        guard let intent = pendingColdUnreadAcknowledgement,
+              intent.slotID == materialization.slotID,
+              intent.materializationGeneration == materialization.generation else {
+            return
+        }
+        pendingColdUnreadAcknowledgement = nil
+    }
+
     private func finishPendingRuntimeMaterializationAsFailed(
         profile: WebAppProfile,
         error: Error
     ) {
+        let pending = pendingRuntimeMaterialization.flatMap {
+            $0.slotID == profile.id ? $0 : nil
+        }
+        if let pending {
+            clearPendingColdUnreadAcknowledgement(for: pending)
+        }
         pendingRuntimeMaterialization = nil
         pendingRuntimeMaterializationIdentity = nil
         webFocusRouter.setCurrentWebView(nil)
+        let presentationContainer = pending.map { container(for: $0.surface) }
+            ?? rootView.webPanelContainerView
         if let profileName = Self.unsupportedBrowserProfileName(
             for: profile,
             error: error,
             browserProfiles: tabStore.browserProfiles
         ) {
-            rootView.webPanelContainerView.showUnsupportedBrowserProfile(
+            presentationContainer.showUnsupportedBrowserProfile(
                 profileName: profileName,
                 defaultProfileName: tabStore.defaultBrowserProfilePresentation.name
             )
         } else {
-            rootView.webPanelContainerView.showEmptyState()
+            presentationContainer.showEmptyState()
         }
         diagnostics.record(
             event: "panel.materialization.failed",
@@ -3313,30 +3609,83 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func handleSlotNavigationFinish(slotID: UUID, runtimeIdentity: WebRuntimeDiagnosticIdentity) {
-        guard let pending = pendingRuntimeMaterialization,
-              pending.slotID == slotID,
-              isPendingRuntimeMaterializationCurrent(pending),
-              let expectedIdentity = pendingRuntimeMaterializationIdentity,
-              expectedIdentity == runtimeIdentity,
-              let currentIdentity = webViewPool.runtimeDiagnosticIdentity(for: slotID),
-              currentIdentity == runtimeIdentity,
-              let readyWebView = webViewPool.existingWebView(for: slotID) else {
+        guard webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
+              webViewPool.existingWebView(for: slotID) != nil else {
             return
         }
+        runtimeReadinessBySlot[slotID] = RuntimeReadinessRecord(
+            identity: runtimeIdentity,
+            state: .ready
+        )
+
+        guard let pending = pendingRuntimeMaterialization,
+              pending.slotID == slotID,
+              isPendingRuntimeMaterializationCurrent(pending) else {
+            return
+        }
+        if pendingRuntimeMaterializationIdentity == nil {
+            pendingRuntimeMaterializationIdentity = runtimeIdentity
+            return
+        }
+        guard pendingRuntimeMaterializationIdentity == runtimeIdentity else { return }
+        completePendingRuntimeMaterialization(pending, runtimeIdentity: runtimeIdentity)
+    }
+
+    private func completePendingRuntimeMaterialization(
+        _ pending: PendingRuntimeMaterialization,
+        runtimeIdentity: WebRuntimeDiagnosticIdentity
+    ) {
+        guard isPendingRuntimeMaterializationCurrent(pending),
+              pendingRuntimeMaterialization?.generation == pending.generation,
+              pendingRuntimeMaterializationIdentity == runtimeIdentity,
+              webViewPool.runtimeDiagnosticIdentity(for: pending.slotID) == runtimeIdentity,
+              runtimeReadinessState(for: pending.slotID) == .ready,
+              let readyWebView = webViewPool.existingWebView(for: pending.slotID),
+              container(for: pending.surface).currentWebView === readyWebView else {
+            return
+        }
+        let coldUnreadIntent = pendingColdUnreadAcknowledgement.flatMap { intent in
+            intent.slotID == pending.slotID
+                && intent.materializationGeneration == pending.generation
+                ? intent
+                : nil
+        }
+        pendingColdUnreadAcknowledgement = nil
 
         let focusTrace = presentationTrace
         let focusOwner = presentationWebFocusOwner
         pendingRuntimeMaterialization = nil
         pendingRuntimeMaterializationIdentity = nil
-        rootView.webPanelContainerView.hideRestoringState()
+        container(for: pending.surface).hideRestoringState()
+        var revealFields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(pending.slotID.uuidString),
+            "materialization_generation": .integer(Int64(pending.generation)),
+            "readiness_source": .string("navigation_finished"),
+            "panel_window_visible": .bool(panel.isVisible),
+            "panel_window_key": .bool(panel.isKeyWindow)
+        ]
+        revealFields.merge(runtimeIdentity.fields) { _, new in new }
+        diagnostics.record(
+            event: "panel.materialization.web_content_reveal_requested",
+            level: .notice,
+            subsystem: "panel",
+            fields: revealFields
+        )
         webFocusRouter.setCurrentWebView(readyWebView)
-        acknowledgeAttentionIfActuallyVisible(slotID: slotID)
+        acknowledgeAttentionIfActuallyVisible(slotID: pending.slotID)
         beginPresentationFocusHandshake(
             trace: focusTrace,
             webFocusOwner: focusOwner
         )
+        if let coldUnreadIntent {
+            acknowledgePresentedSelectionIfNeeded(
+                slotID: pending.slotID,
+                source: .explicitSelectionDeferred,
+                trace: coldUnreadIntent.trace
+            )
+        }
         var fields: [String: RuntimeDiagnosticValue] = [
-            "slot_id": .string(slotID.uuidString),
+            "slot_id": .string(pending.slotID.uuidString),
             "materialization_generation": .integer(Int64(pending.generation)),
             "readiness_source": .string("navigation_finished")
         ]
@@ -3350,27 +3699,55 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func handleSlotNavigationFailure(slotID: UUID, runtimeIdentity: WebRuntimeDiagnosticIdentity) {
-        guard let pending = pendingRuntimeMaterialization,
-              pending.slotID == slotID,
-              isPendingRuntimeMaterializationCurrent(pending),
-              let expectedIdentity = pendingRuntimeMaterializationIdentity,
-              expectedIdentity == runtimeIdentity,
-              let currentIdentity = webViewPool.runtimeDiagnosticIdentity(for: slotID),
-              currentIdentity == runtimeIdentity else {
+        guard webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
+              webViewPool.existingWebView(for: slotID) != nil else {
             return
         }
+        runtimeReadinessBySlot[slotID] = RuntimeReadinessRecord(
+            identity: runtimeIdentity,
+            state: .failed
+        )
 
-        pendingRuntimeMaterialization = nil
-        pendingRuntimeMaterializationIdentity = nil
-        rootView.webPanelContainerView.hideRestoringState()
-        if let failedWebView = webViewPool.existingWebView(for: slotID) {
-            webFocusRouter.setCurrentWebView(failedWebView)
+        let pending = pendingRuntimeMaterialization.flatMap { request in
+            request.slotID == slotID
+                && isPendingRuntimeMaterializationCurrent(request)
+                && (pendingRuntimeMaterializationIdentity == nil
+                    || pendingRuntimeMaterializationIdentity == runtimeIdentity)
+                ? request
+                : nil
         }
+        let standardOwnsRuntime = pending == nil
+            && pendingRuntimeMaterialization == nil
+            && tabStore.activeTabID == slotID
+            && rootView.webPanelContainerView.currentWebView
+                === webViewPool.existingWebView(for: slotID)
+        let companionOwnsRuntime = pending == nil
+            && pendingRuntimeMaterialization == nil
+            && tabStore.activeTabID == slotID
+            && sourceHostController.companionContainer.currentWebView
+                === webViewPool.existingWebView(for: slotID)
+        guard pending != nil || standardOwnsRuntime || companionOwnsRuntime else { return }
+
+        if let pending {
+            clearPendingColdUnreadAcknowledgement(for: pending)
+            pendingRuntimeMaterialization = nil
+            pendingRuntimeMaterializationIdentity = nil
+            container(for: pending.surface).showEmptyState()
+        } else if standardOwnsRuntime {
+            rootView.webPanelContainerView.showEmptyState()
+        } else {
+            sourceHostController.companionContainer.showEmptyState()
+            companionActiveProfile = nil
+        }
+        webFocusRouter.setCurrentWebView(nil)
         var fields: [String: RuntimeDiagnosticValue] = [
             "slot_id": .string(slotID.uuidString),
-            "materialization_generation": .integer(Int64(pending.generation)),
-            "readiness_source": .string("navigation_failed")
+            "readiness_source": .string("navigation_failed"),
+            "failure_presentation": .string("native_empty_state")
         ]
+        if let pending {
+            fields["materialization_generation"] = .integer(Int64(pending.generation))
+        }
         fields.merge(runtimeIdentity.fields) { _, new in new }
         diagnostics.record(
             event: "panel.materialization.readiness_failed",
@@ -3566,25 +3943,28 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func attentionPresentationFacts(slotID: UUID) -> AttentionPresentation.Facts {
         let pooledWebView = webViewPool.existingWebView(for: slotID)
+        let runtimeIsReady = runtimeReadinessState(for: slotID) == .ready
         let normalRestoreBlocked = rootView.webPanelContainerView.isShowingRestoringState
+            && tabStore.activeTabID == slotID
+        let companionRestoreBlocked = sourceHostController.companionContainer.isShowingRestoringState
             && tabStore.activeTabID == slotID
         return AttentionPresentation.Facts(
             slotID: slotID,
             sessionIsLocked: sourceHostController.isSessionLocked,
             pooledWebViewExists: pooledWebView != nil,
-            normalCurrentWebViewIsSlotWebView: !normalRestoreBlocked && (pooledWebView.map { webView in
+            normalCurrentWebViewIsSlotWebView: runtimeIsReady && !normalRestoreBlocked && (pooledWebView.map { webView in
                 rootView.webPanelContainerView.currentWebView === webView
             } ?? false),
             sourceWindowIsVisible: sourceHostController.window.isVisible,
-            webPresentationOwnsActiveInteraction: !normalRestoreBlocked && (pooledWebView.map(
+            webPresentationOwnsActiveInteraction: runtimeIsReady && !normalRestoreBlocked && !companionRestoreBlocked && (pooledWebView.map(
                 ownsActiveInteraction(of:)
             ) ?? false),
             fullscreenSourceSlotID: fullscreenProfile?.id,
             panelIsVisible: panel.isVisible,
             companionSlotID: companionActiveProfile?.id,
-            companionCurrentWebViewIsSlotWebView: pooledWebView.map { webView in
+            companionCurrentWebViewIsSlotWebView: runtimeIsReady && !companionRestoreBlocked && (pooledWebView.map { webView in
                 sourceHostController.companionContainer.currentWebView === webView
-            } ?? false
+            } ?? false)
         )
     }
 
@@ -3606,6 +3986,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotID: UUID,
         facts: AttentionPresentation.Facts
     ) -> Bool {
+        guard runtimeReadinessState(for: slotID) == .ready else { return false }
 #if DEBUG
         if let override = debugPresentationFactOverrides[slotID] {
             return override
@@ -3618,6 +3999,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotID: UUID,
         facts: AttentionPresentation.Facts
     ) -> Bool {
+        guard runtimeReadinessState(for: slotID) == .ready else { return false }
 #if DEBUG
         if let override = debugInteractionSurfaceFactOverrides[slotID] {
             return override
@@ -3668,7 +4050,10 @@ final class PanelController: NSObject, NSWindowDelegate {
             trace: trace,
             fields: ["slot_id": .string(slotID.uuidString)]
         )
-        guard tabStore.select(id: slotID, trace: trace) else {
+        suppressTabStoreSynchronization = true
+        let selected = tabStore.select(id: slotID, trace: trace)
+        suppressTabStoreSynchronization = false
+        guard selected else {
             diagnostics.record(
                 event: "notification.route.unavailable",
                 level: .warning,
@@ -3677,6 +4062,12 @@ final class PanelController: NSObject, NSWindowDelegate {
                 fields: ["slot_id": .string(slotID.uuidString)]
             )
             return false
+        }
+        // A visible panel needs the target synchronized now. A hidden panel
+        // reaches the same gate from showFloatTabs after requested visibility
+        // is established, avoiding eager Runtime creation during selection.
+        if panel.isVisible {
+            synchronizeSlotState()
         }
         presentFloatTabs(trace: trace)
         acknowledgeUnreadAfterExplicitSelection(slotID: slotID, trace: trace)
@@ -3687,6 +4078,23 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotID: UUID,
         trace: RuntimeDiagnosticTrace? = nil
     ) {
+        if let pending = pendingRuntimeMaterialization,
+           pending.slotID == slotID,
+           isPendingRuntimeMaterializationCurrent(pending) {
+            if unreadResponseCoordinator.unreadSlotIDs.contains(slotID) {
+                pendingColdUnreadAcknowledgement = PendingColdUnreadAcknowledgement(
+                    slotID: slotID,
+                    materializationGeneration: pending.generation,
+                    trace: trace ?? diagnostics.beginTrace(root: "unread.explicit_selection")
+                )
+            } else if pendingColdUnreadAcknowledgement?.slotID == slotID,
+                      pendingColdUnreadAcknowledgement?.materializationGeneration
+                        == pending.generation {
+                pendingColdUnreadAcknowledgement = nil
+            }
+            return
+        }
+
         let facts = unreadPresentationFacts(slotID: slotID)
         guard facts.activeSlotMatches else {
             finishUnreadSelectionAttemptIfNeeded(
@@ -4040,15 +4448,18 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func focusActiveWebViewIfAvailable(makeSourceWindowMain: Bool = false) {
         guard !addressOverlayView.isPresented,
-              !rootView.webPanelContainerView.isShowingRestoringState else { return }
+              let activeSlotID = tabStore.activeTabID,
+              let webView = exactReadyWebView(for: activeSlotID) else { return }
         if sourceHostController.isSessionLocked {
-            if let webView = sourceHostController.companionContainer.currentWebView {
-                WebViewFocus.focus(webView, in: panel)
-            }
+            guard sourceHostController.companionContainer.currentWebView === webView,
+                  !sourceHostController.companionContainer.isShowingRestoringState else { return }
+            WebViewFocus.focus(webView, in: panel)
             return
         }
+        guard rootView.webPanelContainerView.currentWebView === webView,
+              !rootView.webPanelContainerView.isShowingRestoringState else { return }
         sourceHostController.orderFrontAndFocus(
-            rootView.webPanelContainerView.currentWebView,
+            webView,
             makeSourceWindowMain: makeSourceWindowMain
         )
     }
@@ -4338,14 +4749,18 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func selectedPresentationWebView() -> WKWebView? {
-        if sourceHostController.isSessionLocked,
-           let companionWebView = sourceHostController.companionContainer.currentWebView {
-            return companionWebView
-        }
-        guard !rootView.webPanelContainerView.isShowingRestoringState else {
+        guard let activeSlotID = tabStore.activeTabID,
+              let readyWebView = exactReadyWebView(for: activeSlotID) else {
             return nil
         }
-        return rootView.webPanelContainerView.currentWebView
+        let presentationContainer = sourceHostController.isSessionLocked
+            ? sourceHostController.companionContainer
+            : rootView.webPanelContainerView
+        guard !presentationContainer.isShowingRestoringState,
+              presentationContainer.currentWebView === readyWebView else {
+            return nil
+        }
+        return readyWebView
     }
 
     static func canRemoveSlotDuringFullscreen(
@@ -5489,7 +5904,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         activateFloatTabs()
         panel.makeKeyAndOrderFront(nil)
 
-        if let webView = sourceHostController.companionContainer.currentWebView {
+        if let companionSlotID = tabStore.activeTabID,
+           runtimeReadinessState(for: companionSlotID) == .ready,
+           let webView = exactReadyWebView(for: companionSlotID),
+           sourceHostController.companionContainer.currentWebView === webView,
+           !sourceHostController.companionContainer.isShowingRestoringState {
             WebViewFocus.focus(webView, in: panel)
         }
         if let companionSlotID = companionActiveProfile?.id {
@@ -5542,9 +5961,28 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
         }
 
+        if runtimeReadinessState(for: activeProfile.id) == .failed {
+            webFocusRouter.setCurrentWebView(nil)
+            rootView.installFullscreenCompanionContainer(
+                sourceHostController.companionContainer
+            )
+            sourceHostController.companionContainer.showEmptyState()
+            companionActiveProfile = nil
+            synchronizeResidentIndicators()
+            return
+        }
+
+        if runtimeReadinessState(for: activeProfile.id) != .ready {
+            beginDeferredRuntimeMaterialization(
+                for: activeProfile,
+                surface: .fullscreenCompanion
+            )
+            return
+        }
+
         let webView: WKWebView
         do {
-            webView = try webViewPool.webView(for: activeProfile)
+            webView = try webViewForPanelController(activeProfile)
         } catch {
             webFocusRouter.setCurrentWebView(nil)
             if let profileName = Self.unsupportedBrowserProfileName(
@@ -5564,6 +6002,13 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
             companionActiveProfile = nil
             synchronizeResidentIndicators()
+            return
+        }
+        guard runtimeReadinessState(for: activeProfile.id) == .ready else {
+            beginDeferredRuntimeMaterialization(
+                for: activeProfile,
+                surface: .fullscreenCompanion
+            )
             return
         }
         rootView.installFullscreenCompanionContainer(

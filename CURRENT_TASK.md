@@ -1,91 +1,106 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-NOTIFICATION-RELIABILITY-RICH-PREVIEW-001`  
-**Title:** Native completion notification reliability + Slot name + assistant preview  
-**Status:** `COMPLETE / MERGE AUTHORIZED`  
-**Mode:** `CLOSEOUT / MERGE BOUNDARY`  
-**Task class:** `APP / NATIVE NOTIFICATION / RESPONSE PROJECTION / UX RELIABILITY`  
-**Execution baseline:** `main@08831ad2cc3e7f18432b1a6ecdc983e849a992aa`  
-**Task branch:** `codex/notification-reliability-rich-preview-001`  
-**PR:** `#193`
+**Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
+**Title:** Adaptive Runtime lifecycle + fast restore + background efficiency — WP1  
+**Status:** `COMPLETE / HUMAN ACCEPTED / MERGE CLOSEOUT ONLY`  
+**Mode:** `CLOSEOUT — NO FURTHER WP1 PRODUCT IMPLEMENTATION AUTHORIZED`  
+**Task class:** `WEB RUNTIME / LIFECYCLE / PERFORMANCE / RESTORE UX`  
+**Execution baseline:** `main@7e179aaf4dbf0c538c7c2221101fc74d16e49b98`  
+**Task branch:** `codex/adaptive-lifecycle-restore-001`
 
-## Authority
+## Authorization
 
-- Project rules: `AGENTS.md`
-- Current state: `CURRENT_STATUS.md`
-- Durable task contract: `docs/architecture/FloatTabs_Native_Completion_Notification_Reliability_Rich_Preview_Contract_V1.md`
-- Domain navigation: `docs/architecture/DOMAIN_MAP.md`
-- Production source/tests/runtime evidence remain implementation truth.
+WP1 is complete. The canonical cold-presentation gate, exact-Runtime readiness, navigation-failure truthfulness, unread readiness gating, rapid A→B→A re-entry, notification exact-Slot routing, and generation protection have passed machine verification, independent audit, and user-owned real-Mac acceptance.
 
-## Final observed task result
+This file authorizes **closeout only** for PR #194. No additional WP1 behavior change and no WP2 product mutation may be added to this branch.
 
-Implementation head before the control-only closeout commit:
+Durable WP1 design authority:
 
-`97eb588ffec370332b7115a9735594a92f6080c3`
+`docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`
 
-Verified machine / audit result:
+## Final accepted evidence
 
-```text
-CORRECTIVE_A_TIMEOUT_EXACTLY_ONCE=PASS
-CORRECTIVE_B_DOM_SANITIZATION_DEDUP=PASS
-FOCUSED_TESTS=PASS_197_OF_197
-FULL_XCTEST=PASS_1148_OF_1148
-DEBUG_ARM64=PASS
-RELEASE_ARM64=PASS
-NATIVE_ARM64=PASS
-PACKAGE_LOCK=UNCHANGED
-LITERAL_HEAD_CI=PASS_RUN_41405393738
-QA_DMG=PASS_RUN_41405393795
-INDEPENDENT_AUDIT=PASS
-BLOCKING_FINDINGS=0
-IMPORTANT_FINDINGS=0
-```
+Semantic implementation head:
 
-## Human acceptance
+`e187f83fd2c4198d3e2baa64ef5074037c87c410`
 
-`HUMAN_UI_ACCEPTANCE=PASS`.
+Pre-closeout branch head with green machine gates:
 
-The user explicitly validated the real installed QA build on macOS:
+`1a77fae92c53708e2c6c373301c825187fdb1de4`
 
-1. hidden ChatGPT completion produced the expected native notification;
-2. notification title/body content was correct;
-3. a roughly 1m20s hidden generation completed successfully;
-4. lifecycle diagnostics showed generation protection while active and later `Automatic` hibernation after completion;
-5. notification click opened the exact persistent Slot after Runtime reclaim;
-6. the conversation/session restored correctly.
-
-This satisfies the task's required human notification acceptance and exact-Slot restore acceptance.
-
-## Final invariant result
-
-- notification routing payload remains exactly `version / kind / slot_id`;
-- no Slot name or assistant preview is persisted in FloatTabs product state, diagnostics, backups or Runtime snapshots;
-- no preview polling or completed-Runtime residency requirement was introduced;
-- existing completion sound semantics remain unchanged;
-- generation protection, 30s Automatic grace, resident target, pressure ordering and Browser Profile/session ownership remain unchanged by this task.
-
-## Merge authorization
-
-The user explicitly authorized merging the already-accepted work on `2026-11-02`.
-
-Required final action:
+Accepted machine evidence:
 
 ```text
-control-only closeout commit
-→ literal-head merge-boundary verification
-→ merge PR #193
+focused affected suites = PASS (381 passed / 4 skipped / 0 failed)
+full XCTest = PASS (1153 passed / 4 skipped / 0 failed)
+Debug arm64 = PASS
+Release arm64 = PASS
+native arm64 verification = PASS
+package lock = unchanged
+implementation-head macOS CI = PASS (41464559708 / 125341924174)
+implementation-head QA DMG = PASS (41464559462)
+control-head macOS CI at 1a77fae = PASS (41466335384 / 125348105768)
+control-head QA DMG at 1a77fae = PASS (41466335512)
+independent exact-diff / ownership / data-safety audit = PASS
 ```
 
-No further notification product mutation is authorized under this task.
+Human acceptance:
 
-## Next task boundary
+```text
+HUMAN_UI_ACCEPTANCE=PASS
+WP1_PRESENTATION=PASS
+WP1_EXACT_RUNTIME_READINESS=PASS
+WP1_NOTIFICATION_COLD_ROUTE=PASS
+WP1_RAPID_SWITCH_PRESENTATION=PASS
+WP1_DATA_SAFETY=PASS
+```
 
-After #193 is merged, open a separate lifecycle/performance task to audit and design the newly observed issues:
+The user's acceptance log `FloatTabs-WP1-Human-20261102-231725.jsonl` shows 23 deferred cold materializations, 23 actually-visible restoring-surface events, 23 attachments, zero readiness failures, and the notification route using the canonical cold gate. The user explicitly requested WP1 closeout.
 
-- cold-restore latency / visible empty-content interval after long inactivity;
-- replacement of the rigid normal `resident target = 2` policy with an evidence-based adaptive policy;
-- Active / Warm-Frozen / Hibernated lifecycle layering to improve resource reduction without sacrificing restore latency;
-- explicit investigation of public WebKit inactive scheduling/suspension behavior, snapshot-based continuity, pressure behavior and macOS-version compatibility;
-- no byte-based per-Slot or aggregate RAM budget may be claimed unless attribution becomes supportably measurable.
+## Separate next-phase evidence — not WP1 work
 
-That work must not be added to PR #193.
+The same run proves the shipped healthy-state lifecycle policy is too aggressive for legitimate multi-Slot usage: nine reconciliations in roughly 50 seconds observed `managed_resident_count=3`, fixed `target=2`, and `eviction_count=1` with `reason=reconcile`.
+
+This is **WP2 lifecycle-policy evidence**, not a reason to reopen WP1.
+
+The next-phase design direction requested by the user is:
+
+```text
+NO_FIXED_NORMAL_RESIDENT_COUNT
+PINNED_KEEP_LOADED = NO_AUTOMATIC_EXIT
+AUTOMATIC = STAGED_AUTOMATIC_LIFECYCLE
+NORMAL_RECLAIM = TIME/STATE BASED, NOT TAB-COUNT BASED
+MEMORY_PRESSURE = PROGRESSIVE AUTOMATIC RECLAIM SIGNAL
+```
+
+This direction is not implementation authority on PR #194. It must be reconciled into a clean post-merge WP2 task/branch/PR before code changes.
+
+## Closeout gate
+
+Required closeout sequence:
+
+1. update `CURRENT_STATUS.md`, this task file, V2, and PR #194 description to final WP1 PASS;
+2. run/observe exact final control-head macOS CI and QA DMG;
+3. if both are green and PR identity is unchanged, mark PR #194 ready and merge using the repository's normal merge method;
+4. verify fresh `origin/main` contains the merge;
+5. only then create the clean WP2 task/branch/PR and new lifecycle-policy design authority.
+
+## STOP conditions
+
+- do not add WP2 code or policy changes to PR #194;
+- do not modify fixed `target=2`, 30-second reclaim, pressure ordering, Keep Loaded semantics, scheduling policy, or snapshot behavior during WP1 closeout;
+- do not merge if the exact final control-head machine gate is red or PR head moved unexpectedly;
+- do not release a public build as part of this closeout;
+- do not clear Browser Profile/cookies/session/cache/configuration;
+- do not infer a cause for the historical CI failures; it remains unknown.
+
+## Final state
+
+```text
+WP1=COMPLETE
+HUMAN_UI_ACCEPTANCE=PASS
+PR_194=MERGE_CLOSEOUT
+WP2=NOT_STARTED
+WP3=NOT_STARTED
+WP4=NOT_STARTED
+```

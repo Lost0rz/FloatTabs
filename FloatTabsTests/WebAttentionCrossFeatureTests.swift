@@ -225,10 +225,12 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     private var retainedControllers: [PanelController] = []
     private var retainedContainers: [WebPanelContainerView] = []
     private var repositoryURLs: [URL] = []
+    private var controllersByPool: [ObjectIdentifier: PanelController] = [:]
 
     override func tearDown() {
         retainedControllers.removeAll()
         retainedContainers.removeAll()
+        controllersByPool.removeAll()
         repositoryURLs.forEach { try? FileManager.default.removeItem(at: $0) }
         repositoryURLs.removeAll()
         super.tearDown()
@@ -859,7 +861,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             registry: WebSiteAdapterRegistry(adapters: [adapter]),
             diagnostics: diagnostics
         )
-        let (controller, _, _, _) = makeController(
+        let (controller, _, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
             webFocusRouter: focusRouter,
             diagnostics: diagnostics,
@@ -870,6 +872,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
                 (applicationActive: true, windowKey: false)
             }
         )
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
 
         let result = await controller.prepareInputFocusForExternalVoice()
         XCTAssertEqual(result, .ready)
@@ -908,12 +911,13 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             registry: WebSiteAdapterRegistry(adapters: [adapter]),
             diagnostics: diagnostics
         )
-        let (controller, _, _, _) = makeController(
+        let (controller, _, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
             webFocusRouter: focusRouter,
             diagnostics: diagnostics,
             presentationFocusReadinessProvider: { (applicationActive: true, windowKey: true) }
         )
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
 
         let result = await controller.prepareInputFocusForExternalVoice()
         XCTAssertEqual(result, .ready)
@@ -959,6 +963,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let profile = try XCTUnwrap(store.activeProfile)
         _ = try pool.webView(for: profile)
         let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        controller.handleSlotNavigationFinish(slotID: profile.id, runtimeIdentity: identity)
         let runtimeFields = pool.diagnosticSnapshotFields(for: profile.id)
         let trace = RuntimeDiagnosticTrace(root: "presentation-focus-failure-identity")
 
@@ -1058,7 +1063,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             registry: WebSiteAdapterRegistry(adapters: [adapter]),
             diagnostics: diagnostics
         )
-        let (controller, _, _, _) = makeController(
+        let (controller, _, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
             webFocusRouter: focusRouter,
             diagnostics: diagnostics,
@@ -1068,6 +1073,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
                 (applicationActive: true, windowKey: false)
             }
         )
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
 
         let result = await controller.prepareInputFocusForExternalVoice(trace: trace)
         XCTAssertEqual(result, .ready)
@@ -1099,7 +1105,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             registry: WebSiteAdapterRegistry(adapters: [adapter]),
             diagnostics: diagnostics
         )
-        let (controller, _, store, _) = makeController(
+        let (controller, _, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
                 spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
@@ -1107,6 +1113,13 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             webFocusRouter: focusRouter,
             diagnostics: diagnostics,
             presentationFocusReadinessProvider: { (applicationActive: true, windowKey: true) }
+        )
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let replacement = try XCTUnwrap(store.profiles.first { $0.name == "ChatB" })
+        _ = try pool.webView(for: replacement)
+        controller.handleSlotNavigationFinish(
+            slotID: replacement.id,
+            runtimeIdentity: try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: replacement.id))
         )
         let voiceTrace = RuntimeDiagnosticTrace(root: "voice-generation-A")
         let replacementTrace = RuntimeDiagnosticTrace(root: "presentation-generation-B")
@@ -1119,7 +1132,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         }
         XCTAssertTrue(voiceFocusStarted)
 
-        let replacement = try XCTUnwrap(store.profiles.first { $0.name == "ChatB" })
         XCTAssertTrue(store.select(id: replacement.id))
         controller.showFloatTabs(trace: replacementTrace)
         adapter.completeSuspendedVoiceFocus()
@@ -1154,12 +1166,13 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             registry: WebSiteAdapterRegistry(adapters: [DiagnosticsPresentationFocusAdapter()]),
             diagnostics: diagnostics
         )
-        let (controller, _, _, _) = makeController(
+        let (controller, _, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
             webFocusRouter: focusRouter,
             diagnostics: diagnostics,
             presentationFocusReadinessProvider: { (applicationActive: true, windowKey: true) }
         )
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         let presentationTrace = RuntimeDiagnosticTrace(root: "presentation-A")
         let dismissTrace = RuntimeDiagnosticTrace(root: "dismiss-B")
 
@@ -1633,6 +1646,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             diagnostics: diagnostics
         )
         let slot = try profile(named: "ChatA", in: store)
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         var completionCallbackCount = 0
         controller.onChatGPTGenerationCompleted = { _ in
             completionCallbackCount += 1
@@ -4139,6 +4153,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             store.profiles.first(where: { $0.id == hiddenSlotID })
         )
         let hiddenWebView = try pool.webView(for: hiddenProfile)
+        controller.handleSlotNavigationFinish(
+            slotID: hiddenProfile.id,
+            runtimeIdentity: try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: hiddenProfile.id))
+        )
         let hiddenBridge = try attentionBridge(pool: pool, slot: hiddenProfile)
         completeGeneration(
             bridge: hiddenBridge,
@@ -5397,6 +5415,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             presentationFocusReadinessProvider: presentationFocusReadinessProvider
         )
         retainedControllers.append(controller)
+        controllersByPool[ObjectIdentifier(pool)] = controller
         return (controller, attentionCoordinator, tabStore, pool)
     }
 
@@ -5528,7 +5547,17 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     ) throws -> WKWebView {
         try select(named: slotName, in: store)
         let slot = try profile(named: slotName, in: store)
-        return try XCTUnwrap(pool.existingWebView(for: slot.id))
+        if controllersByPool[ObjectIdentifier(pool)]?.debugIsShowingRestoringState == true {
+            let attached = expectation(description: "resident Runtime attached beneath restoring state")
+            DispatchQueue.main.async { attached.fulfill() }
+            wait(for: [attached], timeout: 5)
+        }
+        let webView = try XCTUnwrap(pool.existingWebView(for: slot.id))
+        pool.onSlotNavigationFinish?(
+            slot.id,
+            try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slot.id))
+        )
+        return webView
     }
 
     /// Materializes a background Slot's real pooled runtime and bridge via
@@ -5542,6 +5571,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let slot = try profile(named: slotName, in: store)
         let webView = try pool.webView(for: slot)
         XCTAssertTrue(pool.contains(slotID: slot.id))
+        pool.onSlotNavigationFinish?(
+            slot.id,
+            try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slot.id))
+        )
         return (slot, webView)
     }
 
@@ -6253,10 +6286,293 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.10 Phase 3 notification exact-Slot routing
 
-    /// Gate C1: the notification route selects the exact persistent Slot
-    /// BEFORE presenting FloatTabs, so the prior active Slot's runtime is not
-    /// re-materialized by the presentation path.
-    func testNotificationRouteSelectsExactSlotBeforePresentingIt() throws {
+    /// The notification route selects the exact persistent Slot without
+    /// allowing TabStore's intermediate change callback to eagerly create its
+    /// Runtime. Cold materialization starts only after the shared restoring
+    /// surface is visible.
+    func testNotificationRouteUsesCanonicalColdPresentationGate() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let suite = "FloatTabsColdNotificationUnread-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let unreadCoordinator = ChatGPTUnreadResponseCoordinator(
+            store: UnreadResponseStore(defaults: defaults)
+        )
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
+            ],
+            unreadResponseCoordinator: unreadCoordinator,
+            diagnostics: diagnostics
+        )
+        let slotA = try profile(named: "ChatA", in: store)
+        let slotB = try profile(named: "ChatB", in: store)
+        unreadCoordinator.markUnread(slotID: slotB.id)
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        XCTAssertEqual(store.activeTabID, slotA.id)
+        // ChatA's runtime is reclaimed first: if presentation ran before the
+        // exact-Slot selection, synchronizing the still-active ChatA would
+        // re-materialize its runtime.
+        pool.hibernate(slotID: slotA.id)
+        XCTAssertNil(pool.existingWebView(for: slotA.id))
+        pool.hibernate(slotID: slotB.id)
+        XCTAssertNil(pool.existingWebView(for: slotB.id))
+
+        let routed = controller.presentSlotFromCompletionNotification(slotB.id)
+
+        XCTAssertTrue(routed)
+        XCTAssertEqual(store.activeTabID, slotB.id)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertNil(
+            pool.existingWebView(for: slotB.id),
+            "Notification selection must not eagerly create a Runtime before the cold gate"
+        )
+        XCTAssertNil(
+            pool.existingWebView(for: slotA.id),
+            "Presentation must not re-materialize the previously active Slot"
+        )
+
+        let visibilityRecorded = try await waitUntil(timeoutMilliseconds: 1000) {
+            writer.events.contains {
+                $0.event == "panel.restoring_surface.window_visible"
+                    && $0.fields["slot_id"] == .string(slotB.id.uuidString)
+            }
+        }
+        XCTAssertTrue(visibilityRecorded)
+        let visibleRestore = try XCTUnwrap(
+            writer.events.first {
+                $0.event == "panel.restoring_surface.window_visible"
+                    && $0.fields["slot_id"] == .string(slotB.id.uuidString)
+            }
+        )
+        XCTAssertEqual(visibleRestore.fields["surface_window_visible"], .bool(true))
+
+        let created = try await waitUntil(timeoutMilliseconds: 1000) {
+            pool.existingWebView(for: slotB.id) != nil
+        }
+        XCTAssertTrue(created)
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(
+            controller.unreadResponseSlotIDs.contains(slotB.id),
+            "Cold notification selection must retain unread until exact readiness"
+        )
+        let createBegin = try XCTUnwrap(
+            writer.events.last {
+                $0.event == "web_runtime.create.begin"
+                    && $0.fields["slot_id"] == .string(slotB.id.uuidString)
+            }
+        )
+        XCTAssertLessThan(visibleRestore.sequence, createBegin.sequence)
+
+        let attachedWebView = try XCTUnwrap(pool.existingWebView(for: slotB.id))
+        XCTAssertTrue(controller.presentSlotFromCompletionNotification(slotB.id))
+        XCTAssertTrue(
+            controller.debugIsShowingRestoringState,
+            "A duplicate exact-Slot route must retain restoring ownership while its Runtime is unready"
+        )
+        XCTAssertTrue(controller.debugPresentedWebView === attachedWebView)
+        XCTAssertEqual(
+            writer.events.filter {
+                $0.event == "panel.materialization.deferred"
+                    && $0.fields["slot_id"] == .string(slotB.id.uuidString)
+            }.count,
+            1,
+            "The existing pending generation must be reused for the same Slot"
+        )
+        controller.debugSetPresentationFactOverride(
+            slotID: slotB.id,
+            presentationFact: true
+        )
+        defer { controller.debugClearPresentationFactOverride(slotID: slotB.id) }
+        controller.handleSlotNavigationFinish(
+            slotID: slotB.id,
+            runtimeIdentity: try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotB.id))
+        )
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertFalse(
+            controller.unreadResponseSlotIDs.contains(slotB.id),
+            "Exact-current readiness must complete the eligible pending notification acknowledgement"
+        )
+    }
+
+    func testColdExplicitUnreadSelectionAcknowledgesOnlyAfterExactReadiness() async throws {
+        let suite = "FloatTabsColdExplicitUnread-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let unreadCoordinator = ChatGPTUnreadResponseCoordinator(
+            store: UnreadResponseStore(defaults: defaults)
+        )
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
+            ],
+            unreadResponseCoordinator: unreadCoordinator
+        )
+        let slotA = try profile(named: "ChatA", in: store)
+        let slotB = try profile(named: "ChatB", in: store)
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        XCTAssertEqual(store.activeTabID, slotA.id)
+        pool.hibernate(slotID: slotB.id)
+        XCTAssertNil(pool.existingWebView(for: slotB.id))
+        unreadCoordinator.markUnread(slotID: slotB.id)
+        controller.showFloatTabs()
+
+        XCTAssertTrue(controller.debugInvokeRailSelection(slotID: slotB.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
+        let restored = try await waitUntil(timeoutMilliseconds: 1000) {
+            pool.existingWebView(for: slotB.id) != nil
+        }
+        XCTAssertTrue(restored)
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
+
+        controller.debugSetPresentationFactOverride(
+            slotID: slotB.id,
+            presentationFact: true
+        )
+        defer { controller.debugClearPresentationFactOverride(slotID: slotB.id) }
+        controller.handleSlotNavigationFinish(
+            slotID: slotB.id,
+            runtimeIdentity: try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotB.id))
+        )
+
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slotB.id))
+    }
+
+    func testColdUnreadIntentIsInvalidatedByTargetReplacement() async throws {
+        let suite = "FloatTabsColdUnreadReplacement-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let unreadCoordinator = ChatGPTUnreadResponseCoordinator(
+            store: UnreadResponseStore(defaults: defaults)
+        )
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b"),
+                spec(name: "ChatC", url: "https://chatgpt.com/chat-c")
+            ],
+            unreadResponseCoordinator: unreadCoordinator
+        )
+        let slotA = try profile(named: "ChatA", in: store)
+        let slotB = try profile(named: "ChatB", in: store)
+        let slotC = try profile(named: "ChatC", in: store)
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        XCTAssertEqual(store.activeTabID, slotA.id)
+        pool.hibernate(slotID: slotB.id)
+        pool.hibernate(slotID: slotC.id)
+        XCTAssertNil(pool.existingWebView(for: slotB.id))
+        XCTAssertNil(pool.existingWebView(for: slotC.id))
+        unreadCoordinator.markUnread(slotID: slotB.id)
+        unreadCoordinator.markUnread(slotID: slotC.id)
+        controller.showFloatTabs()
+
+        XCTAssertTrue(controller.debugInvokeRailSelection(slotID: slotB.id))
+        let restoredB = try await waitUntil(timeoutMilliseconds: 1000) {
+            pool.existingWebView(for: slotB.id) != nil
+        }
+        XCTAssertTrue(restoredB)
+        let identityB = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotB.id))
+
+        XCTAssertTrue(controller.debugInvokeRailSelection(slotID: slotC.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        let restoredC = try await waitUntil(timeoutMilliseconds: 1000) {
+            pool.existingWebView(for: slotC.id) != nil
+        }
+        XCTAssertTrue(restoredC)
+        let identityC = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotC.id))
+
+        // A's successor B can finish late, but its replaced intent cannot
+        // acknowledge either the now-inactive B Slot or current C Slot.
+        controller.handleSlotNavigationFinish(
+            slotID: slotB.id,
+            runtimeIdentity: identityB
+        )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotC.id))
+
+        controller.debugSetPresentationFactOverride(
+            slotID: slotC.id,
+            presentationFact: true
+        )
+        defer { controller.debugClearPresentationFactOverride(slotID: slotC.id) }
+        controller.handleSlotNavigationFinish(
+            slotID: slotC.id,
+            runtimeIdentity: identityC
+        )
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slotC.id))
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
+    }
+
+    func testLoadingRuntimeReturnsThroughFreshRestoringGenerationWithoutDuplication() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
+            ],
+            diagnostics: diagnostics
+        )
+        let slotA = try profile(named: "ChatA", in: store)
+        let slotB = try profile(named: "ChatB", in: store)
+        XCTAssertTrue(store.select(id: slotA.id))
+        pool.hibernate(slotID: slotA.id)
+
+        controller.showFloatTabs()
+        let materializedA = try await waitUntil(timeoutMilliseconds: 1000) {
+            pool.existingWebView(for: slotA.id) != nil
+        }
+        XCTAssertTrue(materializedA)
+        let webViewA = try XCTUnwrap(pool.existingWebView(for: slotA.id))
+        let identityA = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotA.id))
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: slotA.id), "loading")
+        let createdCountBeforeReturn = writer.events.filter {
+            $0.event == "web_runtime.created"
+                && $0.fields["slot_id"] == .string(slotA.id.uuidString)
+        }.count
+
+        XCTAssertTrue(store.select(id: slotB.id))
+        XCTAssertTrue(store.select(id: slotA.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: slotA.id), "loading")
+
+        let reattachedA = try await waitUntil(timeoutMilliseconds: 1000) {
+            writer.events.filter {
+                $0.event == "panel.materialization.attached"
+                    && $0.fields["slot_id"] == .string(slotA.id.uuidString)
+            }.count >= 2
+        }
+        XCTAssertTrue(reattachedA)
+        XCTAssertTrue(pool.existingWebView(for: slotA.id) === webViewA)
+        XCTAssertTrue(controller.debugPresentedWebView === webViewA)
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+        XCTAssertEqual(
+            writer.events.filter {
+                $0.event == "web_runtime.created"
+                    && $0.fields["slot_id"] == .string(slotA.id.uuidString)
+            }.count,
+            createdCountBeforeReturn,
+            "Returning to the exact loading Runtime must not create a duplicate"
+        )
+
+        controller.handleSlotNavigationFinish(slotID: slotA.id, runtimeIdentity: identityA)
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: slotA.id), "ready")
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === webViewA)
+        XCTAssertTrue(controller.debugCurrentWebFocusWebView === webViewA)
+    }
+
+    func testBackgroundFinishUpdatesExactReadinessWithoutChangingSelectedPresentation() async throws {
         let (controller, _, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
@@ -6265,23 +6581,99 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
         let slotA = try profile(named: "ChatA", in: store)
         let slotB = try profile(named: "ChatB", in: store)
-        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
-        XCTAssertEqual(store.activeTabID, slotA.id)
-        // ChatA's runtime is reclaimed first: if presentation ran before the
-        // exact-Slot selection, synchronizing the still-active ChatA would
-        // re-materialize its runtime.
-        pool.hibernate(slotID: slotA.id)
-        XCTAssertNil(pool.existingWebView(for: slotA.id))
+        XCTAssertTrue(store.select(id: slotA.id))
+        let webViewA = try XCTUnwrap(pool.existingWebView(for: slotA.id))
+        let identityA = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotA.id))
 
-        let routed = controller.presentSlotFromCompletionNotification(slotB.id)
+        controller.showFloatTabs()
+        XCTAssertTrue(store.select(id: slotB.id))
+        let materializedB = try await waitUntil(timeoutMilliseconds: 1000) {
+            guard let webView = pool.existingWebView(for: slotB.id) else { return false }
+            return controller.debugPresentedWebView === webView
+        }
+        XCTAssertTrue(materializedB)
+        let webViewB = try XCTUnwrap(pool.existingWebView(for: slotB.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === webViewB)
 
-        XCTAssertTrue(routed)
+        controller.handleSlotNavigationFinish(slotID: slotA.id, runtimeIdentity: identityA)
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: slotA.id), "ready")
         XCTAssertEqual(store.activeTabID, slotB.id)
-        XCTAssertNotNil(pool.existingWebView(for: slotB.id))
-        XCTAssertNil(
-            pool.existingWebView(for: slotA.id),
-            "Presentation must not re-materialize the previously active Slot"
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === webViewB)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+
+        XCTAssertTrue(store.select(id: slotA.id))
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === webViewA)
+        XCTAssertTrue(controller.debugCurrentWebFocusWebView === webViewA)
+    }
+
+    func testOldRuntimeFinishCannotTransferReadinessToReplacement() async throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
+        let slotA = try profile(named: "ChatA", in: store)
+        XCTAssertTrue(store.select(id: slotA.id))
+        let oldIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotA.id))
+        pool.release(slotID: slotA.id)
+        let replacement = try pool.webView(for: slotA)
+        let replacementIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotA.id))
+        XCTAssertNotEqual(oldIdentity, replacementIdentity)
+
+        controller.showFloatTabs()
+        let attached = try await waitUntil(timeoutMilliseconds: 1000) {
+            controller.debugPresentedWebView === replacement
+        }
+        XCTAssertTrue(attached)
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: slotA.id), "unknown")
+
+        controller.handleSlotNavigationFinish(slotID: slotA.id, runtimeIdentity: oldIdentity)
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: slotA.id), "unknown")
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+
+        controller.handleSlotNavigationFinish(
+            slotID: slotA.id,
+            runtimeIdentity: replacementIdentity
+        )
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: slotA.id), "ready")
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugCurrentWebFocusWebView === replacement)
+    }
+
+    func testFailedResidentRuntimeReentryStaysNativeAndUnfocused() async throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
+            ]
+        )
+        let slotA = try profile(named: "ChatA", in: store)
+        let slotB = try profile(named: "ChatB", in: store)
+        XCTAssertTrue(store.select(id: slotA.id))
+        controller.showFloatTabs()
+        let attachedA = try await waitUntil(timeoutMilliseconds: 1000) {
+            controller.debugPresentedWebView === pool.existingWebView(for: slotA.id)
+        }
+        XCTAssertTrue(attachedA)
+        let webViewA = try XCTUnwrap(pool.existingWebView(for: slotA.id))
+        let identityA = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotA.id))
+
+        controller.handleSlotNavigationFailure(slotID: slotA.id, runtimeIdentity: identityA)
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: slotA.id), "failed")
+        XCTAssertNil(controller.debugPresentedWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+
+        XCTAssertTrue(store.select(id: slotB.id))
+        XCTAssertTrue(store.select(id: slotA.id))
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: slotA.id), "failed")
+        XCTAssertNil(controller.debugPresentedWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(pool.existingWebView(for: slotA.id) === webViewA)
     }
 
     /// Gate C2: a stale/deleted target routes unavailable with no fallback
@@ -6378,7 +6770,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     /// lifecycle ownership into exactly one runtime, routing depends only on
     /// the persistent Slot UUID, and Slot/Browser Profile configuration is
     /// unchanged.
-    func testNonResidentNotificationTargetRestoresThroughExistingLifecyclePath() throws {
+    func testNonResidentNotificationTargetRestoresThroughExistingLifecyclePath() async throws {
         let (controller, _, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
@@ -6414,10 +6806,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertTrue(routed)
         XCTAssertEqual(store.activeTabID, slotB.id)
-        XCTAssertNotNil(
-            pool.existingWebView(for: slotB.id),
+        XCTAssertNil(pool.existingWebView(for: slotB.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        let restored = try await waitUntil(timeoutMilliseconds: 1000) {
+            pool.existingWebView(for: slotB.id) != nil
+        }
+        XCTAssertTrue(
+            restored,
             "The existing lifecycle path must restore the non-resident target runtime"
         )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
         XCTAssertEqual(store.profiles.map(\.id), profilesBefore)
         XCTAssertEqual(store.browserProfiles, browserProfilesBefore)
     }

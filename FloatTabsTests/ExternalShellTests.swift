@@ -2173,7 +2173,8 @@ final class ExternalShellTests: XCTestCase {
     // MARK: Phase 6 restoring presentation
 
     private func makePhase6Harness(
-        slotName: String
+        slotName: String,
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
     ) throws -> (store: TabStore, pool: WebViewPool, controller: PanelController, profile: WebAppProfile) {
         let store = TabStore(repository: MemoryProfileRepository())
         let profile = try XCTUnwrap(
@@ -2181,14 +2182,16 @@ final class ExternalShellTests: XCTestCase {
         )
         let pool = WebViewPool(
             onURLChange: { _, _ in },
-            initialLoad: { _, _ in }
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
         )
         let controller = PanelController(
             tabStore: store,
             webViewPool: pool,
             attentionCoordinator: WebAttentionCoordinator(),
             frameStore: PanelFrameStore(),
-            preferencesStore: AppPreferencesStore()
+            preferencesStore: AppPreferencesStore(),
+            diagnostics: diagnostics
         )
         return (store, pool, controller, profile)
     }
@@ -2317,6 +2320,10 @@ final class ExternalShellTests: XCTestCase {
 
     func testResidentSlotPresentationStaysDirectWithoutRestoringState() throws {
         let (_, pool, controller, profile) = try makePhase6Harness(slotName: "Resident")
+        controller.handleSlotNavigationFinish(
+            slotID: profile.id,
+            runtimeIdentity: try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        )
 
         controller.showFloatTabs()
         drainMainThreadTurns()
@@ -2365,6 +2372,68 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(controller.debugIsShowingRestoringState)
     }
 
+    func testColdMaterializationTimingDiagnosticsAreIdentityBoundedAndContentFree() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (_, pool, controller, profile) = try makePhase6Harness(
+            slotName: "RestoreTiming",
+            diagnostics: diagnostics
+        )
+        pool.hibernate(slotID: profile.id)
+
+        controller.showFloatTabs()
+        drainMainThreadTurns()
+
+        let restoringSurface = try XCTUnwrap(
+            writer.events.first { $0.event == "panel.restoring_surface.window_visible" }
+        )
+        XCTAssertEqual(restoringSurface.fields["slot_id"], .string(profile.id.uuidString))
+        XCTAssertEqual(restoringSurface.fields["materialization_generation"], .integer(1))
+        XCTAssertEqual(restoringSurface.fields["surface_window_visible"], .bool(true))
+
+        let createBegin = try XCTUnwrap(
+            writer.events.last {
+                $0.event == "web_runtime.create.begin"
+                    && $0.fields["slot_id"] == .string(profile.id.uuidString)
+            }
+        )
+        XCTAssertLessThan(
+            restoringSurface.sequence,
+            createBegin.sequence,
+            "The existing native restoring surface must be visible before Runtime creation"
+        )
+
+        let webView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        webView.navigationDelegate = nil
+        let navigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>ready</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didFinish: navigation)
+
+        let reveal = try XCTUnwrap(
+            writer.events.first {
+                $0.event == "panel.materialization.web_content_reveal_requested"
+            }
+        )
+        XCTAssertEqual(reveal.fields["slot_id"], .string(profile.id.uuidString))
+        XCTAssertEqual(reveal.fields["materialization_generation"], .integer(1))
+        XCTAssertEqual(
+            reveal.fields["runtime_generation"],
+            .integer(Int64(identity.runtimeGeneration))
+        )
+        XCTAssertEqual(
+            reveal.fields["webview_instance_id"],
+            .string(identity.webViewInstanceID.uuidString)
+        )
+        XCTAssertLessThan(restoringSurface.sequence, reveal.sequence)
+        XCTAssertNil(reveal.fields["url"])
+        XCTAssertNil(reveal.fields["content"])
+        XCTAssertNil(reveal.fields["page_text"])
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+    }
+
     func testStaleOrForeignRuntimeFinishDoesNotDismissRestoringState() throws {
         let (_, pool, controller, profile) = try makePhase6Harness(slotName: "StaleFinish")
         pool.hibernate(slotID: profile.id)
@@ -2400,7 +2469,7 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(controller.debugIsShowingRestoringState)
     }
 
-    func testNavigationFailureRemovesRestoringStateWithoutManufacturingSuccess() throws {
+    func testNavigationFailureShowsNativeEmptyStateWithoutExposingOrFocusingFailedRuntime() throws {
         let (_, pool, controller, profile) = try makePhase6Harness(slotName: "FailBounded")
         pool.hibernate(slotID: profile.id)
         controller.showFloatTabs()
@@ -2419,11 +2488,78 @@ final class ExternalShellTests: XCTestCase {
             withError: NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)
         )
 
-        // Bounded terminal handling: the restoring surface cannot persist
-        // forever after a failed navigation, and the failed Runtime stays
-        // attached underneath for WebKit's own error presentation.
+        // A failed cold Runtime resolves to the existing native empty surface;
+        // its WebView remains pooled but never becomes current or focusable.
         XCTAssertFalse(controller.debugIsShowingRestoringState)
-        XCTAssertTrue(controller.debugPresentedWebView === webView)
+        XCTAssertNil(controller.debugPresentedWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+        XCTAssertTrue(pool.existingWebView(for: profile.id) === webView)
+
+        // A later synchronization of the same selected Slot must preserve the
+        // bounded native failure presentation instead of taking the resident
+        // fast path for the failed Runtime.
+        XCTAssertTrue(controller.debugInvokeRailSelection(slotID: profile.id))
+        XCTAssertNil(controller.debugPresentedWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+    }
+
+    func testStaleOrForeignNavigationFailureCannotReplaceCurrentRestoringTarget() throws {
+        let (store, pool, controller, firstProfile) = try makePhase6Harness(
+            slotName: "FailureStaleA"
+        )
+        pool.hibernate(slotID: firstProfile.id)
+        controller.showFloatTabs()
+        drainMainThreadTurns()
+
+        let firstWebView = try XCTUnwrap(pool.existingWebView(for: firstProfile.id))
+        let firstIdentity = try XCTUnwrap(
+            pool.runtimeDiagnosticIdentity(for: firstProfile.id)
+        )
+        let secondProfile = try XCTUnwrap(
+            store.add(
+                name: "FailureStaleB",
+                homeURL: URL(string: "https://failure-stale-b.example.com")!
+            )
+        )
+        drainMainThreadTurns()
+
+        let secondWebView = try XCTUnwrap(pool.existingWebView(for: secondProfile.id))
+        let secondIdentity = try XCTUnwrap(
+            pool.runtimeDiagnosticIdentity(for: secondProfile.id)
+        )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === secondWebView)
+
+        // The prior Slot's exact Runtime failure is stale after replacement.
+        controller.handleSlotNavigationFailure(
+            slotID: firstProfile.id,
+            runtimeIdentity: firstIdentity
+        )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === secondWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+
+        // A foreign identity for the current Slot is also ignored.
+        controller.handleSlotNavigationFailure(
+            slotID: secondProfile.id,
+            runtimeIdentity: WebRuntimeDiagnosticIdentity(
+                runtimeGeneration: secondIdentity.runtimeGeneration &+ 1,
+                webViewInstanceID: UUID()
+            )
+        )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === secondWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+
+        controller.handleSlotNavigationFinish(
+            slotID: secondProfile.id,
+            runtimeIdentity: secondIdentity
+        )
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === secondWebView)
+        XCTAssertTrue(controller.debugCurrentWebFocusWebView === secondWebView)
+        XCTAssertTrue(pool.existingWebView(for: firstProfile.id) === firstWebView)
     }
 
     func testRapidSlotChangeInvalidatesPendingMaterializationBeforeAttach() throws {
@@ -2455,6 +2591,66 @@ final class ExternalShellTests: XCTestCase {
             runtimeIdentity: try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: secondProfile.id))
         )
         XCTAssertFalse(controller.debugIsShowingRestoringState)
+    }
+
+    func testExplicitNonresidentSelectionUsesVisibleRestoringGate() throws {
+        let store = TabStore(repository: MemoryProfileRepository())
+        let firstProfile = try XCTUnwrap(
+            store.add(
+                name: "ExplicitResident",
+                homeURL: URL(string: "https://explicit-resident.example.com")!
+            )
+        )
+        let secondProfile = try XCTUnwrap(
+            store.add(
+                name: "ExplicitCold",
+                homeURL: URL(string: "https://explicit-cold.example.com")!
+            )
+        )
+        XCTAssertTrue(store.select(id: firstProfile.id))
+
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
+        )
+        let controller = PanelController(
+            tabStore: store,
+            webViewPool: pool,
+            frameStore: PanelFrameStore(),
+            preferencesStore: AppPreferencesStore(),
+            diagnostics: diagnostics
+        )
+
+        controller.showFloatTabs()
+        drainMainThreadTurns()
+        XCTAssertNotNil(pool.existingWebView(for: firstProfile.id))
+        XCTAssertNil(pool.existingWebView(for: secondProfile.id))
+
+        XCTAssertTrue(store.select(id: secondProfile.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertNil(pool.existingWebView(for: secondProfile.id))
+
+        drainMainThreadTurns()
+        XCTAssertNotNil(pool.existingWebView(for: secondProfile.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        let visibleRestore = try XCTUnwrap(
+            writer.events.first {
+                $0.event == "panel.restoring_surface.window_visible"
+                    && $0.fields["slot_id"] == .string(secondProfile.id.uuidString)
+            }
+        )
+        let createBegin = try XCTUnwrap(
+            writer.events.last {
+                $0.event == "web_runtime.create.begin"
+                    && $0.fields["slot_id"] == .string(secondProfile.id.uuidString)
+            }
+        )
+        XCTAssertEqual(visibleRestore.fields["surface_window_visible"], .bool(true))
+        XCTAssertLessThan(visibleRestore.sequence, createBegin.sequence)
     }
 
     func testDismissalDuringPendingRestoreInvalidatesMaterialization() throws {
