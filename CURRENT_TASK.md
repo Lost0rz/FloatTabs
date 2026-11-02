@@ -2,7 +2,7 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001-PHASE8-DESIGN`  
 **Title:** Adaptive Runtime Memory Budget + Background Efficiency — design freeze  
-**Status:** `ACTIVE / DESIGN FREEZE / NO PRODUCT MUTATION`  
+**Status:** `COMPLETE / DESIGN FROZEN / WAITING FOR IMPLEMENTATION AUTHORIZATION`  
 **Mode:** `ARCHITECTURE / POLICY DESIGN / DOCUMENT ALIGNMENT`  
 **Task class:** `WEB RUNTIME / LIFECYCLE / MEMORY / PERFORMANCE`  
 **Baseline:** `main@2b414982710b3f042fc7d6e9c88eb2d7117b4e38`
@@ -19,148 +19,182 @@ The user explicitly authorized a redesign of FloatTabs performance/lifecycle pol
 6. reassess background-generation thrift and other Chrome/open-source lifecycle mechanisms that Phase 7 does not yet implement;
 7. freeze the new plan and update documentation before any production-code construction.
 
-This task authorizes **design/control/document changes only**. No `FloatTabs/**` production mutation is authorized until the new frozen contract and phase implementation gate are accepted.
+That design work is now complete. This task does **not** authorize `FloatTabs/**` production construction. A new bounded implementation authorization is required before Phase 8 WP0/WP1 mutation begins.
 
-## Current baseline truth
+## Frozen authority
 
-Phase 7 is merged at `main@2b414982710b3f042fc7d6e9c88eb2d7117b4e38`.
+Program contract:
 
-The current production policy still contains:
+`docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`
+
+Phase 8 implementation contract:
+
+`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md`
+
+Historical Phase 7/V5 snapshot:
+
+`docs/architecture/archive/FloatTabs_Runtime_Lifecycle_Phase7_Closeout_Snapshot_2026-11-02.md`
+
+Navigation/status:
+
+- `docs/README.md`
+- `docs/architecture/README.md`
+- `docs/architecture/DOMAIN_MAP.md`
+
+## Current shipped vs target boundary
+
+Current shipped `main@2b414982...` still implements Phase 7 fixed-count tuning until Phase 8 lands:
 
 ```text
 normal Automatic target = 2
-Automatic grace = 30s
+inactive release path = 30s
 warning target = 1
 critical target = 0
 ```
 
-Fresh source review confirms `RuntimeBudgetPolicy.defaultManagedResidentTarget = 2`, so opening a third eligible Automatic Runtime can cause immediate LRU reclaim even when memory is healthy. This behavior is now treated as a policy limitation to be superseded by Phase 8, not as the target design.
-
-Phase 7 foundations remain valid and must be preserved:
-
-- persistent Slot/Profile/session separated from disposable Runtime;
-- `SlotLifecycleCoordinator` is the sole lifecycle writer;
-- `WebViewPool` owns materialize/hibernate/restore;
-- `interactionState`-based restore support;
-- Attention `Generating` protects Runtime while `Ready`/unread does not;
-- completion notification/unread survives Runtime reclaim;
-- Browser Profile/login/cookie/session data is never ordinary reclaim data;
-- Keep Loaded is a preference, not launch-time preload.
-
-## Design scope
-
-The design freeze must define:
-
-### A. Memory-budget model
-
-- `Auto` memory budget (recommended);
-- user `Custom` memory budget in bytes/GiB;
-- optional `Unlimited` normal-budget mode while still respecting system memory pressure;
-- high/low watermark hysteresis;
-- aggregate owned-process footprint estimation without claiming exact per-Slot WebContent attribution;
-- clear fallback behavior when aggregate attribution is temporarily unavailable.
-
-### B. Progressive reclaim
-
-Normal operation must not reclaim merely because resident Runtime count exceeds a fixed number.
-
-When the memory budget or system pressure requires reclaim:
+Frozen Phase 8 target:
 
 ```text
-choose safest eligible candidate
-→ hibernate/release one Runtime
-→ re-measure / re-evaluate
-→ stop when pressure is relieved
-→ otherwise continue one at a time
+Memory Budget = Auto | Custom | Unlimited
+no normal fixed Runtime-count ceiling
+high watermark = 105%
+low watermark = 90%
+progressive one-at-a-time reclaim
+fresh resource remeasurement after each reclaim
+system memory pressure = independent ladder
+proactive long-idle cleanup = OFF by default
 ```
 
-Candidate ordering must prioritize protection/safety first, then inactivity/recency and restore cost. Fixed Runtime count may remain only as a deterministic test seam or emergency safety guard if separately justified; it must not be the user-facing normal policy.
+Initial Auto reference formula:
 
-### C. Background-generation efficiency
+```text
+clamp(physical RAM × 20%, 1.5 GiB, 6 GiB)
+```
 
-Preserve generating continuity. Audit and optimize only work that can safely be reduced while the Runtime must remain alive, including observation/probe cadence and other host-side work. Do not claim that WKWebView memory itself can be deeply frozen while generation continues unless supported by public WebKit APIs and fresh evidence.
+This formula is frozen as the first implementation assumption, not claimed as measured optimum. WP6 must validate/tune through Real-Mac A/B evidence before program-final acceptance.
 
-### D. Lifecycle aggressiveness / idle policy
+## Protection contract
 
-Separate:
+Hard-protected Runtime:
 
-- memory-budget pressure;
-- system memory-pressure response;
-- proactive long-idle cleanup.
+- active / actually presented;
+- fullscreen source;
+- supplemental visible Web surface;
+- Attention Generating;
+- active/pending allowed-background-media protection;
+- current materialization/restoring ownership.
 
-Do not reuse the Phase 7 `30s` grace as an unconditional browser-wide long-idle discard rule. The new contract must define whether proactive idle cleanup is off by default, tied to Auto aggressiveness, or separately user-configurable.
+Keep Loaded:
 
-### E. Advanced settings
+- excluded from normal budget reclaim;
+- may make the soft budget temporarily unsatisfied;
+- warning still prefers Automatic reclaim;
+- critical may reclaim inactive/unprotected Keep Loaded after eligible Automatic Runtime.
 
-The intended user-facing location is `Advanced → Runtime & Memory` (or an equivalent bounded Advanced section after IA review), with memory budget as the primary control. The UI must not expose implementation-level resident-count knobs as the main product model.
+## Background-generation contract
 
-### F. Verification
+Generating remains hard-protected because arbitrary WKWebView JS/network work cannot be safely destroyed while generation must continue.
 
-The plan must define:
+Phase 8 may optimize:
 
-- deterministic policy/unit tests;
-- aggregate footprint measurement tests/harness;
-- Real-Mac budget crossing/reclaim/restore scenarios;
-- active/generating/media/fullscreen protections;
-- no-thrash hysteresis evidence;
-- session continuity;
-- old-vs-new A/B performance benchmark on identical Slot workload;
-- required self-hosted Apple Silicon CI before merge.
+- event-first sensing;
+- fallback watchdog cadence;
+- redundant hidden health/diagnostic probes;
+- response-identity work;
+- obsolete observer/task cancellation;
+- presentation-only hidden work.
 
-## Research inputs accepted for design
+It must not claim deep renderer-memory freeze without a supported public WebKit mechanism.
 
-Current external reference review may inform the plan but does not become repository authority by itself:
+After generation completes:
 
-- Chrome Memory Saver uses user-selectable aggressiveness and eligibility exceptions rather than a fixed count ceiling;
-- current Chromium Memory Saver combines inactivity timers with revisit heuristics and separate memory-pressure/discard machinery;
-- Kylmora uses lazy materialization, idle/memory-pressure sleep and per-tab Keep Awake;
-- Kestrel demonstrates WKWebView hibernate/restore using `interactionState` and memory-pressure-triggered sleep.
+```text
+Ready/unread + native notification survives
+→ generating protection ends
+→ normal budget lifecycle resumes
+```
 
-Any mechanism requiring private WebKit SPI, exact private renderer accounting, or unsafe process control must be rejected or separately gated.
+The implementation contract sets an initial bounded 15s post-completion normal-budget recall grace; warning/critical may bypass it.
 
-## Authorized paths for this design-freeze task
+## Resource-measurement Gate
 
-Primary:
+Phase 8 Gate 0 is mandatory before budget enforcement.
 
-- `CURRENT_STATUS.md`
-- `CURRENT_TASK.md`
-- `docs/README.md`
-- `docs/architecture/README.md`
-- `docs/architecture/DOMAIN_MAP.md`
-- new current architecture/performance contract(s)
-- new archive/status snapshot documents needed to preserve Phase 7/V5 history
+It must prove a production-safe aggregate measurement mechanism for:
 
-No production source/test/tooling mutation is authorized in this task unless needed only to read evidence; write scope remains documentation/control only.
+```text
+FloatTabs host + FloatTabs-attributable WebKit helpers
+```
 
-## Deliverables
+Rules:
 
-1. frozen V6 lifecycle/memory program contract;
-2. frozen Phase 8 implementation plan/contract with work packages and Gates;
-3. archived Phase 7/V5 closeout snapshot and routing so superseded policy cannot be mistaken for current target behavior;
-4. updated `CURRENT_STATUS.md`, `docs/README.md`, `docs/architecture/README.md`, and `DOMAIN_MAP.md`;
-5. final design receipt with exact branch/head and next implementation Gate.
+- aggregate only; no exact per-Slot WebContent RSS claim;
+- read-only resource monitor; no direct kill/reload/reclaim;
+- explicit measurement-unavailable state;
+- no substitution of Runtime count for GiB;
+- no private WebKit SPI.
+
+If Gate 0 cannot be proven, STOP and reconcile before WP2.
+
+## Frozen work packages
+
+```text
+WP0 measurement feasibility + exact source audit
+WP1 additive budget configuration + passive resource monitor
+WP2 budget scheduler + progressive normal reclaim
+WP3 system-pressure ladder + anti-thrash integration
+WP4 Advanced → Runtime & Memory UI + persistence/backup
+WP5 background-generation / observer efficiency corrective
+WP6 Real-Mac + Phase7-vs-Phase8 identical-workload A/B acceptance
+```
+
+## Frozen acceptance principles
+
+Phase 8 must prove at minimum:
+
+1. 3+ Automatic Runtimes can remain resident beyond the old 30s window while under budget;
+2. budget crossing reclaims one Runtime at a time;
+3. each reclaim is followed by fresh measurement;
+4. reclaim stops at/below low watermark or no-candidate boundary;
+5. active/generating/fullscreen/media/restoring protections hold;
+6. Keep Loaded behavior remains explicit/honest when it blocks convergence;
+7. repeated switching does not cause reclaim/restore thrash;
+8. reclaim/restore preserves Browser Profile login/session and exact Slot identity;
+9. hidden completion still yields unread/native notification and later budget eligibility;
+10. Phase 7 baseline vs Phase 8 candidate is compared under an identical workload for aggregate memory, helper count, CPU, hibernate/restore cycles, resident switch latency and restore latency;
+11. required self-hosted Apple Silicon CI passes on literal merge head;
+12. fresh ownership/exact-diff audit finds no second lifecycle writer/private WebKit workaround/destructive data coupling.
+
+## Historical/document disposition
+
+V5 and the Phase 7 implementation contract are preserved unchanged as delivered historical evidence. They no longer define the future target policy.
+
+The old Phase 7 acceptance criterion that expected convergence to a fixed resident count is historical and must not be reused as Phase 8 success criteria.
 
 ## STOP conditions
 
-STOP before production construction if the design would require:
+STOP before implementation if work would require:
 
 - deleting/resetting Browser Profile, cookies, session, website data, or user configuration;
 - a second canonical lifecycle writer;
-- private WebKit SPI as a required production dependency;
-- pretending exact per-Slot memory attribution is available when it is not;
-- killing a Runtime that is active, generating, fullscreen, protected background media, or in current materialization/restore ownership;
-- making reload/reset/restart an ordinary memory-management mechanism;
-- interpreting the user memory budget as a hard OS-enforced cap rather than a best-effort soft working-set target;
-- product/source mutation before this design-freeze task is closed and a bounded implementation task is authorized.
+- private WebKit SPI;
+- exact per-Slot memory attribution as required policy truth;
+- a disguised fixed resident-count budget;
+- normal reclaim of active/generating/fullscreen/protected-media/current-restoring Runtime;
+- arbitrary reload/reset/restart as memory management;
+- product mutation before a new implementation task is authorized.
 
 ## Current execution state
 
 ```text
 BASELINE_MAIN=2b414982710b3f042fc7d6e9c88eb2d7117b4e38
 PHASE7=MERGED
-PHASE8_DESIGN=ACTIVE
+V6=ACCEPTED_FROZEN
+PHASE8_CONTRACT=ACCEPTED_FROZEN
+DESIGN_DELIVERABLES=COMPLETE
 PRODUCT_MUTATION=NOT_AUTHORIZED
 TARGET_NORMAL_POLICY=MEMORY_BUDGET_DRIVEN
-FIXED_NORMAL_RESIDENT_COUNT=TO_BE_SUPERSEDED
-NEXT_GATE=FREEZE_V6_AND_PHASE8_CONTRACTS_THEN_CONTROL_ALIGNMENT
+FIXED_NORMAL_RESIDENT_COUNT=SUPERSEDED_TARGET
+NEXT_GATE=DESIGN_DOCS_MERGE_THEN_STOP
+NEXT_PRODUCT_WORK=REQUIRES_EXPLICIT_PHASE8_IMPLEMENTATION_AUTHORIZATION_STARTING_WITH_WP0
 ```
