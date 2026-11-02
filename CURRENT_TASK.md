@@ -1,56 +1,81 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
-**Title:** Runtime Lifecycle / Memory redesign — Phase 7 final closeout and merge boundary  
-**Status:** `ACTIVE / PHASE 7 FINAL CLOSEOUT / MERGE AUTHORIZED AFTER LITERAL-HEAD HOST GATE`  
-**Mode:** `EVIDENCE AUDIT / CONTROL ALIGNMENT / MERGE`  
-**Task class:** `WEB RUNTIME / LIFECYCLE / MEMORY`  
-**JSC root cause:** `UNKNOWN`
+**Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001-PHASE8-DESIGN`  
+**Title:** Adaptive Runtime Memory Budget + Background Efficiency — design freeze  
+**Status:** `COMPLETE / DESIGN FROZEN / WAITING FOR IMPLEMENTATION AUTHORIZATION`  
+**Mode:** `ARCHITECTURE / POLICY DESIGN / DOCUMENT ALIGNMENT`  
+**Task class:** `WEB RUNTIME / LIFECYCLE / MEMORY / PERFORMANCE`  
+**Baseline:** `main@2b414982710b3f042fc7d6e9c88eb2d7117b4e38`
 
 ## Authorization state
 
-The user authorized a fresh independent closeout audit and, if no blocking issue remains, merge of PR #188.
+The user explicitly authorized a redesign of FloatTabs performance/lifecycle policy after Phase 7 merge, with these goals:
 
-Phase 7 product implementation is frozen. No further `FloatTabs/**` runtime/lifecycle mutation is authorized unless new evidence proves a defect and this task is reconciled first.
+1. replace the fixed normal resident-count policy (`2`) with a memory-budget-driven policy;
+2. let the user configure an approximate FloatTabs/WebKit memory budget rather than a maximum number of open pages;
+3. reclaim inactive Runtime progressively only when budget/system pressure requires it;
+4. preserve active/generating/fullscreen/media/materializing hard protections;
+5. keep the Phase 1-7 hibernate/restore/session/notification foundations;
+6. reassess background-generation thrift and other Chrome/open-source lifecycle mechanisms that Phase 7 does not yet implement;
+7. freeze the new plan and update documentation before any production-code construction.
 
-The fresh closeout audit found no blocking product/runtime defect. It did find stale current-status/routing projections that still described Phase 7 as not started or only preparing for Real-Mac acceptance. Those control/routing files are being aligned as control-only closeout; this does not change the verified product semantics.
+That design work is now complete. This task does **not** authorize `FloatTabs/**` production construction. A new bounded implementation authorization is required before Phase 8 WP0/WP1 mutation begins.
 
-## Current authority
+## Frozen authority
 
 Program contract:
 
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`
+`docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`
 
-Phase 7 frozen implementation contract:
+Phase 8 implementation contract:
 
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`
+`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md`
 
-Documentation routing:
+Historical Phase 7/V5 snapshot:
 
-`docs/README.md`
+`docs/architecture/archive/FloatTabs_Runtime_Lifecycle_Phase7_Closeout_Snapshot_2026-11-02.md`
 
-Domain/navigation:
+Navigation/status:
 
-`docs/architecture/README.md`  
-`docs/architecture/DOMAIN_MAP.md`
+- `docs/README.md`
+- `docs/architecture/README.md`
+- `docs/architecture/DOMAIN_MAP.md`
 
-PR:
+## Current shipped vs target boundary
 
-`#188 — codex/ft-runtime-lifecycle-phase7-automatic-001 → main`
-
-## Frozen product policy
+Current shipped `main@2b414982...` still implements Phase 7 fixed-count tuning until Phase 8 lands:
 
 ```text
-Automatic   (default)
-Keep Loaded
-
-normal Automatic target   = 2
-Automatic inactive grace  = 30 seconds
-warning Automatic target  = 1
-critical Automatic target = 0
+normal Automatic target = 2
+inactive release path = 30s
+warning target = 1
+critical target = 0
 ```
 
-Hard protection remains:
+Frozen Phase 8 target:
+
+```text
+Memory Budget = Auto | Custom | Unlimited
+no normal fixed Runtime-count ceiling
+high watermark = 105%
+low watermark = 90%
+progressive one-at-a-time reclaim
+fresh resource remeasurement after each reclaim
+system memory pressure = independent ladder
+proactive long-idle cleanup = OFF by default
+```
+
+Initial Auto reference formula:
+
+```text
+clamp(physical RAM × 20%, 1.5 GiB, 6 GiB)
+```
+
+This formula is frozen as the first implementation assumption, not claimed as measured optimum. WP6 must validate/tune through Real-Mac A/B evidence before program-final acceptance.
+
+## Protection contract
+
+Hard-protected Runtime:
 
 - active / actually presented;
 - fullscreen source;
@@ -59,92 +84,117 @@ Hard protection remains:
 - active/pending allowed-background-media protection;
 - current materialization/restoring ownership.
 
-Keep Loaded resists ordinary reclaim, is not proactively materialized at launch, and may be reclaimed under critical pressure when inactive and otherwise unprotected.
+Keep Loaded:
 
-Legacy Hot/Warm/Cold is compatibility-only and must not return as current product UI/settings/shortcut/lifecycle policy.
+- excluded from normal budget reclaim;
+- may make the soft budget temporarily unsatisfied;
+- warning still prefers Automatic reclaim;
+- critical may reclaim inactive/unprotected Keep Loaded after eligible Automatic Runtime.
 
-## Verified semantic / acceptance identity
+## Background-generation contract
 
-Product + Real-Mac acceptance semantic head:
+Generating remains hard-protected because arbitrary WKWebView JS/network work cannot be safely destroyed while generation must continue.
 
-`b894641a254e7ffb49c84b4ed32d9c70a3f28ad7`
+Phase 8 may optimize:
 
-Verified on that identity:
+- event-first sensing;
+- fallback watchdog cadence;
+- redundant hidden health/diagnostic probes;
+- response-identity work;
+- obsolete observer/task cancellation;
+- presentation-only hidden work.
+
+It must not claim deep renderer-memory freeze without a supported public WebKit mechanism.
+
+After generation completes:
 
 ```text
-MACOS_CI_1349=PASS
-REQUIRED_BUILD_AND_TEST_ARM64=PASS
-QA_DMG_668=PASS
-BENCHMARK_TOOL_CI_139=PASS
-PRODUCT_EXACT_DIFF_AUDIT=PASS
-REAL_MAC_ACCEPTANCE=PASS
-KEEP_LOADED_RELAUNCH_NON_PRELOAD=PASS
-SESSION_CONTINUITY=PASS
-WARNINGS=NONE
+Ready/unread + native notification survives
+→ generating protection ends
+→ normal budget lifecycle resumes
 ```
 
-Real-Mac evidence establishes:
+The implementation contract sets an initial bounded 15s post-completion normal-budget recall grace; warning/critical may bypass it.
 
-1. Automatic normal-budget/LRU convergence;
-2. 30-second grace behavior;
-3. active Slot protection;
-4. Rapid A → B → A correctness;
-5. Background Generation protection followed by ordinary reclaim;
-6. Keep Loaded ordinary retention;
-7. reclaim → restore with Browser Profile/session continuity;
-8. Keep Loaded preference persistence without proactive relaunch materialization;
-9. aggregate WebKit/RSS directional support without unsupported exact per-Slot memory attribution.
+## Resource-measurement Gate
 
-Warning target `1` / critical target `0` remain deterministically covered by machine tests because current Debug control has no safe explicit system-pressure injection trigger.
+Phase 8 Gate 0 is mandatory before budget enforcement.
 
-## Fresh closeout audit disposition
-
-Audit basis: fresh repository/PR/CI evidence review at the merge boundary.
-
-Required claims:
+It must prove a production-safe aggregate measurement mechanism for:
 
 ```text
-CURRENT_BASE_MAIN=54f2e43b0fbc224affa52d9662ac2ba5aa5b963c
-SEMANTIC_HEAD=b894641a254e7ffb49c84b4ed32d9c70a3f28ad7
-BASE_DRIFT=NONE
-PRODUCT_SCOPE=PASS
-CANONICAL_LIFECYCLE_WRITER=PASS
-LEGACY_ACTIVE_POLICY_RETIRED=PASS
-HIDDEN_HOT_HOST_RETIRED=PASS
-SESSION_DATA_SAFETY=PASS
-PHASE6_RESTORE_PRESERVED=PASS
-REAL_MAC_WP5=PASS
-OPEN_REVIEW_THREADS=NONE
-OVERLAPPING_OPEN_PRS=NONE
+FloatTabs host + FloatTabs-attributable WebKit helpers
 ```
 
-The only audit finding was stale control/document-routing status; it is being corrected without product-source mutation.
+Rules:
 
-## Final merge gate
+- aggregate only; no exact per-Slot WebContent RSS claim;
+- read-only resource monitor; no direct kill/reload/reclaim;
+- explicit measurement-unavailable state;
+- no substitution of Runtime count for GiB;
+- no private WebKit SPI.
 
-Control-only closeout commits may advance the literal PR HEAD beyond the semantic head above. Per `AGENTS.md`, that does not invalidate product implementation/acceptance evidence, but repository-host protection still applies to the literal final HEAD.
+If Gate 0 cannot be proven, STOP and reconcile before WP2.
 
-Before merge:
-
-1. verify PR #188 final literal HEAD and unchanged `main@54f2e43b0fbc224affa52d9662ac2ba5aa5b963c`;
-2. verify no production `FloatTabs/**` change was introduced by closeout alignment;
-3. required `Build & Test (Apple Silicon arm64)` check must be `success` on that literal HEAD;
-4. required auxiliary PR workflows must have no failure;
-5. PR must remain mergeable with no unresolved review thread;
-6. mark Draft PR ready for review if GitHub requires it;
-7. merge using `expected_head_sha` so a moved head cannot be merged accidentally.
-
-Do not perform release/version work in this task.
-
-## After merge
-
-The Runtime Lifecycle / Memory program remains active for the contract-required post-merge integrated Phases 1–7 audit. That audit is a new read-only program-final acceptance boundary, not additional Phase 7 product construction.
+## Frozen work packages
 
 ```text
-CURRENT_STAGE=PHASE7_FINAL_MERGE_GATE
-PRODUCT_RUNTIME_MUTATION=FROZEN
-SEMANTIC_ACCEPTANCE_HEAD=b894641a254e7ffb49c84b4ed32d9c70a3f28ad7
-CONTROL_ONLY_CLOSEOUT=ACTIVE
-PR_188_MERGE_AUTHORIZED=YES_AFTER_LITERAL_HEAD_HOST_GATE
-POST_MERGE_NEXT=INTEGRATED_PHASES_1_TO_7_AUDIT
+WP0 measurement feasibility + exact source audit
+WP1 additive budget configuration + passive resource monitor
+WP2 budget scheduler + progressive normal reclaim
+WP3 system-pressure ladder + anti-thrash integration
+WP4 Advanced → Runtime & Memory UI + persistence/backup
+WP5 background-generation / observer efficiency corrective
+WP6 Real-Mac + Phase7-vs-Phase8 identical-workload A/B acceptance
+```
+
+## Frozen acceptance principles
+
+Phase 8 must prove at minimum:
+
+1. 3+ Automatic Runtimes can remain resident beyond the old 30s window while under budget;
+2. budget crossing reclaims one Runtime at a time;
+3. each reclaim is followed by fresh measurement;
+4. reclaim stops at/below low watermark or no-candidate boundary;
+5. active/generating/fullscreen/media/restoring protections hold;
+6. Keep Loaded behavior remains explicit/honest when it blocks convergence;
+7. repeated switching does not cause reclaim/restore thrash;
+8. reclaim/restore preserves Browser Profile login/session and exact Slot identity;
+9. hidden completion still yields unread/native notification and later budget eligibility;
+10. Phase 7 baseline vs Phase 8 candidate is compared under an identical workload for aggregate memory, helper count, CPU, hibernate/restore cycles, resident switch latency and restore latency;
+11. required self-hosted Apple Silicon CI passes on literal merge head;
+12. fresh ownership/exact-diff audit finds no second lifecycle writer/private WebKit workaround/destructive data coupling.
+
+## Historical/document disposition
+
+V5 and the Phase 7 implementation contract are preserved unchanged as delivered historical evidence. They no longer define the future target policy.
+
+The old Phase 7 acceptance criterion that expected convergence to a fixed resident count is historical and must not be reused as Phase 8 success criteria.
+
+## STOP conditions
+
+STOP before implementation if work would require:
+
+- deleting/resetting Browser Profile, cookies, session, website data, or user configuration;
+- a second canonical lifecycle writer;
+- private WebKit SPI;
+- exact per-Slot memory attribution as required policy truth;
+- a disguised fixed resident-count budget;
+- normal reclaim of active/generating/fullscreen/protected-media/current-restoring Runtime;
+- arbitrary reload/reset/restart as memory management;
+- product mutation before a new implementation task is authorized.
+
+## Current execution state
+
+```text
+BASELINE_MAIN=2b414982710b3f042fc7d6e9c88eb2d7117b4e38
+PHASE7=MERGED
+V6=ACCEPTED_FROZEN
+PHASE8_CONTRACT=ACCEPTED_FROZEN
+DESIGN_DELIVERABLES=COMPLETE
+PRODUCT_MUTATION=NOT_AUTHORIZED
+TARGET_NORMAL_POLICY=MEMORY_BUDGET_DRIVEN
+FIXED_NORMAL_RESIDENT_COUNT=SUPERSEDED_TARGET
+NEXT_GATE=DESIGN_DOCS_MERGE_THEN_STOP
+NEXT_PRODUCT_WORK=REQUIRES_EXPLICIT_PHASE8_IMPLEMENTATION_AUTHORIZATION_STARTING_WITH_WP0
 ```
