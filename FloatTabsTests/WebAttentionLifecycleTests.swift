@@ -935,6 +935,177 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertEqual(pool.count, 0)
     }
 
+    // MARK: Sustained-pressure eligibility re-entry
+
+    func testSustainedWarningReclaimsRuntimeWhenGenerationProtectionEndsWithoutNewPressureEvent() async throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "ReentryGenerating", policy: .warm)
+        _ = try pool.webView(for: profile)
+        let coordinator = WebAttentionCoordinator()
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            warmReleaseDelay: 600,
+            pressureStepDelay: 0.05,
+            attentionProtectionQuery: { coordinator.isAttentionProtected($0) }
+        )
+
+        coordinator.apply(.generationStarted, for: profile.id)
+        makeInactive(lifecycle, profile: profile)
+        lifecycle.handleMemoryPressure(.warning)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+
+        // Protection ends with NO second warning event: the still-active
+        // warning state must reclaim the newly eligible Runtime itself.
+        coordinator.apply(.generationFinished(userVisible: false), for: profile.id)
+        lifecycle.restartAfterAttentionProtectionEnded(profile: profile)
+
+        let reclaimed = try await waitUntil { !pool.contains(slotID: profile.id) }
+        XCTAssertTrue(reclaimed)
+        XCTAssertEqual(coordinator.state(for: profile.id), .ready)
+    }
+
+    func testSustainedCriticalReclaimsKeepLoadedWhenProtectionEndsWithoutNewPressureEvent() async throws {
+        let pool = makePool()
+        let automatic = makeProfile(name: "ReentryAutomatic", policy: .warm)
+        let keepLoaded = makeProfile(name: "ReentryKeepLoaded", policy: .hot)
+        for profile in [automatic, keepLoaded] {
+            _ = try pool.webView(for: profile)
+        }
+        let coordinator = WebAttentionCoordinator()
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            warmReleaseDelay: 600,
+            pressureStepDelay: 0.05,
+            attentionProtectionQuery: { coordinator.isAttentionProtected($0) }
+        )
+
+        // Keep Loaded is generating-protected; the eligible Automatic is
+        // reclaimed by the critical ladder first.
+        coordinator.apply(.generationStarted, for: keepLoaded.id)
+        makeInactive(lifecycle, profile: automatic)
+        makeInactive(lifecycle, profile: keepLoaded)
+        lifecycle.handleMemoryPressure(.critical)
+
+        let automaticReclaimed = try await waitUntil {
+            !pool.contains(slotID: automatic.id)
+        }
+        XCTAssertTrue(automaticReclaimed)
+        XCTAssertTrue(pool.contains(slotID: keepLoaded.id))
+
+        // Protection ends with NO second critical event: with no eligible
+        // Automatic remaining, still-active critical reclaims the Keep
+        // Loaded Runtime through the re-entry seam.
+        coordinator.apply(.generationFinished(userVisible: false), for: keepLoaded.id)
+        lifecycle.restartAfterAttentionProtectionEnded(profile: keepLoaded)
+
+        let keepLoadedReclaimed = try await waitUntil {
+            !pool.contains(slotID: keepLoaded.id)
+        }
+        XCTAssertTrue(keepLoadedReclaimed)
+    }
+
+    func testCriticalTakeoverCancelsPendingWarningContinuationAndPreservesOrdering() async throws {
+        let pool = makePool()
+        let keepLoaded = makeProfile(name: "TakeoverKeepLoaded", policy: .hot)
+        let automaticA = makeProfile(name: "TakeoverAutoA", policy: .warm)
+        let automaticB = makeProfile(name: "TakeoverAutoB", policy: .warm)
+        for profile in [keepLoaded, automaticA, automaticB] {
+            _ = try pool.webView(for: profile)
+        }
+        var releasedSlotIDs: [UUID] = []
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            warmReleaseDelay: 600,
+            pressureStepDelay: 0.25,
+            onRuntimeReleased: { releasedSlotIDs.append($0.id) }
+        )
+        for profile in [keepLoaded, automaticA, automaticB] {
+            makeInactive(lifecycle, profile: profile)
+        }
+
+        lifecycle.handleMemoryPressure(.warning)
+        XCTAssertEqual(pool.count, 2)
+        XCTAssertEqual(releasedSlotIDs.count, 1)
+
+        // Critical arrives while the warning continuation is pending: the
+        // stale warning continuation is cancelled and critical takes over
+        // immediately with Automatic reclaimed before Keep Loaded.
+        lifecycle.handleMemoryPressure(.critical)
+        XCTAssertEqual(pool.count, 1)
+        XCTAssertEqual(releasedSlotIDs.count, 2)
+        XCTAssertTrue(automaticA.id == releasedSlotIDs[0] || automaticB.id == releasedSlotIDs[0])
+
+        let fullyReclaimed = try await waitUntil { pool.count == 0 }
+        XCTAssertTrue(fullyReclaimed)
+        XCTAssertEqual(Set(releasedSlotIDs).count, releasedSlotIDs.count)
+        XCTAssertEqual(releasedSlotIDs.last, keepLoaded.id)
+    }
+
+    func testNormalizedPressureClearsStaleStateBeforeEligibilityReturns() async throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "StaleWarningGenerating", policy: .warm)
+        _ = try pool.webView(for: profile)
+        let coordinator = WebAttentionCoordinator()
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            warmReleaseDelay: 600,
+            pressureStepDelay: 0.05,
+            attentionProtectionQuery: { coordinator.isAttentionProtected($0) }
+        )
+
+        coordinator.apply(.generationStarted, for: profile.id)
+        makeInactive(lifecycle, profile: profile)
+        lifecycle.handleMemoryPressure(.warning)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+
+        // Pressure clears while the Runtime is still protected; protection
+        // then ends with no further pressure event.
+        lifecycle.handleMemoryPressureNormalized()
+        coordinator.apply(.generationFinished(userVisible: false), for: profile.id)
+        lifecycle.restartAfterAttentionProtectionEnded(profile: profile)
+
+        // Stale warning state must not reclaim: only the normal target=2 /
+        // 30s policy applies, so the Runtime stays resident.
+        try await wait(milliseconds: 200)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
+    }
+
+    func testRepeatedEligibilityBoundariesProduceSingleReclaimChain() async throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "SingleChainGenerating", policy: .warm)
+        _ = try pool.webView(for: profile)
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let coordinator = WebAttentionCoordinator()
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            warmReleaseDelay: 600,
+            pressureStepDelay: 0.05,
+            attentionProtectionQuery: { coordinator.isAttentionProtected($0) },
+            diagnostics: diagnostics
+        )
+
+        coordinator.apply(.generationStarted, for: profile.id)
+        makeInactive(lifecycle, profile: profile)
+        // Repeated same-level pressure events while no candidate exists.
+        lifecycle.handleMemoryPressure(.warning)
+        lifecycle.handleMemoryPressure(.warning)
+        lifecycle.handleMemoryPressure(.warning)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+
+        // Protection ends once; repeated eligibility boundaries must still
+        // yield exactly one reclaim transaction chain for one Runtime.
+        coordinator.apply(.generationFinished(userVisible: false), for: profile.id)
+        lifecycle.restartAfterAttentionProtectionEnded(profile: profile)
+        lifecycle.handleMemoryPressure(.warning)
+
+        let reclaimed = try await waitUntil { !pool.contains(slotID: profile.id) }
+        XCTAssertTrue(reclaimed)
+        let hibernateEvents = writer.events.filter { $0.event == "slot_lifecycle.hibernate" }
+        XCTAssertEqual(hibernateEvents.count, 1)
+    }
+
     func testSelectedHiddenGeneratingKeepsHiddenGraceAndThenProtectsInactiveRuntime() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "HiddenGenerating", policy: .cold)

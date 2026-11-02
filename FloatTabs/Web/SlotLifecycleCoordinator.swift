@@ -470,11 +470,10 @@ final class SlotLifecycleCoordinator {
                 level: level,
                 incidentContext: incidentContext
             )
-        } else if pressureReclaimWorkItem == nil {
-            // Same level while no continuation is pending (progression
-            // previously stopped at the no-candidate boundary): re-evaluate
-            // against fresh facts without stacking a second transaction.
-            beginProgressivePressureReclaim(level: level)
+        } else {
+            // Same level: idempotently reconsider against fresh facts
+            // without stacking a second transaction.
+            reconcileProgressivePressureIfNeeded()
         }
 
         var completionFields = incidentContext.fields(phase: .closure)
@@ -613,6 +612,10 @@ final class SlotLifecycleCoordinator {
         } else {
             scheduleRelease(for: profile, plan: plan)
         }
+        // A newly created inactive plan is the primary eligibility-increasing
+        // boundary; under sustained warning/critical pressure the ladder
+        // reconsiders it immediately instead of waiting for another event.
+        reconcileProgressivePressureIfNeeded()
     }
 
     private func evaluateMediaProtection(
@@ -656,6 +659,9 @@ final class SlotLifecycleCoordinator {
                 }
                 self.scheduleRelease(for: profile, plan: plan)
                 self.enforceRuntimeBudget(reason: "media_protection_ended")
+                // Media protection ending restores pressure eligibility for
+                // this Runtime; the ladder may resume under sustained pressure.
+                self.reconcileProgressivePressureIfNeeded()
             }
         }
     }
@@ -801,6 +807,18 @@ final class SlotLifecycleCoordinator {
         )
     }
 
+    /// Idempotent pressure re-entry seam. Whenever a lifecycle boundary makes
+    /// a Runtime newly eligible (inactive plan created, media protection
+    /// ended, protection window closed) while the latest observed pressure is
+    /// still warning/critical, the progressive ladder is reconsidered from
+    /// fresh facts — without waiting for the system to re-send the same
+    /// pressure event and without stacking a second reclaim transaction.
+    private func reconcileProgressivePressureIfNeeded() {
+        guard let level = latestMemoryPressureLevel,
+              pressureReclaimWorkItem == nil else { return }
+        beginProgressivePressureReclaim(level: level)
+    }
+
     /// Progressive memory-pressure reclaim: at most one Runtime is reclaimed
     /// per step, and every step revalidates the latest pressure state plus
     /// current Runtime identity/protection through fresh candidate facts.
@@ -936,7 +954,7 @@ final class SlotLifecycleCoordinator {
                 "release_eligible": .bool(selectedForRelease),
                 "decision": .string(decisionName),
                 "release_reason": .string(releaseReason),
-                "budget_target": .integer(Int64(managedResidentTarget)),
+                "normal_managed_resident_target": .integer(Int64(managedResidentTarget)),
                 "web_process_resource_attribution": .string("unavailable_public_api")
             ]) { _, new in new }
             diagnostics.record(
