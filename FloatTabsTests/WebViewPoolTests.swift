@@ -1642,7 +1642,8 @@ final class WebViewPoolTests: XCTestCase {
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: 0.01
+            recentStageDuration: 0,
+            longIdleThreshold: 0.01
         )
 
         lifecycle.activate(profile: profile)
@@ -1666,7 +1667,8 @@ final class WebViewPoolTests: XCTestCase {
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: 0.01,
+            recentStageDuration: 0,
+            longIdleThreshold: 0.01,
             onRuntimeReleased: { releasedProfile in
                 notifiedProfile = releasedProfile
                 poolWasStillResidentAtNotification = pool.contains(slotID: releasedProfile.id)
@@ -1682,7 +1684,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(poolWasStillResidentAtNotification)
     }
 
-    func testVisibleActivationCancelsPendingAutomaticRelease() async throws {
+    func testVisibleActivationCancelsPendingLongIdleReclaim() async throws {
         let pool = makePool()
         var profile = makeProfile(name: "AutomaticCancel")
         profile.runtimeRetentionPreference = .automatic
@@ -1691,8 +1693,8 @@ final class WebViewPoolTests: XCTestCase {
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: 0.01,
-            warmReleaseDelay: 0.01,
+            recentStageDuration: 0,
+            longIdleThreshold: 0.01,
             installsMemoryPressureSource: false
         )
 
@@ -1720,7 +1722,8 @@ final class WebViewPoolTests: XCTestCase {
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: 0.01,
+            recentStageDuration: 0,
+            longIdleThreshold: 0.01,
             installsMemoryPressureSource: false
         )
 
@@ -1749,7 +1752,8 @@ final class WebViewPoolTests: XCTestCase {
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: 0.01,
+            recentStageDuration: 0,
+            longIdleThreshold: 0.01,
             hiddenActiveGraceDelay: 0.02,
             mediaPauseAction: { pausedIDs.append($0) },
             installsMemoryPressureSource: false
@@ -1766,8 +1770,8 @@ final class WebViewPoolTests: XCTestCase {
         try await Task.sleep(nanoseconds: 70_000_000)
         XCTAssertTrue(pool.contains(slotID: source.id))
 
-        // Once WebKit exits fullscreen, the same hidden source returns to the
-        // ordinary pause + grace + Cold release contract.
+        // Once WebKit exits fullscreen, the hidden source returns to the
+        // ordinary pause + staged Automatic lifecycle.
         lifecycle.endFullscreenSourceVisibility(profile: source)
         lifecycle.setPanelVisible(false, activeProfile: source)
         XCTAssertEqual(pausedIDs, [source.id])
@@ -1790,7 +1794,8 @@ final class WebViewPoolTests: XCTestCase {
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: 0.01,
+            recentStageDuration: 0,
+            longIdleThreshold: 0.01,
             installsMemoryPressureSource: false
         )
         lifecycle.activate(profile: source)
@@ -1807,9 +1812,9 @@ final class WebViewPoolTests: XCTestCase {
     }
 
     func testResourceLifecycleDefaultsMatchAutomaticContract() throws {
-        XCTAssertEqual(SlotLifecycleCoordinator.defaultAutomaticReleaseDelay, 30)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultRecentStageDuration, 30)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultLongIdleThreshold, 600)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay, 0)
-        XCTAssertEqual(SlotLifecycleCoordinator.defaultManagedResidentTarget, 2)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultPressureStepDelay, 0.5)
     }
 
@@ -1822,8 +1827,8 @@ final class WebViewPoolTests: XCTestCase {
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: 0.01,
-            warmReleaseDelay: 0.01,
+            recentStageDuration: 0,
+            longIdleThreshold: 0.01,
             installsMemoryPressureSource: false
         )
         lifecycle.activate(profile: profile)
@@ -1843,7 +1848,8 @@ final class WebViewPoolTests: XCTestCase {
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            warmReleaseDelay: 0.01,
+            recentStageDuration: 0,
+            longIdleThreshold: 0.01,
             mediaPlayingQuery: { _, completion in completion(false) },
             installsMemoryPressureSource: false
         )
@@ -1856,9 +1862,9 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
-    func testThreeInactiveAutomaticRuntimesRespectNormalBudgetBeforeGrace() throws {
+    func testFiveInactiveAutomaticRuntimesRemainResidentWithoutNormalCountBudget() throws {
         let pool = makePool()
-        let profiles = ["A", "B", "C"].enumerated().map { index, name in
+        let profiles = ["A", "B", "C", "D", "E"].enumerated().map { index, name in
             var profile = makeProfile(name: name)
             profile.order = index
             profile.residencyPolicy = .warm
@@ -1871,7 +1877,8 @@ final class WebViewPoolTests: XCTestCase {
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            warmReleaseDelay: 60,
+            recentStageDuration: 0,
+            longIdleThreshold: 60,
             mediaPlayingQuery: { _, completion in completion(false) },
             installsMemoryPressureSource: false
         )
@@ -1882,12 +1889,12 @@ final class WebViewPoolTests: XCTestCase {
             lifecycle.deactivate(profile: profile)
         }
 
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 2)
-        XCTAssertEqual(pool.count, 2)
-        XCTAssertEqual(profiles.filter { pool.contains(slotID: $0.id) }.count, 2)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 5)
+        XCTAssertEqual(pool.count, 5)
+        XCTAssertEqual(profiles.filter { pool.contains(slotID: $0.id) }.count, 5)
     }
 
-    func testBackgroundAudioPlayingProtectsColdUntilPlaybackStopsThenStartsFreshGrace() async throws {
+    func testBackgroundAudioProtectionEndsAndRechecksCurrentLongIdleAge() async throws {
         let pool = makePool()
         var profile = makeProfile(name: "MediaCold")
         profile.residencyPolicy = .cold
@@ -1898,7 +1905,8 @@ final class WebViewPoolTests: XCTestCase {
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: 0.05,
+            recentStageDuration: 0,
+            longIdleThreshold: 0.05,
             mediaProtectionPollDelay: 0.005,
             mediaPlayingQuery: { _, completion in completion(isPlaying) },
             installsMemoryPressureSource: false
@@ -1912,9 +1920,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(lifecycle.mediaProtectedIDs.contains(profile.id))
 
         isPlaying = false
-        try await Task.sleep(nanoseconds: 20_000_000)
-        XCTAssertTrue(pool.contains(slotID: profile.id), "stopping playback starts a fresh Cold grace period")
-        try await Task.sleep(nanoseconds: 70_000_000)
+        try await Task.sleep(nanoseconds: 30_000_000)
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
@@ -1927,7 +1933,8 @@ final class WebViewPoolTests: XCTestCase {
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: 0.01,
+            recentStageDuration: 0,
+            longIdleThreshold: 0.01,
             hiddenActiveGraceDelay: 0.02,
             mediaPlayingQuery: { _, completion in completion(false) },
             installsMemoryPressureSource: false
@@ -2001,7 +2008,8 @@ final class WebViewPoolTests: XCTestCase {
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: 0.01,
+            recentStageDuration: 0,
+            longIdleThreshold: 0.01,
             hiddenActiveGraceDelay: 0.03,
             mediaPlayingQuery: { _, completion in completion(false) },
             installsMemoryPressureSource: false
@@ -2030,7 +2038,8 @@ final class WebViewPoolTests: XCTestCase {
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            warmReleaseDelay: 60,
+            recentStageDuration: 0,
+            longIdleThreshold: 60,
             mediaPlayingQuery: { slotID, completion in completion(slotID == playing.id) },
             installsMemoryPressureSource: false
         )

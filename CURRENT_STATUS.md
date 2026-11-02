@@ -1,6 +1,6 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-11-02
+**Status date:** 2026-11-03
 **Repository:** Lost0rz/FloatTabs
 **Default branch:** main
 
@@ -32,7 +32,7 @@ WP1=COMPLETE / HUMAN_ACCEPTED
 WP2=ACTIVE
 WP2_CONTROL_BOOTSTRAP=PUSHED_VERIFIED
 WP2_CONTROL_BOOTSTRAP_HEAD=e289171eff3d5045c48a86c229b7967e126ec087
-WP2_SOURCE_MUTATION=AUTHORIZED / IN_PROGRESS
+WP2_SOURCE_MUTATION=IMPLEMENTED / LOCAL_MACHINE_GATES_PASS
 WP2_DRAFT_PR=195 / OPEN / DRAFT
 HUMAN_UI_ACCEPTANCE=PENDING / USER_OWNED
 WP3_SCHEDULING_MUTATION=NOT_STARTED
@@ -54,14 +54,17 @@ Normal residency no longer uses a fixed Runtime count. Keep Loaded / Pinned is n
 
 The WP1 human run observed fixed-count normal eviction while three Automatic Runtime instances were in use. At the new baseline, lifecycle source still contains defaultManagedResidentTarget=2, count-based decisions, an approximately 30s release path, and a critical path that can reclaim inactive Keep Loaded. These are the WP2 baseline facts to replace.
 
-## Current gate
+## Current execution
 
 ~~~text
-fresh post-WP1 main verified
-→ reconcile WP2 status/task + Policy V7
-→ push control/design-only commit and verify remote
-→ create one Draft PR separate from #194
-→ only then change lifecycle source/tests
+control/design bootstrap = remotely verified at e289171eff3d5045c48a86c229b7967e126ec087
+WP2 Draft PR = #195 / OPEN / DRAFT
+source implementation = active on codex/adaptive-lifecycle-wp2-policy
+focused lifecycle/cross-feature/pool/ExternalShell/WP1 presentation/notification/diagnostic/privacy/preference/cache suites = PASS (589 run / 4 skipped / 0 failed)
+full XCTest = PASS (1,160 run / 4 skipped / 0 failed)
+Debug/Release arm64 builds = PASS; Release binary architecture = arm64
+Package lock = unchanged after locked resolution
+exact-head CI/QA and independent audit = PENDING
 ~~~
 
-No WP2 product source has changed yet. Do not merge the WP2 PR or release. Human UI acceptance remains user-owned and pending.
+The WP2 source changes are local and not yet pushed. Do not merge the WP2 PR or release. Human UI acceptance remains user-owned and pending.

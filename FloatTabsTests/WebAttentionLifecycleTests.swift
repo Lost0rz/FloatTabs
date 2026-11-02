@@ -13,7 +13,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var attentionProtected = true
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             attentionProtectionQuery: { _ in attentionProtected }
         )
 
@@ -34,7 +34,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var releasedProfile: WebAppProfile?
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             prepareRuntimeForRelease: { preparedSlotID in
                 wasResidentDuringPreparation = pool.contains(slotID: preparedSlotID)
             },
@@ -66,7 +66,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var becameInactiveCount = 0
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 60,
+            longIdleThreshold: 60,
             hiddenActiveGraceDelay: 0.06,
             onSlotBecameInactive: { _ in
                 becameInactiveCount += 1
@@ -91,7 +91,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         _ = try pool.webView(for: profile)
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             attentionProtectionQuery: { _ in true }
         )
 
@@ -101,28 +101,54 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
-    func testThreeInactiveAutomaticRuntimesRespectNormalBudgetBeforeGrace() throws {
+    func testFiveInactiveAutomaticRuntimesRemainResidentUnderNormalPressure() throws {
         let pool = makePool()
         let profiles = [
             makeProfile(name: "WarmOne", policy: .warm),
             makeProfile(name: "WarmTwo", policy: .warm),
-            makeProfile(name: "WarmThree", policy: .warm)
+            makeProfile(name: "WarmThree", policy: .warm),
+            makeProfile(name: "WarmFour", policy: .warm),
+            makeProfile(name: "WarmFive", policy: .warm)
         ]
         for profile in profiles {
             _ = try pool.webView(for: profile)
         }
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 600
+            longIdleThreshold: 600,
+            diagnostics: diagnostics
         )
 
         for profile in profiles {
             makeInactive(lifecycle, profile: profile)
         }
 
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 2)
-        XCTAssertEqual(pool.count, 2)
-        XCTAssertEqual(profiles.filter { pool.contains(slotID: $0.id) }.count, 2)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 5)
+        XCTAssertEqual(pool.count, 5)
+        XCTAssertEqual(profiles.filter { pool.contains(slotID: $0.id) }.count, 5)
+        XCTAssertNil(lifecycle.diagnosticSnapshotFields(for: profiles[0].id)[
+            "lifecycle_managed_resident_target"
+        ])
+        XCTAssertFalse(writer.events.contains { $0.event == "slot_lifecycle.runtime_budget" })
+    }
+
+    func testKeepLoadedRemainsResidentPastNormalLongIdleBoundary() async throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "KeepLoadedLongIdle", policy: .hot)
+        _ = try pool.webView(for: profile)
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            longIdleThreshold: 0.02
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        try await wait(milliseconds: 80)
+
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
+        XCTAssertNil(lifecycle.debugInactivePlanToken(slotID: profile.id))
     }
 
     func testMemoryWarningProgressivelyReclaimsOneEligibleAutomaticPerStep() async throws {
@@ -136,37 +162,35 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var releasedSlotIDs: [UUID] = []
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 600,
+            longIdleThreshold: 600,
             pressureStepDelay: 0.03,
             onRuntimeReleased: { releasedSlotIDs.append($0.id) }
         )
         for profile in profiles { makeInactive(lifecycle, profile: profile) }
 
-        XCTAssertEqual(pool.count, 2)
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 2)
-        // The normal healthy-state budget already reclaimed the oldest
-        // Automatic Runtime before any pressure existed.
+        XCTAssertEqual(pool.count, 3)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
+        // Normal pressure has no count-based reclaim path.
         let baselineReleasedCount = releasedSlotIDs.count
-        XCTAssertEqual(baselineReleasedCount, 1)
+        XCTAssertEqual(baselineReleasedCount, 0)
+        let expectedOrder = profiles.sorted {
+            let lhs = lifecycle.debugInactiveSinceUptime(slotID: $0.id) ?? .infinity
+            let rhs = lifecycle.debugInactiveSinceUptime(slotID: $1.id) ?? .infinity
+            return lhs == rhs ? $0.id.uuidString < $1.id.uuidString : lhs < rhs
+        }.map(\.id)
         lifecycle.handleMemoryPressure(.warning)
 
         // One reclaim transaction per step: exactly one Runtime is gone
         // synchronously; the rest may only follow through continuation steps.
-        XCTAssertEqual(pool.count, 1)
+        XCTAssertEqual(pool.count, 2)
         XCTAssertEqual(releasedSlotIDs.count, baselineReleasedCount + 1)
 
         let fullyReclaimed = try await waitUntil { pool.count == 0 }
         XCTAssertTrue(fullyReclaimed)
 
-        // Sustained warning reclaims every eligible Automatic, oldest first.
-        let expectedOrder = profiles
-            .sorted {
-                $0.lastUsedAt == $1.lastUsedAt
-                    ? $0.id.uuidString < $1.id.uuidString
-                    : $0.lastUsedAt < $1.lastUsedAt
-            }
-            .map(\.id)
+        // Sustained warning reclaims every eligible Automatic exactly once.
         XCTAssertEqual(releasedSlotIDs, expectedOrder)
+        XCTAssertEqual(Set(releasedSlotIDs).count, profiles.count)
         XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
     }
 
@@ -179,7 +203,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         for profile in profiles { _ = try pool.webView(for: profile) }
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 600,
+            longIdleThreshold: 600,
             pressureStepDelay: 0.25
         )
         for profile in profiles { makeInactive(lifecycle, profile: profile) }
@@ -220,7 +244,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let coordinator = WebAttentionCoordinator()
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             attentionProtectionQuery: { _ in coordinator.isAttentionProtected(profile.id) }
         )
 
@@ -244,7 +268,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let coordinator = WebAttentionCoordinator()
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.03,
+            longIdleThreshold: 0.03,
             attentionProtectionQuery: { _ in coordinator.isAttentionProtected(profile.id) }
         )
 
@@ -267,7 +291,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let protectedIDs: Set<UUID> = [protected.id]
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 60,
+            longIdleThreshold: 60,
             pressureStepDelay: 0.03,
             attentionProtectionQuery: { protectedIDs.contains($0) }
         )
@@ -477,7 +501,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         _ = try pool.webView(for: profile)
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             attentionProtectionQuery: { _ in true }
         )
 
@@ -497,7 +521,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var prepared = false
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             prepareRuntimeForRelease: { _ in prepared = true },
             attentionProtectionQuery: { _ in true },
             diagnostics: diagnostics
@@ -513,7 +537,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         )
         XCTAssertEqual(event.level, .info)
         XCTAssertEqual(event.fields["slot_id"], .string(profile.id.uuidString))
-        XCTAssertEqual(event.fields["boundary"], .string("automatic_grace"))
+        XCTAssertEqual(event.fields["boundary"], .string("automatic_long_idle"))
     }
 
     func testStandardDiagnosticsPersistPlanIdentityAcrossProtectionAndCancellation() async throws {
@@ -525,7 +549,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var attentionProtected = true
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             attentionProtectionQuery: { _ in attentionProtected },
             diagnostics: diagnostics
         )
@@ -569,7 +593,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 60,
+            longIdleThreshold: 60,
             hiddenActiveGraceDelay: 0.02,
             diagnostics: diagnostics
         )
@@ -631,7 +655,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var mediaPlaying = true
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.03,
+            longIdleThreshold: 0.03,
             mediaProtectionPollDelay: 0.005,
             mediaPlayingQuery: { _, completion in completion(mediaPlaying) },
             diagnostics: diagnostics
@@ -647,10 +671,8 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertNil(mediaProtected.fields["plan_token"])
 
         mediaPlaying = false
-        try await wait(milliseconds: 15)
-        XCTAssertTrue(pool.contains(slotID: profile.id))
-        try await wait(milliseconds: 60)
-        XCTAssertFalse(pool.contains(slotID: profile.id))
+        let released = try await waitUntil { !pool.contains(slotID: profile.id) }
+        XCTAssertTrue(released)
     }
 
     func testFullscreenProtectedDeactivateOnlyRecordsAcceptedDeactivation() throws {
@@ -702,7 +724,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var mediaPlaying = true
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.03,
+            longIdleThreshold: 0.03,
             mediaProtectionPollDelay: 0.005,
             mediaPlayingQuery: { _, completion in completion(mediaPlaying) },
             attentionProtectionQuery: { _ in attentionProtected }
@@ -716,10 +738,8 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: profile.id))
 
         mediaPlaying = false
-        try await wait(milliseconds: 15)
-        XCTAssertTrue(pool.contains(slotID: profile.id))
-        try await wait(milliseconds: 60)
-        XCTAssertFalse(pool.contains(slotID: profile.id))
+        let released = try await waitUntil { !pool.contains(slotID: profile.id) }
+        XCTAssertTrue(released)
     }
 
     func testRemovingMediaAloneDoesNotBypassAttentionProtection() async throws {
@@ -731,7 +751,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var mediaPlaying = true
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.03,
+            longIdleThreshold: 0.03,
             mediaProtectionPollDelay: 0.005,
             mediaPlayingQuery: { _, completion in completion(mediaPlaying) },
             attentionProtectionQuery: { _ in attentionProtected }
@@ -745,20 +765,17 @@ final class WebAttentionLifecycleTests: XCTestCase {
 
         attentionProtected = false
         lifecycle.restartAfterAttentionProtectionEnded(profile: profile)
-        try await wait(milliseconds: 15)
-        XCTAssertTrue(pool.contains(slotID: profile.id))
-        try await wait(milliseconds: 60)
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
-    func testColdRestartAfterSkippedTimerGetsFullFreshDelay() async throws {
+    func testProtectionEndReevaluatesElapsedAutomaticStageWithFreshPlan() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "ColdRestart", policy: .cold)
         _ = try pool.webView(for: profile)
         var attentionProtected = false
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.04,
+            longIdleThreshold: 0.04,
             attentionProtectionQuery: { _ in attentionProtected }
         )
 
@@ -769,20 +786,17 @@ final class WebAttentionLifecycleTests: XCTestCase {
 
         attentionProtected = false
         lifecycle.restartAfterAttentionProtectionEnded(profile: profile)
-        try await wait(milliseconds: 15)
-        XCTAssertTrue(pool.contains(slotID: profile.id))
-        try await wait(milliseconds: 60)
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
-    func testWarmRestartAfterSkippedTTLGetsFullFreshTTL() async throws {
+    func testLongIdleProtectionEndDoesNotRestartTheLongIdleLifetime() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "WarmRestart", policy: .warm)
         _ = try pool.webView(for: profile)
         var attentionProtected = false
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 0.04,
+            longIdleThreshold: 0.04,
             attentionProtectionQuery: { _ in attentionProtected }
         )
 
@@ -793,28 +807,89 @@ final class WebAttentionLifecycleTests: XCTestCase {
 
         attentionProtected = false
         lifecycle.restartAfterAttentionProtectionEnded(profile: profile)
-        try await wait(milliseconds: 15)
-        XCTAssertTrue(pool.contains(slotID: profile.id))
-        try await wait(milliseconds: 60)
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
-    func testWarmPreferenceUpdateRebuildsExistingReleaseTimer() async throws {
+    func testAutomaticStageBoundariesKeepIdleResidentThenReclaimAtLongIdle() async throws {
+        XCTAssertEqual(
+            AutomaticLifecycleStage.resolve(
+                inactiveDuration: 29,
+                recentStageDuration: 30,
+                longIdleThreshold: 600
+            ),
+            .recent
+        )
+        XCTAssertEqual(
+            AutomaticLifecycleStage.resolve(
+                inactiveDuration: 30,
+                recentStageDuration: 30,
+                longIdleThreshold: 600
+            ),
+            .idle
+        )
+        XCTAssertEqual(
+            AutomaticLifecycleStage.resolve(
+                inactiveDuration: 599,
+                recentStageDuration: 30,
+                longIdleThreshold: 600
+            ),
+            .idle
+        )
+        XCTAssertEqual(
+            AutomaticLifecycleStage.resolve(
+                inactiveDuration: 600,
+                recentStageDuration: 30,
+                longIdleThreshold: 600
+            ),
+            .longIdle
+        )
+
         let pool = makePool()
-        let profile = makeProfile(name: "WarmPreferenceUpdate", policy: .warm)
+        let profile = makeProfile(name: "StageBoundary", policy: .warm)
         _ = try pool.webView(for: profile)
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 0.04
+            recentStageDuration: 0.025,
+            longIdleThreshold: 0.10,
+            diagnostics: diagnostics
         )
 
         makeInactive(lifecycle, profile: profile)
-        try await wait(milliseconds: 15)
-        lifecycle.updateReleaseDelays(coldReleaseDelay: 30, warmReleaseDelay: 0.10)
-
-        try await wait(milliseconds: 45)
+        try await wait(milliseconds: 10)
+        XCTAssertEqual(lifecycle.debugInactiveStage(slotID: profile.id), .recent)
         XCTAssertTrue(pool.contains(slotID: profile.id))
-        try await wait(milliseconds: 75)
+        try await wait(milliseconds: 35)
+        XCTAssertEqual(lifecycle.debugInactiveStage(slotID: profile.id), .idle)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        try await wait(milliseconds: 90)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+        let hibernations = writer.events.filter { $0.event == "slot_lifecycle.hibernate" }
+        XCTAssertEqual(hibernations.count, 1)
+        XCTAssertEqual(
+            hibernations.first?.fields["release_reason"],
+            .string("automatic_long_idle_expired")
+        )
+    }
+
+    func testCriticalMayBypassRecentButWarningMustWaitUntilIdle() throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "RecentPressure", policy: .warm)
+        _ = try pool.webView(for: profile)
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            recentStageDuration: 60,
+            longIdleThreshold: 600,
+            pressureStepDelay: 600
+        )
+        makeInactive(lifecycle, profile: profile)
+
+        lifecycle.handleMemoryPressure(.warning)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertEqual(lifecycle.debugInactiveStage(slotID: profile.id), .recent)
+
+        lifecycle.handleMemoryPressure(.critical)
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
@@ -829,7 +904,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var protectedIDs: Set<UUID> = [first.id]
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 60,
+            longIdleThreshold: 60,
             pressureStepDelay: 0.03,
             attentionProtectionQuery: { protectedIDs.contains($0) }
         )
@@ -858,7 +933,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         }
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 600,
+            longIdleThreshold: 600,
             pressureStepDelay: 0.03
         )
 
@@ -885,7 +960,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var releasedSlotIDs: [UUID] = []
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 600,
+            longIdleThreshold: 600,
             pressureStepDelay: 0.03,
             onRuntimeReleased: { releasedSlotIDs.append($0.id) }
         )
@@ -895,17 +970,19 @@ final class WebAttentionLifecycleTests: XCTestCase {
         makeInactive(lifecycle, profile: automaticB)
         lifecycle.handleMemoryPressure(.critical)
 
-        let fullyReclaimed = try await waitUntil { pool.count == 0 }
-        XCTAssertTrue(fullyReclaimed)
+        let automaticReclaimed = try await waitUntil {
+            !pool.contains(slotID: automaticA.id) && !pool.contains(slotID: automaticB.id)
+        }
+        XCTAssertTrue(automaticReclaimed)
 
-        // Automatic Runtime is reclaimed before inactive/unprotected
-        // Keep Loaded, even when Keep Loaded is the older usage candidate.
+        // Keep Loaded remains resident after Automatic candidates are gone.
         let automaticIDs = Set([automaticA.id, automaticB.id])
         XCTAssertTrue(
             releasedSlotIDs.prefix(2).allSatisfy(automaticIDs.contains),
             "expected Automatic candidates first, got \(releasedSlotIDs)"
         )
-        XCTAssertEqual(releasedSlotIDs.last, keepLoaded.id)
+        XCTAssertEqual(Set(releasedSlotIDs), automaticIDs)
+        XCTAssertTrue(pool.contains(slotID: keepLoaded.id))
     }
 
     func testDuplicatePressureEventsDoNotStackReclaimTransactions() async throws {
@@ -917,7 +994,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         for profile in profiles { _ = try pool.webView(for: profile) }
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 600,
+            longIdleThreshold: 600,
             pressureStepDelay: 0.3
         )
         for profile in profiles { makeInactive(lifecycle, profile: profile) }
@@ -944,7 +1021,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let coordinator = WebAttentionCoordinator()
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 600,
+            longIdleThreshold: 600,
             pressureStepDelay: 0.05,
             attentionProtectionQuery: { coordinator.isAttentionProtected($0) }
         )
@@ -974,7 +1051,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let coordinator = WebAttentionCoordinator()
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 600,
+            longIdleThreshold: 600,
             pressureStepDelay: 0.05,
             attentionProtectionQuery: { coordinator.isAttentionProtected($0) }
         )
@@ -992,16 +1069,11 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(automaticReclaimed)
         XCTAssertTrue(pool.contains(slotID: keepLoaded.id))
 
-        // Protection ends with NO second critical event: with no eligible
-        // Automatic remaining, still-active critical reclaims the Keep
-        // Loaded Runtime through the re-entry seam.
+        // Protection ending does not make Keep Loaded pressure eligible.
         coordinator.apply(.generationFinished(userVisible: false), for: keepLoaded.id)
         lifecycle.restartAfterAttentionProtectionEnded(profile: keepLoaded)
-
-        let keepLoadedReclaimed = try await waitUntil {
-            !pool.contains(slotID: keepLoaded.id)
-        }
-        XCTAssertTrue(keepLoadedReclaimed)
+        try await wait(milliseconds: 100)
+        XCTAssertTrue(pool.contains(slotID: keepLoaded.id))
     }
 
     func testCriticalTakeoverCancelsPendingWarningContinuationAndPreservesOrdering() async throws {
@@ -1015,7 +1087,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var releasedSlotIDs: [UUID] = []
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 600,
+            longIdleThreshold: 600,
             pressureStepDelay: 0.25,
             onRuntimeReleased: { releasedSlotIDs.append($0.id) }
         )
@@ -1029,16 +1101,19 @@ final class WebAttentionLifecycleTests: XCTestCase {
 
         // Critical arrives while the warning continuation is pending: the
         // stale warning continuation is cancelled and critical takes over
-        // immediately with Automatic reclaimed before Keep Loaded.
+        // while preserving Keep Loaded.
         lifecycle.handleMemoryPressure(.critical)
         XCTAssertEqual(pool.count, 1)
         XCTAssertEqual(releasedSlotIDs.count, 2)
         XCTAssertTrue(automaticA.id == releasedSlotIDs[0] || automaticB.id == releasedSlotIDs[0])
 
-        let fullyReclaimed = try await waitUntil { pool.count == 0 }
-        XCTAssertTrue(fullyReclaimed)
+        let automaticReclaimed = try await waitUntil {
+            !pool.contains(slotID: automaticA.id) && !pool.contains(slotID: automaticB.id)
+        }
+        XCTAssertTrue(automaticReclaimed)
+        XCTAssertTrue(pool.contains(slotID: keepLoaded.id))
         XCTAssertEqual(Set(releasedSlotIDs).count, releasedSlotIDs.count)
-        XCTAssertEqual(releasedSlotIDs.last, keepLoaded.id)
+        XCTAssertFalse(releasedSlotIDs.contains(keepLoaded.id))
     }
 
     func testNormalizedPressureClearsStaleStateBeforeEligibilityReturns() async throws {
@@ -1048,7 +1123,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let coordinator = WebAttentionCoordinator()
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 600,
+            longIdleThreshold: 600,
             pressureStepDelay: 0.05,
             attentionProtectionQuery: { coordinator.isAttentionProtected($0) }
         )
@@ -1064,8 +1139,8 @@ final class WebAttentionLifecycleTests: XCTestCase {
         coordinator.apply(.generationFinished(userVisible: false), for: profile.id)
         lifecycle.restartAfterAttentionProtectionEnded(profile: profile)
 
-        // Stale warning state must not reclaim: only the normal target=2 /
-        // 30s policy applies, so the Runtime stays resident.
+        // Stale warning state must not reclaim; normal policy keeps this
+        // IDLE Automatic Runtime resident until its long-idle boundary.
         try await wait(milliseconds: 200)
         XCTAssertTrue(pool.contains(slotID: profile.id))
         XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
@@ -1080,7 +1155,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let coordinator = WebAttentionCoordinator()
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 600,
+            longIdleThreshold: 600,
             pressureStepDelay: 0.05,
             attentionProtectionQuery: { coordinator.isAttentionProtected($0) },
             diagnostics: diagnostics
@@ -1113,7 +1188,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var attentionProtectionQueryCount = 0
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             hiddenActiveGraceDelay: 0.02,
             attentionProtectionQuery: { _ in
                 attentionProtectionQueryCount += 1
@@ -1168,7 +1243,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let coordinator = WebAttentionCoordinator()
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             attentionProtectionQuery: { _ in coordinator.isAttentionProtected(profile.id) }
         )
 
@@ -1196,7 +1271,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         )
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             attentionProtectionQuery: { _ in coordinator.isAttentionProtected(profile.id) }
         )
 
@@ -1221,7 +1296,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         }
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             attentionProtectionQuery: { $0 == protected.id }
         )
 
@@ -1240,7 +1315,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var attentionProtected = false
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             attentionProtectionQuery: { _ in attentionProtected }
         )
 
@@ -1261,7 +1336,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var attentionProtected = false
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             mediaPlayingQuery: { _, completion in
                 pendingMediaResult = completion
             },
@@ -1277,7 +1352,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
-    func testAsyncMediaResultKeepsOldPlanMatchingBehaviorAfterPoolRelease() async throws {
+    func testAsyncMediaResultFromReleasedRuntimeCannotAdvanceOldPlan() async throws {
         let pool = makePool()
         var profile = makeProfile(name: "ReleasedMedia", policy: .cold)
         profile.backgroundMediaPolicy = .allowBackgroundAudio
@@ -1286,7 +1361,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var mediaQueryCount = 0
         let lifecycle = makeLifecycle(
             pool: pool,
-            coldReleaseDelay: 0.02,
+            longIdleThreshold: 0.02,
             mediaProtectionPollDelay: 0.01,
             mediaPlayingQuery: { _, completion in
                 mediaQueryCount += 1
@@ -1296,18 +1371,32 @@ final class WebAttentionLifecycleTests: XCTestCase {
 
         makeInactive(lifecycle, profile: profile)
         XCTAssertEqual(mediaQueryCount, 1)
-        pendingMediaResults.removeFirst()(false)
-        try await wait(milliseconds: 30)
-        XCTAssertEqual(mediaQueryCount, 2)
-
-        // This leaves the lifecycle plan intact while removing the runtime,
-        // which isolates the media callback's historical plan/visibility
-        // gating from the later release helper's pool eligibility check.
+        // The pending query belongs to this exact Runtime.
         pool.release(slotID: profile.id)
         pendingMediaResults.removeFirst()(true)
         try await wait(milliseconds: 70)
 
-        XCTAssertGreaterThanOrEqual(mediaQueryCount, 3)
+        XCTAssertEqual(mediaQueryCount, 1)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
+    func testOldInactivePlanCannotReclaimReplacementRuntimeGeneration() async throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "ReplacementRuntime", policy: .warm)
+        _ = try pool.webView(for: profile)
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            longIdleThreshold: 0.04
+        )
+        makeInactive(lifecycle, profile: profile)
+        let oldPlanToken = try XCTUnwrap(lifecycle.debugInactivePlanToken(slotID: profile.id))
+
+        pool.release(slotID: profile.id)
+        _ = try pool.webView(for: profile)
+        XCTAssertEqual(lifecycle.debugInactivePlanToken(slotID: profile.id), oldPlanToken)
+
+        try await wait(milliseconds: 90)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
     private func makePool() -> WebViewPool {
@@ -1316,11 +1405,11 @@ final class WebAttentionLifecycleTests: XCTestCase {
 
     private func makeLifecycle(
         pool: WebViewPool,
-        coldReleaseDelay: TimeInterval = 30,
-        warmReleaseDelay: TimeInterval = 120,
+        recentStageDuration: TimeInterval = 0,
+        longIdleThreshold: TimeInterval = 600,
         hiddenActiveGraceDelay: TimeInterval = 120,
         mediaProtectionPollDelay: TimeInterval = 0.01,
-        pressureStepDelay: TimeInterval = 600,
+        pressureStepDelay: TimeInterval = 0.02,
         mediaPlayingQuery: SlotLifecycleCoordinator.MediaPlayingQuery? = nil,
         prepareRuntimeForRelease: @escaping SlotLifecycleCoordinator.RuntimeReleasePreparation = { _ in },
         onRuntimeReleased: @escaping SlotLifecycleCoordinator.RuntimeReleasedHandler = { _ in },
@@ -1335,8 +1424,8 @@ final class WebAttentionLifecycleTests: XCTestCase {
         return SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: coldReleaseDelay,
-            warmReleaseDelay: warmReleaseDelay,
+            recentStageDuration: recentStageDuration,
+            longIdleThreshold: longIdleThreshold,
             hiddenActiveGraceDelay: hiddenActiveGraceDelay,
             mediaProtectionPollDelay: mediaProtectionPollDelay,
             pressureStepDelay: pressureStepDelay,

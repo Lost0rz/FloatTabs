@@ -205,6 +205,10 @@ final class AppPreferencesStore {
         "FloatTabs.performance.warmWebViewRetentionDelay"
     static let coldWebViewReleaseDelayKey =
         "FloatTabs.performance.coldWebViewReleaseDelay"
+    // Preserve parsing defaults for legacy preference values. WP2 lifecycle
+    // policy no longer consumes either setting.
+    private static let legacyWarmWebViewRetentionDelayFallback: TimeInterval = 120
+    private static let legacyColdWebViewReleaseDelayFallback: TimeInterval = 30
     static let runtimeDiagnosticsModeKey = "FloatTabs.runtimeDiagnostics.mode"
     static let longTermPerformanceObservationEnabledKey =
         "FloatTabs.longTermPerformanceObservation.enabled"
@@ -615,7 +619,7 @@ final class AppPreferencesStore {
         get {
             let raw = normalizedNonNegativeDouble(
                 forKey: Self.warmWebViewRetentionDelayKey,
-                fallback: SlotLifecycleCoordinator.defaultWarmReleaseDelay
+                fallback: Self.legacyWarmWebViewRetentionDelayFallback
             )
             return WarmWebViewRetentionOption(seconds: raw).seconds
         }
@@ -634,7 +638,7 @@ final class AppPreferencesStore {
         get {
             let raw = normalizedNonNegativeDouble(
                 forKey: Self.coldWebViewReleaseDelayKey,
-                fallback: SlotLifecycleCoordinator.defaultColdReleaseDelay
+                fallback: Self.legacyColdWebViewReleaseDelayFallback
             )
             return ColdWebViewReleaseOption(seconds: raw).seconds
         }

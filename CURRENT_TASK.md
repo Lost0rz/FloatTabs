@@ -77,6 +77,8 @@ Primary policy owner: FloatTabs/Web/SlotLifecycleCoordinator.swift. Inspect and 
 
 Focused suites: lifecycle; WebAttentionLifecycleTests; WebAttentionCrossFeatureTests; WebViewPool reclaim regressions; ExternalShell/WP1 presentation regressions; affected runtime diagnostic/privacy tests.
 
+Current verification: the focused lifecycle, cross-feature, pool, ExternalShell/WP1 presentation, notification, diagnostic/privacy, preference, and cache suites pass (589 tests run, 4 skipped, 0 failed). Full XCTest passes (1,160 tests run, 4 skipped, 0 failed). Debug and Release arm64 builds pass; the Release executable is arm64-only; locked package resolution passes with Package.resolved unchanged. Exact-head CI/QA and independent audit remain pending.
+
 Then full XCTest, Debug arm64, Release arm64, native arm64 verification, package-lock check, exact-head self-hosted macOS CI on [self-hosted, macOS, ARM64, mac-mini-ci], exact-head QA DMG, and a fresh independent exact-diff / ownership / data-safety audit. Do not infer exact-head evidence from earlier commits. Do not silently use hosted macOS CI.
 
 The 15 acceptance cases are enumerated in Policy V7. Stop after machine evidence and independent audit. Do not merge or release. HUMAN_UI_ACCEPTANCE=PENDING / USER_OWNED until the user validates integrated real-Mac multi-Slot use, long-idle restore through the WP1 gate, pinned retention, background generation protection, and intact login/session/conversation.
