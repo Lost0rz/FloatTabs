@@ -28,6 +28,24 @@ jobs:
       - name: Apply bounded test-contract corrective
         run: python3 tools/phase7_test_contract_corrective.py
 
+      - name: Correct per-slot inactive-plan assertion
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("FloatTabsTests/WebAttentionCrossFeatureTests.swift")
+          text = path.read_text()
+          old = '        XCTAssertEqual(controller.debugPendingWarmReleaseCount, webInteractionRegained ? 0 : 1)'
+          new = '''        if webInteractionRegained {
+              XCTAssertNil(controller.debugInactivePlanToken(slotID: slot.id))
+          } else {
+              XCTAssertNotNil(controller.debugInactivePlanToken(slotID: slot.id))
+          }'''
+          if old not in text:
+              raise SystemExit("expected global pending-plan assertion not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
+
       - name: Verify diff hygiene and test-only scope
         shell: bash
         run: |
@@ -100,3 +118,19 @@ jobs:
           git diff --cached --check
           git commit -m "Update Phase 7 tests for automatic lifecycle"
           git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Remove accidental temporary remote branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          for branch in \
+            codex/ft-runtime-lifecycle-phase7-automatic-001-control \
+            codex/ft-runtime-lifecycle-phase7-automatic-001-control-scratch \
+            codex/ft-runtime-lifecycle-phase7-automatic-001-temp \
+            codex/ft-runtime-lifecycle-phase7-automatic-001-work \
+            codex/ft-runtime-lifecycle-phase7-test-corrective-001 \
+            codex/ft-runtime-lifecycle-phase7-test-corrective-002 \
+            codex/ft-runtime-lifecycle-phase7-test-corrective-003
+          do
+            git push origin --delete "$branch" || true
+          done
