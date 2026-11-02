@@ -2,355 +2,90 @@
 
 **Task ID:** `FT-NOTIFICATION-RELIABILITY-RICH-PREVIEW-001`  
 **Title:** Native completion notification reliability + Slot name + assistant preview  
-**Status:** `ACTIVE / CORRECTIVE 001 AUTHORIZED`
-**Mode:** `CORRECTIVE IMPLEMENTATION AUTHORIZED / MERGE NOT AUTHORIZED`
+**Status:** `COMPLETE / MERGE AUTHORIZED`  
+**Mode:** `CLOSEOUT / MERGE BOUNDARY`  
 **Task class:** `APP / NATIVE NOTIFICATION / RESPONSE PROJECTION / UX RELIABILITY`  
 **Execution baseline:** `main@08831ad2cc3e7f18432b1a6ecdc983e849a992aa`  
-**Task branch:** `codex/notification-reliability-rich-preview-001`
-
-## Authorization
-
-The user opened a new standalone notification task after the Phase 8 lifecycle task closed.
-
-Authorized objective:
-
-1. make native ChatGPT completion notification delivery diagnosable;
-2. show the target Slot/Web App name in the notification;
-3. show a bounded plain-text preview of the completed assistant response when safely available;
-4. preserve exact-Slot click routing and existing Runtime restore ownership;
-5. keep notification behavior compatible with the merged lightweight background-generation policy.
-
-This task does not reopen or modify the closed Phase 8 memory-budget work.
-
-## Corrective 001 — current execution authority
-
-The existing implementation is on the same task branch and PR; this is a corrective continuation, not a new task or a Phase 8 reopening.
-
-```text
-CARD_ID=FT-NOTIFICATION-RELIABILITY-RICH-PREVIEW-001-CORRECTIVE-001
-TARGET=Lost0rz/FloatTabs
-BRANCH=codex/notification-reliability-rich-preview-001
-PR=193
-PR_STATE=OPEN_DRAFT_MERGEABLE_UNMERGED
-AUDITED_BASE=08831ad2cc3e7f18432b1a6ecdc983e849a992aa
-AUDITED_HEAD=18161e9b91159acd4a164aca824cdedbd10d48ce
-INDEPENDENT_SEMANTIC_VERDICT=HOLD
-HUMAN_UI_ACCEPTANCE=PENDING_NOT_STARTED
-MERGE=NOT_AUTHORIZED
-```
-
-The audited head's literal-head Build & Test and QA DMG passed. Those results do not transfer to the corrective head.
-
-### Finding A — blocking timeout and exactly-once fallback
-
-The one-shot preview request can suspend forever and suppress the hidden `.marked` completion notification. Add a bounded one-shot provider-vs-timeout race. The first terminal result wins: provider success admits the current-document preview; provider failure/nil, timeout, or runtime/navigation invalidation completes exactly once with `nil`. Provider results after timeout or invalidation are ignored. Do not add periodic polling or completed-runtime residency protection.
-
-### Finding B — important DOM sanitization and deduplication
-
-An allowed selected node can contain excluded descendants, and nested selected nodes can project the same text twice. Exclude descendant button, `[role=button]`, `[aria-hidden=true]`, toolbar/action chrome, and other existing `RESPONSE_EXCLUDED_SELECTOR` matches from projected text. Deduplicate nested selected content such as `li > p` and `blockquote > p`, while preserving legitimate list/code/math/paragraph text. Preserve the existing assistant-root ownership and `RESPONSE_CONTENT_SELECTOR` / `RESPONSE_EXCLUDED_SELECTOR` policy; do not create a second root classifier.
-
-### Corrective scope and required regressions
-
-Production corrections are limited to the existing task paths:
-
-- `FloatTabs/Web/ChatGPTResponseBridge.swift`
-- `FloatTabs/Web/ChatGPTResponseExtraction.swift`
-- `FloatTabs/Panel/PanelController.swift` only if narrowly required for exactly-once fallback orchestration
-
-Focused tests belong in:
-
-- `FloatTabsTests/ChatGPTResponseBridgeTests.swift`
-- `FloatTabsTests/ChatGPTResponseExtractionTests.swift`
-- `FloatTabsTests/WebAttentionCrossFeatureTests.swift`
-
-Prove timeout → one `nil` callback; late provider → no duplicate; runtime/document invalidation → one `nil` callback and ignored late result; hidden `.marked` timeout → one generic notification projection; descendant button/role-button/aria-hidden/toolbar text exclusion; nested-node deduplication; legitimate assistant content preservation; prompt/user exclusion; bounded JavaScript and final host preview.
-
-Preserve notification trigger, exact-Slot routing, `userInfo` (`version / kind / slot_id`), generic fallback, sound, settings diagnostics, RuntimeDiagnosticPrivacy, and lifecycle policy. Slot name/preview remain unpersisted and unlogged. Do not change generation detection, Phase 8 watchdogs (2s/5s/10s), Generating protection, target=2, 30s grace, pressure ladder, or Browser Profile/session data.
-
-### Corrective verification and delivery
-
-Run focused Bridge, Extraction, notification/composition, exact-Slot routing, and lifecycle/background regressions; full XCTest; Debug arm64; Release arm64; native arm64 verification; package-lock unchanged check; exact-diff/privacy/ownership self-audit. Push only to the existing branch / PR #193. Obtain fresh literal-head self-hosted mac-mini-ci Build & Test and QA DMG if triggered; do not reuse evidence from `18161e9b`.
-
-After delivery, stop at `WAITING_FOR_FRESH_INDEPENDENT_WEB_AUDIT`. Do not request human notification acceptance until the corrective head passes that audit. Merge remains unauthorized.
+**Task branch:** `codex/notification-reliability-rich-preview-001`  
+**PR:** `#193`
 
 ## Authority
 
 - Project rules: `AGENTS.md`
 - Current state: `CURRENT_STATUS.md`
-- Task contract: this file
-- Durable design/implementation contract: `docs/architecture/FloatTabs_Native_Completion_Notification_Reliability_Rich_Preview_Contract_V1.md`
-- Documentation routing: `docs/README.md`
+- Durable task contract: `docs/architecture/FloatTabs_Native_Completion_Notification_Reliability_Rich_Preview_Contract_V1.md`
 - Domain navigation: `docs/architecture/DOMAIN_MAP.md`
-- Existing Phase 3 notification plan: historical/delivered baseline only where not superseded by the new contract
-- Production source/tests/fresh repository and runtime evidence remain implementation truth.
+- Production source/tests/runtime evidence remain implementation truth.
 
-## Verified baseline findings
+## Final observed task result
 
-Fresh audit of `main@08831ad2...` established:
+Implementation head before the control-only closeout commit:
 
-1. `ChatGPTCompletionNotificationCoordinator` already owns the only `UNUserNotificationCenter` integration.
-2. Current content is intentionally generic: title `FloatTabs`, body `A ChatGPT response is ready.`.
-3. Current notification routing payload contains only `version / kind / slot_id`.
-4. `AppCoordinator` already wires notification default action to `PanelController.presentSlotFromCompletionNotification(slotID)`.
-5. Exact persistent Slot routing is already covered by tests; stale Slot IDs fail closed and do not fall back to the current Slot.
-6. Notification projection is triggered only when a valid hidden completion produces durable unread `.marked`; visible/invalid/already-handled completions do not notify.
-7. Existing response infrastructure can identify the latest assistant response root and response identity/status, but response-body preview is deliberately not currently extracted.
-8. Existing diagnostics record request / skipped / delivery-style events but do not record current macOS notification authorization/alert/preview settings and cannot prove a visible banner.
-9. Apple public notification settings APIs expose authorization, alert setting/style, Notification Center setting and show-previews policy; they do not provide a supported basis for claiming Focus suppression as proven root cause.
-10. There are no open PRs in the repository at task start and no pre-existing task branch matching this objective.
+`97eb588ffec370332b7115a9735594a92f6080c3`
 
-## Frozen product behavior
-
-### Trigger
-
-Preserve existing trigger semantics:
+Verified machine / audit result:
 
 ```text
-valid hidden completion
-AND durable unread transition == .marked
-→ one native notification projection attempt
+CORRECTIVE_A_TIMEOUT_EXACTLY_ONCE=PASS
+CORRECTIVE_B_DOM_SANITIZATION_DEDUP=PASS
+FOCUSED_TESTS=PASS_197_OF_197
+FULL_XCTEST=PASS_1148_OF_1148
+DEBUG_ARM64=PASS
+RELEASE_ARM64=PASS
+NATIVE_ARM64=PASS
+PACKAGE_LOCK=UNCHANGED
+LITERAL_HEAD_CI=PASS_RUN_41405393738
+QA_DMG=PASS_RUN_41405393795
+INDEPENDENT_AUDIT=PASS
+BLOCKING_FINDINGS=0
+IMPORTANT_FINDINGS=0
 ```
-
-Do not notify for visible completion, invalid/stray finish, already-handled duplicate, Runtime reset or restore alone.
-
-### Content
-
-Notification title:
-
-```text
-normalized Slot/Web App display name
-fallback: ChatGPT
-max: 80 user-perceived characters
-```
-
-Notification body:
-
-```text
-latest completed assistant response preview
-plain text
-normalized whitespace
-max: 240 user-perceived characters
-fallback: A ChatGPT response is ready.
-```
-
-Never include prompt/user text, URL, Browser Profile/session identity, document token or Runtime identity.
-
-### Routing payload
-
-Keep exactly:
-
-```text
-version
-kind
-slot_id
-```
-
-Do not add Slot name or response preview to `userInfo`.
-
-### Preview extraction ownership
-
-- `ChatGPTResponseExtraction` remains the DOM semantic source for assistant-response roots.
-- `ChatGPTResponseBridge` may add a separate one-shot preview snapshot API using its existing isolated content world and current-WebView/current-document guards.
-- Do not add response text to the existing ordinary status snapshot contract.
-- Preview is ephemeral and best-effort. If extraction fails, races Runtime/navigation replacement, or returns untrustworthy state, deliver the generic fallback body.
-- Preview extraction must not create periodic polling or a new long-lived Runtime protection.
-
-### Notification system preflight
-
-Before submission, read the current system notification settings through the injectable backend seam.
-
-Required bounded settings facts:
-
-- authorization status;
-- alert setting;
-- alert style;
-- Notification Center setting;
-- show-previews setting.
-
-If authorization is `notDetermined`, request `.alert` contextually and reread settings. Do not re-request authorization for every already-authorized completion.
-
-System submission success proves only that macOS accepted the request, not that a banner was visibly displayed. Diagnostics must use that semantic distinction.
-
-Do not use private APIs and do not claim current Focus/DND suppression is directly observable.
-
-### Exact click routing
-
-Preserve the existing route:
-
-```text
-notification default action
-→ parse persistent Slot UUID
-→ PanelController.presentSlotFromCompletionNotification(slotID)
-→ exact Slot select
-→ existing presentation/materialization path
-```
-
-No fallback to another/current Slot is allowed.
-
-## Authorized production paths
-
-Expected mutation scope:
-
-- `FloatTabs/App/ChatGPTCompletionNotificationCoordinator.swift`
-- `FloatTabs/App/AppCoordinator.swift`
-- `FloatTabs/Panel/PanelController.swift`
-- `FloatTabs/Web/ChatGPTResponseBridge.swift`
-- `FloatTabs/Web/ChatGPTResponseExtraction.swift`
-
-Conditional only if fresh source reconciliation proves it necessary:
-
-- `FloatTabs/Web/WebViewPool.swift` for a minimal read-only response-bridge projection seam only.
-
-No lifecycle policy file is authorized for semantic change.
-
-## Authorized test paths
-
-Expected focused coverage:
-
-- `FloatTabsTests/ChatGPTCompletionNotificationTests.swift`
-- `FloatTabsTests/ChatGPTResponseExtractionTests.swift`
-- `FloatTabsTests/ChatGPTResponseBridgeTests.swift`
-- `FloatTabsTests/WebAttentionCrossFeatureTests.swift`
-- narrowly necessary diagnostics/privacy regression only if new diagnostics fields require it.
-
-## Acceptance gates
-
-### N0 — source reconciliation
-
-Before production mutation, confirm current symbols/call order and that no newer branch/PR changed the notification or response ownership boundary.
-
-### N1 — preview extraction
-
-PASS only when tests prove:
-
-- latest assistant-only plain text extraction;
-- exclusion of user/composer/action/hidden content;
-- Unicode-safe whitespace normalization and 240-character cap;
-- no trusted preview for generating/missing/malformed/stale document state;
-- Runtime/navigation invalidation drops stale async preview results;
-- ordinary response-status snapshots remain body-free.
-
-### N2 — notification coordinator / settings
-
-PASS only when tests prove:
-
-- Slot name title + assistant preview body;
-- generic body fallback;
-- routing payload remains version/kind/slot_id only;
-- settings read occurs through injected backend;
-- authorization request occurs only from notDetermined and settings are reread;
-- denied/unavailable state skips system submission only;
-- authorized submission remains allowed when system banner policy is disabled, with diagnostics reflecting that fact;
-- same-Slot replacement and foreground banner/list/no-sound semantics remain intact;
-- no diagnostics field records Slot name or response text.
-
-### N3 — production composition / exact routing
-
-PASS only when tests prove:
-
-- hidden `.marked` completion emits one projection attempt;
-- visible/invalid/duplicate completions emit none;
-- preview failure still yields one generic notification attempt;
-- default-action routes exact Slot;
-- stale/deleted Slot never falls back;
-- non-resident target restores through existing Runtime ownership;
-- unread is not pre-cleared by submission/tap;
-- existing completion sound semantics are unchanged.
-
-### N4 — lifecycle/background regression
-
-PASS only when:
-
-- hidden generation watchdog remains 2s → 5s → 10s;
-- Generating remains hard-protected;
-- normal target=2 / 30s grace remain unchanged;
-- warning/critical pressure ladder remains unchanged;
-- no preview polling, second lifecycle writer or response-content persistence is introduced.
-
-### N5 — broad repository gate
-
-Required:
-
-- focused tests PASS;
-- full XCTest PASS;
-- Debug arm64 PASS;
-- Release arm64 PASS;
-- native arm64 architecture PASS;
-- package lock unchanged unless separately reconciled;
-- exact changed-path / ownership / privacy self-audit PASS;
-- push to this task branch and verify remote commit;
-- one Draft PR for this task;
-- literal-head required `Build & Test (Apple Silicon arm64)` PASS on `[self-hosted, macOS, ARM64, mac-mini-ci]`;
-- QA DMG PASS if automatically triggered;
-- independent exact-diff / ownership / privacy review before human acceptance.
 
 ## Human acceptance
 
-This task materially changes native notification content and click interaction.
+`HUMAN_UI_ACCEPTANCE=PASS`.
 
-`HUMAN_UI_ACCEPTANCE=PENDING` until the user explicitly validates the real macOS notification behavior.
+The user explicitly validated the real installed QA build on macOS:
 
-After machine + independent audit gates, stop before merge and ask the user to validate:
+1. hidden ChatGPT completion produced the expected native notification;
+2. notification title/body content was correct;
+3. a roughly 1m20s hidden generation completed successfully;
+4. lifecycle diagnostics showed generation protection while active and later `Automatic` hibernation after completion;
+5. notification click opened the exact persistent Slot after Runtime reclaim;
+6. the conversation/session restored correctly.
 
-1. hidden ChatGPT completion produces a notification when macOS settings allow it;
-2. correct Slot name appears;
-3. assistant preview is sensible when system preview policy allows it;
-4. clicking opens the exact Slot;
-5. reclaimed Runtime restores correctly from a notification click;
-6. macOS preview-disabled behavior is not misdiagnosed as app failure;
-7. alert-disabled behavior is reflected in diagnostics.
+This satisfies the task's required human notification acceptance and exact-Slot restore acceptance.
 
-AI/browser/screenshot inspection does not count as human acceptance.
+## Final invariant result
 
-## Explicit non-scope
+- notification routing payload remains exactly `version / kind / slot_id`;
+- no Slot name or assistant preview is persisted in FloatTabs product state, diagnostics, backups or Runtime snapshots;
+- no preview polling or completed-Runtime residency requirement was introduced;
+- existing completion sound semantics remain unchanged;
+- generation protection, 30s Automatic grace, resident target, pressure ordering and Browser Profile/session ownership remain unchanged by this task.
 
-Do not add or change:
+## Merge authorization
 
-- FloatTabs notification settings UI/persistence;
-- notification sound policy;
-- Time Sensitive/Critical Alert escalation;
-- Focus/DND bypass;
-- remote push or Web Notification API emulation;
-- persisted notification history or persisted response text;
-- ChatGPT generation detector semantics merely to obtain preview text;
-- Runtime lifecycle policy/timers;
-- aggregate memory-budget work;
-- Browser Profile/session/cache reset or migration.
+The user explicitly authorized merging the already-accepted work on `2026-11-02`.
 
-## STOP conditions
-
-STOP and reconcile if implementation requires:
-
-- a second completion/unread/Tab/Runtime writer;
-- periodic response-preview polling;
-- adding Slot name/preview to routing `userInfo`;
-- persisting/logging response text or Slot name;
-- unbounded wait for preview extraction;
-- keeping a completed Runtime resident solely for notification preview;
-- private notification/Focus APIs;
-- lifecycle timer/pressure/generation-protection changes;
-- destructive user/session data mutation;
-- mutation outside authorized production scope without evidence-backed reconciliation;
-- required tests/build/CI failure caused by the task.
-
-## Delivery / merge boundary
-
-The implementation stays on:
-
-`codex/notification-reliability-rich-preview-001`
-
-Use one Draft PR for the task. Do not merge from the executor context.
-
-Required stopping state after implementation:
+Required final action:
 
 ```text
-machine gates complete
-literal-head CI complete
-independent audit still required or complete as observed
-HUMAN_UI_ACCEPTANCE=PENDING
-MERGE=NOT_MERGED
+control-only closeout commit
+→ literal-head merge-boundary verification
+→ merge PR #193
 ```
 
-For Corrective 001, the immediate required stop is `WAITING_FOR_FRESH_INDEPENDENT_WEB_AUDIT`; human acceptance is not requested before that audit passes.
+No further notification product mutation is authorized under this task.
 
-Final merge requires the user’s explicit human notification acceptance plus fresh merge-boundary verification.
+## Next task boundary
+
+After #193 is merged, open a separate lifecycle/performance task to audit and design the newly observed issues:
+
+- cold-restore latency / visible empty-content interval after long inactivity;
+- replacement of the rigid normal `resident target = 2` policy with an evidence-based adaptive policy;
+- Active / Warm-Frozen / Hibernated lifecycle layering to improve resource reduction without sacrificing restore latency;
+- explicit investigation of public WebKit inactive scheduling/suspension behavior, snapshot-based continuity, pressure behavior and macOS-version compatibility;
+- no byte-based per-Slot or aggregate RAM budget may be claimed unless attribution becomes supportably measurable.
+
+That work must not be added to PR #193.
