@@ -2,24 +2,19 @@
 
 **Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
 **Title:** Adaptive Runtime lifecycle + fast restore + background efficiency  
-**Status:** `ACTIVE / WP1 CORRECTIVE-002 + CI DIAGNOSIS AUTHORIZED`  
-**Mode:** `EXECUTE / DIAGNOSE — WP1 PRESENTATION READINESS CORRECTIVE`  
+**Status:** `ACTIVE / WP1 MACHINE GATE PASS; HUMAN UI ACCEPTANCE PENDING`
+**Mode:** `WAITING — USER-OWNED HUMAN UI ACCEPTANCE; NO FURTHER IMPLEMENTATION AUTHORIZED`
 **Task class:** `WEB RUNTIME / LIFECYCLE / PERFORMANCE / RESTORE UX`  
 **Execution baseline:** `main@7e179aaf4dbf0c538c7c2221101fc74d16e49b98`  
 **Task branch:** `codex/adaptive-lifecycle-restore-001`
 
 ## Authorization
 
-This remains the same task and the same WP1 product objective. No successor task, new lifecycle phase, or WP2 authority is created.
+This remains the same task and the same WP1 product objective. No successor task, new lifecycle phase, or WP2 authority is created. WP1 Corrective-002 and its bounded CI gate are complete; the remaining acceptance step is user-owned.
 
-The implementation head `1a457adccf10fce3631963caad8aa5cfb30f4561` corrects the prior navigation-failure and cold-unread findings, but a fresh independent audit found one remaining WP1 correctness gap: rapid A→B→A can reuse an existing but not-yet-ready Runtime as though residency implied presentation readiness.
+The implementation head `e187f83fd2c4198d3e2baa64ef5074037c87c410` adds exact-Runtime presentation readiness and closes the rapid A→B→A gap. Local verification, the single required literal-head self-hosted CI run, QA DMG, and a fresh independent exact-diff audit all pass. The cause of the earlier broad CI failures at `1a457ad…` remains unknown; the later pass does not establish their cause.
 
-The same literal head also fails the required self-hosted macOS CI gate despite a green local full-XCTest run. CI root cause is not yet established.
-
-This file authorizes only:
-
-1. **WP1 Corrective-002** — establish exact-Runtime presentation readiness so existing but loading/failed Runtime cannot bypass the canonical cold gate; and
-2. **bounded CI diagnosis** if the next exact implementation head reproduces the broad self-hosted CI failure.
+Corrective-002 implementation and machine verification are complete. This card authorizes no further product implementation. Human UI acceptance is pending for the user; WP2–WP4 remain unauthorized.
 
 Durable design authority remains:
 
@@ -41,12 +36,12 @@ V2 is amended for the new readiness invariant; V1 remains superseded.
 ## Current evidence head
 
 ```text
-implementation_head = 1a457adccf10fce3631963caad8aa5cfb30f4561
-prior_corrective_parent = 1d0d2e040dae38a7b468f9edcb32dd55825428fa
+implementation_head = e187f83fd2c4198d3e2baa64ef5074037c87c410
+implementation_parent = 3152a606d81ce7764fbb28af15524d8effde2acd
 PR_194 = OPEN / DRAFT / UNMERGED
 ```
 
-Verified results at `1a457ad…`:
+Verified results at `e187f83…`:
 
 - navigation-failure presentation corrective: PASS;
 - failed-WebView focus exclusion: PASS for that path;
@@ -57,15 +52,18 @@ Verified results at `1a457ad…`:
 - resident fast path: PASS in focused regression;
 - notification routing/privacy regressions: PASS;
 - generation-protection regressions: PASS;
-- local full XCTest: `1149 passed / 4 skipped / 0 failed`;
-- local Debug/Release/native arm64/package-lock: PASS;
-- QA DMG: PASS;
-- literal-head self-hosted macOS CI: FAIL on two attempts;
-- independent exact-diff audit: `FINDINGS / STOP` due rapid-switch readiness gap.
+- A→B→A loading return reuses the same Runtime under a fresh Restoring generation, without duplicate creation or pre-ready focus/reveal: PASS;
+- background finish isolation, Runtime identity replacement rejection, and failed Runtime re-entry: PASS;
+- focused affected suites: `381 passed / 4 skipped / 0 failed`;
+- local full XCTest: `1153 passed / 4 skipped / 0 failed`;
+- local Debug arm64, Release arm64, native arm64, and package-lock checks: PASS;
+- literal-head self-hosted macOS CI: PASS, run `41464559708`, job `125341924174`;
+- QA DMG: PASS, run `41464559462`;
+- fresh independent exact-diff / ownership / data-safety audit: PASS, no blocking or important findings.
 
-## Corrective C — Runtime residency is not presentation readiness
+## Corrective C — Runtime residency is not presentation readiness (corrected at `e187f83…`)
 
-### Defect
+### Historical defect
 
 The current generic resident path can infer readiness from `webViewPool.existingWebView(for:) != nil`.
 
@@ -155,47 +153,29 @@ Add focused regressions proving at minimum:
 9. notification exact-Slot/privacy/content regressions remain PASS.
 10. generation/Attention protection regressions remain PASS.
 
-## Machine verification gate
+## Machine verification gate — completed
 
-After Corrective-002:
+Corrective-002 results at `e187f83…`:
 
-- focused rapid-switch/readiness regressions;
-- affected presentation/materialization/failure/unread/notification/Attention regressions;
-- full local XCTest;
-- Debug arm64;
-- Release arm64;
-- native arm64 verification;
-- package-lock unchanged unless separately reconciled;
-- push the existing task branch and verify remote delivery;
-- run one clean literal-head self-hosted macOS CI;
-- run literal-head QA DMG.
+- focused rapid-switch/readiness and affected presentation/materialization/failure/unread/notification/Attention regressions: PASS;
+- full local XCTest: PASS (1153 passed / 4 skipped / 0 failed);
+- Debug arm64, Release arm64, and native arm64 verification: PASS;
+- package-lock: unchanged;
+- existing task branch pushed at `e187f83…`;
+- one clean literal-head self-hosted macOS CI: PASS (run `41464559708`, job `125341924174`);
+- literal-head QA DMG: PASS (run `41464559462`);
+- fresh independent exact-diff / ownership / data-safety audit: PASS.
 
 ### CI diagnosis boundary
 
-The current `1a457ad…` CI failures are a real gate blocker but their root cause is `UNKNOWN`. Local success does not prove CI is flaky, and the current evidence does not prove task causality either.
-
-If the next exact implementation head passes the literal-head CI, proceed to a fresh independent exact-diff/ownership/data-safety audit.
-
-If the broad WebKit-focused CI failure repeats, **STOP before further product mutation or blind rerun** and return a bounded evidence package containing:
-
-```text
-CI_RUN_ID
-CI_JOB_ID
-FIRST_10_FAILING_TESTS
-FAILURE_SIGNATURE_GROUPS
-FOCUSED_NEW_TESTS_RESULT
-REPEATED_FAILURE_OVERLAP
-LOCAL_FULL_XCTEST_RESULT
-OBSERVABLE_RUNNER_HOST_PRECONDITIONS
-TASK_CAUSALITY = PROVEN / DISPROVEN / UNKNOWN
-```
+The two prior `1a457ad…` CI failures remain unexplained (`CI_ROOT_CAUSE=UNKNOWN`, `TASK_ATTRIBUTION=UNPROVEN`). The single authorized next-head CI run at `e187f83…` passed, followed by the required independent audit. This does not establish the cause of the earlier failures, and no blind rerun was performed.
 
 Do not perform destructive runner cleanup, delete user/session data, or repeatedly rerun until green.
 
 ## Human UI acceptance
 
 ```text
-HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
+HUMAN_UI_ACCEPTANCE=PENDING_USER_OWNED
 ```
 
 Human acceptance may begin only after:
@@ -275,7 +255,7 @@ CI_FAILURE_TAXONOMY
 TASK_CAUSALITY
 
 INDEPENDENT_AUDIT
-HUMAN_UI_ACCEPTANCE=BLOCKED_OR_PENDING
+HUMAN_UI_ACCEPTANCE=PENDING_USER_OWNED
 
 WP2_POLICY_MUTATION=NOT_STARTED
 WP3_SCHEDULING_MUTATION=NOT_STARTED

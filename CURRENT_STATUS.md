@@ -6,9 +6,9 @@
 
 ## Mode
 
-**MODE: ADAPTIVE LIFECYCLE + RESTORE PERFORMANCE — WP1 CORRECTIVE-002 + CI DIAGNOSIS**
+**MODE: ADAPTIVE LIFECYCLE + RESTORE PERFORMANCE — WP1 MACHINE GATE PASS; HUMAN ACCEPTANCE PENDING**
 
-Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` — **ACTIVE / WP1 MACHINE CORRECTIVE-002; HUMAN ACCEPTANCE BLOCKED**.
+Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` — **ACTIVE / WP1 MACHINE GATE PASS; HUMAN UI ACCEPTANCE PENDING (USER-OWNED)**.
 
 Task branch:
 
@@ -24,7 +24,7 @@ Execution baseline:
 
 Latest implementation / fresh audit evidence head:
 
-`1a457adccf10fce3631963caad8aa5cfb30f4561`
+`e187f83fd2c4198d3e2baa64ef5074037c87c410`
 
 ## Repository / delivery state
 
@@ -33,21 +33,22 @@ PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 MAIN_BASELINE=7E179AAF
 TASK=FT-ADAPTIVE-LIFECYCLE-RESTORE-001
-TASK_STATE=ACTIVE_WP1_CORRECTIVE_002_AND_CI_DIAGNOSIS
+TASK_STATE=ACTIVE_WAITING_USER_OWNED_HUMAN_UI_ACCEPTANCE
 PR_194=OPEN_DRAFT_UNMERGED
-WP1_CANONICAL_COLD_PRESENTATION_GATE=PARTIAL
+WP1_CANONICAL_COLD_PRESENTATION_GATE=IMPLEMENTED
 WP1_FINDING_A_NAVIGATION_FAILURE=CORRECTED_AT_1A457AD
 WP1_FINDING_B_COLD_UNREAD_READINESS=CORRECTED_AT_1A457AD
-WP1_FINDING_C_RAPID_SWITCH_READINESS=OPEN
-WP1_MACHINE_GATE=BLOCKED
-LOCAL_FULL_XCTEST=PASS_1149_4_SKIPPED_0_FAILED
-LITERAL_HEAD_CI=FAIL
-CI_ROOT_CAUSE=UNKNOWN
-QA_DMG=PASS
-HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
-WP2_POLICY_MUTATION=BLOCKED
-WP3_SCHEDULING_MUTATION=BLOCKED
-WP4_POLICY_INTEGRATION=BLOCKED
+WP1_FINDING_C_RAPID_SWITCH_READINESS=CORRECTED_AT_E187F83
+WP1_MACHINE_GATE=PASS
+LOCAL_FULL_XCTEST=PASS_1153_4_SKIPPED_0_FAILED
+LITERAL_HEAD_CI=PASS_RUN_41464559708_JOB_125341924174
+PRIOR_CI_FAILURE_ROOT_CAUSE=UNKNOWN
+QA_DMG=PASS_RUN_41464559462
+INDEPENDENT_EXACT_DIFF_AUDIT=PASS
+HUMAN_UI_ACCEPTANCE=PENDING_USER_OWNED
+WP2_POLICY_MUTATION=NOT_STARTED
+WP3_SCHEDULING_MUTATION=NOT_STARTED
+WP4_INTEGRATION_MUTATION=NOT_STARTED
 COLD_RESTORE_PRESENTATION_ROOT_CAUSE=KNOWN
 COLD_RESTORE_LATENCY_ROOT_CAUSE=NARROWED
 WEBKIT_FIRST_PIXEL=UNMEASURED
@@ -83,7 +84,27 @@ package lock = unchanged
 QA DMG = PASS
 ```
 
-## Open WP1 finding C — Runtime residency is not presentation readiness
+## WP1 Corrective-002 evidence at `e187f83…`
+
+The exact-Runtime readiness gate closes the rapid-switch finding while preserving the existing WebPanelContainerView Restoring surface and the resident-ready fast path. The A→B→A regression confirms same-Runtime re-entry under a fresh restoring generation, no duplicate creation or pre-ready focus/reveal, and reveal only after the exact-current finish. Background finish isolation, Runtime identity replacement rejection, and failed Runtime re-entry are also covered.
+
+Machine verification and independent review:
+
+```text
+focused affected suites = PASS (381 passed / 4 skipped / 0 failed)
+full XCTest = PASS (1153 passed / 4 skipped / 0 failed)
+Debug arm64 = PASS
+Release arm64 = PASS
+native arm64 verification = PASS
+package lock = unchanged
+literal-head self-hosted macOS CI = PASS (run 41464559708 / job 125341924174)
+QA DMG = PASS (run 41464559462)
+fresh independent exact-diff / ownership / data-safety audit = PASS
+```
+
+The audit found no blocking or important code findings. Human UI acceptance is pending for the user and was not performed by the agent. WP2–WP4 remain not started.
+
+## Historical WP1 finding C — Runtime residency is not presentation readiness (corrected)
 
 The fresh exact-diff audit found an A→B→A path that can still bypass the cold presentation gate:
 
@@ -131,29 +152,19 @@ Required semantics:
 
 Do not solve this presentation race by releasing/hibernating A. Runtime teardown/reclaim is lifecycle policy/mechanism and is outside WP1 corrective scope.
 
-## Literal-head CI blocker
+## Historical literal-head CI failures
 
-The literal-head self-hosted macOS CI for `1a457ad…` failed twice while the same source passed the full local XCTest suite. The reported failures are broad and concentrated in WebKit focus/page-load/geometry tests; the new WP1 corrective tests themselves passed.
+The literal-head self-hosted macOS CI for `1a457ad…` failed twice while the same source passed the full local XCTest suite. The reported failures were broad and concentrated in WebKit focus/page-load/geometry tests; the new WP1 corrective tests themselves passed. The next implementation head `e187f83…` passed the single required literal-head CI attempt. The cause of the earlier failures remains unknown; this pass does not retrospectively establish their cause.
 
-Current classification:
+Historical classification of the prior run:
 
 ```text
-CI_FAILURE=REAL_GATE_BLOCKER
-CI_ROOT_CAUSE=UNKNOWN
-TASK_ATTRIBUTION=UNPROVEN
+PRIOR_CI_FAILURE=REAL_GATE_BLOCKER
+PRIOR_CI_ROOT_CAUSE=UNKNOWN
+PRIOR_TASK_ATTRIBUTION=UNPROVEN
 ```
 
-A local green run does not override the literal-head CI gate, and a broad CI failure must not be dismissed as infrastructure flakiness without evidence.
-
-The next implementation head receives one clean literal-head CI run after the rapid-switch correction. If broad failure persists, stop implementation and return a bounded failure taxonomy before any further rerun:
-
-- run/job IDs;
-- first 10 failing test names;
-- grouped failure signatures;
-- whether focused/new tests passed;
-- whether repeated attempts fail the same tests/signatures;
-- local full-XCTest result;
-- observable runner/host preconditions relevant to the failures.
+The required next-head check after the rapid-switch correction completed successfully at `e187f83…`. The prior failure cause remains unknown and is not inferred from the later pass.
 
 No destructive runner cleanup, Browser Profile/session deletion, or blind rerun loop is authorized.
 
@@ -172,15 +183,9 @@ No destructive runner cleanup, Browser Profile/session deletion, or blind rerun 
 ## Next gate
 
 ```text
-WP1 Corrective-002: exact-Runtime presentation readiness + A→B→A safety
-→ focused rapid-switch/readiness regressions
-→ full local machine gate
-→ push exact head
-→ one clean literal-head self-hosted macOS CI + QA DMG
-→ if CI fails broadly again: STOP for CI evidence taxonomy / diagnosis
-→ if CI passes: fresh independent exact-diff / ownership / data-safety audit
-→ only if audit PASS: user real-Mac human acceptance
+WP1 Corrective-002 machine gate and independent audit = PASS at e187f83…
+→ user-owned human real-Mac acceptance is PENDING
 → no merge before human acceptance
 
-WP2 / WP3 / WP4 remain blocked.
+WP2 / WP3 / WP4 remain not started and unauthorized.
 ```
