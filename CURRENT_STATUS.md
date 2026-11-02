@@ -6,87 +6,141 @@
 
 ## Mode
 
-**MODE: NATIVE COMPLETION NOTIFICATION — MACHINE + INDEPENDENT AUDIT + HUMAN ACCEPTANCE COMPLETE / MERGE AUTHORIZED**
+**MODE: ADAPTIVE LIFECYCLE + RESTORE PERFORMANCE — AUDIT/DESIGN FROZEN / WP0 EVIDENCE GATE AUTHORIZED**
 
-Current task: `FT-NOTIFICATION-RELIABILITY-RICH-PREVIEW-001` — **COMPLETE / MERGE AUTHORIZED**.
+Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` — **ACTIVE / WP0 AUTHORIZED**.
 
 Task branch:
 
-`codex/notification-reliability-rich-preview-001`
+`codex/adaptive-lifecycle-restore-001`
 
-Implementation/audit head before this control-only closeout:
+Execution baseline:
 
-`97eb588ffec370332b7115a9735594a92f6080c3`
+`main@7e179aaf4dbf0c538c7c2221101fc74d16e49b98`
 
 ## Repository / delivery state
 
 ```text
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
-TASK=FT-NOTIFICATION-RELIABILITY-RICH-PREVIEW-001
-PR_193=OPEN_DRAFT_MERGEABLE_UNMERGED_AT_CLOSEOUT_START
-IMPLEMENTATION_HEAD=97eb588ffec370332b7115a9735594a92f6080c3
-CORRECTIVE_A_TIMEOUT_EXACTLY_ONCE=PASS
-CORRECTIVE_B_DOM_SANITIZATION_DEDUP=PASS
-FOCUSED_CORRECTIVE_REGRESSIONS=PASS_197_OF_197
-FULL_XCTEST=PASS_1148_OF_1148
-DEBUG_ARM64_BUILD=PASS
-RELEASE_ARM64_BUILD=PASS
-NATIVE_ARM64=PASS
-PACKAGE_LOCK=UNCHANGED
-LITERAL_HEAD_CI=PASS_RUN_41405393738
-QA_DMG=PASS_RUN_41405393795
-INDEPENDENT_AUDIT=PASS
-BLOCKING_FINDINGS=0
-IMPORTANT_FINDINGS=0
-HUMAN_UI_ACCEPTANCE=PASS
-MERGE_AUTHORIZED=YES
+MAIN_BASELINE=7E179AAF
+PR_193=MERGED
+PR_193_SQUASH_MERGE=7E179AAF
+NOTIFICATION_HUMAN_ACCEPTANCE=PASS
+TASK=FT-ADAPTIVE-LIFECYCLE-RESTORE-001
+TASK_STATE=ACTIVE_WP0_AUTHORIZED
+PRODUCT_POLICY_MUTATION=BLOCKED_PENDING_WP0
+COLD_RESTORE_ROOT_CAUSE=UNKNOWN
+NORMAL_FIXED_TARGET_2=CURRENT_PRODUCTION_TRUTH_NOT_FINAL_PRODUCT_TARGET
+AUTOMATIC_30S_UNCONDITIONAL_RELEASE=CURRENT_PRODUCTION_TRUTH_UNDER_REVIEW
+AGGREGATE_GIB_BUDGET=DEFERRED_PLATFORM_BLOCKED
+PRIVATE_WEBKIT_SPI=FORBIDDEN
 ```
 
-## Human acceptance evidence
+Current task contract:
 
-The user validated the installed QA build from implementation head `97eb588f...` on real macOS:
+`docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md`
 
-1. a hidden ChatGPT response of about 1m20s produced the expected native notification;
-2. notification content was correct;
-3. the generating Slot remained lifecycle-protected while the response was active;
-4. after completion the Slot entered `Automatic` inactive state and later emitted `slot_lifecycle.hibernate` with `release_reason=automatic_grace_expired`;
-5. resident-budget reclaim was observed separately with `target=2 / resident=3 / eviction=1`;
-6. clicking the notification opened the exact intended Slot after that Runtime had been reclaimed;
-7. the Browser Profile/session and conversation restored correctly.
+## Fresh user-observed problems
 
-This completes the notification task's required human acceptance and also provides real-runtime evidence that notification routing remains compatible with hibernation/materialization.
+1. **Cold restore / perceived blank interval.** After FloatTabs has been unused long enough for Runtime reclaim, summoning it can present the shell/colored border while the Web content remains visually absent for roughly one second or more before the page appears. Exact Slot/session restoration is correct, but the perceived restore path is not acceptable yet. Root cause remains `UNKNOWN` until the restore timeline is measured.
+2. **Rigid healthy-state Runtime count.** Production still treats `Automatic resident target = 2` as the normal count budget. This is a tuning constant, not a trustworthy memory budget, and the user has rejected it as the final product policy.
+3. **Background efficiency vs restore latency.** FloatTabs needs a supported layered strategy that reduces work/resource use for hidden/inactive Runtime without destroying fast revisit behavior, while preserving generation/media/fullscreen correctness and Browser Profile/session data.
 
-## Ownership / privacy result
+## Fresh source audit
 
-- `ChatGPTCompletionNotificationCoordinator` remains the sole native notification projection owner.
-- `ChatGPTResponseExtraction` remains the assistant-response DOM semantic source.
-- `ChatGPTResponseBridge` owns bounded one-shot preview extraction and current Runtime/document validity.
-- `PanelController` owns hidden-completion handoff and exact-Slot presentation routing.
-- `SlotLifecycleCoordinator` remains the sole lifecycle writer.
-- routing `userInfo` remains exactly `version / kind / slot_id`.
-- Slot name and assistant preview are not persisted or logged by FloatTabs.
-- notification preview never creates a new lifecycle residency requirement.
+### Lifecycle policy
 
-## Previous lifecycle program state
+`SlotLifecycleCoordinator` is still the sole lifecycle writer. Current production behavior remains:
 
-Phase 8 remains closed/merged. The following behavior remains current:
+```text
+Automatic inactive
+→ create inactive plan
+→ 30s grace
+→ hibernate if still eligible
 
-- Automatic inactive release uses a 30s grace;
-- normal Automatic resident target is currently 2;
-- warning pressure progressively reclaims eligible Automatic Runtime;
-- critical pressure reclaims Automatic first, then inactive/unprotected Keep Loaded;
-- generating Runtime remains hard-protected;
-- aggregate FloatTabs/WebContent/GPU memory attribution is still not considered deterministic enough to drive a byte-budget scheduler.
+normal resident Automatic count > 2
+→ reclaim eligible Automatic Runtime by deterministic order
 
-The user has now identified a separate next lifecycle/performance problem set: cold-restore latency, the rigidity of the fixed normal resident target, and the need to evaluate a layered Active/Warm/Hibernated resource model. That work is not part of PR #193 and must open as a new task after #193 merge.
+warning pressure
+→ progressive eligible Automatic reclaim
+
+critical pressure
+→ Automatic first, then inactive/unprotected Keep Loaded
+```
+
+Generating/fullscreen/media/visible work remains protected.
+
+### Runtime mechanism / restore
+
+`WebViewPool.hibernate` captures an opaque, memory-only `interactionState` restore snapshot, then tears down the live WebView Runtime. A cold revisit creates a fresh `WKWebView` and reapplies compatible interaction state. This preserves session/navigation correctness but does not preserve a live rendered surface, so cold restore necessarily has a materialization window.
+
+`PanelController` / `WebPanelContainerView` already own a native `Restoring…` presentation and exact-current Runtime readiness handshake. The user's visible blank-border symptom therefore requires timing/presentation evidence before changing restore mechanics; do not assume interaction-state failure.
+
+### WebKit inactive scheduling
+
+Current `WebViewFactory` does not override `WKPreferences.inactiveSchedulingPolicy`.
+
+On macOS 14+, Apple's public API states the default policy is `suspend` for a WebView that is not in a window. A suspended idle WebView pauses JavaScript execution and page layout. WebViews playing media, doing media capture, loading pages, or otherwise user-interactive may be exempt. Therefore FloatTabs must not introduce an explicit `.suspend` and call it a new Frozen layer without first characterizing the actual current behavior.
+
+macOS 13 does not expose this public API; compatibility behavior must remain evidence-driven and use no private SPI.
+
+### Memory-budget platform boundary
+
+The prior Phase 8 feasibility result remains authoritative: supported public production APIs cannot deterministically attribute dominant WebContent/GPU helper footprint to FloatTabs. Therefore no per-Slot or aggregate GiB limit may be implemented from guessed Runtime counts or process correlation.
+
+## Design direction
+
+The task will evaluate a layered runtime model using observable facts rather than fake memory attribution:
+
+```text
+ACTIVE / HARD-PROTECTED
+→ RESIDENT_BACKGROUND
+→ NO_RUNTIME_WITH_RESTORE_STATE
+→ RESTORING
+→ ACTIVE
+```
+
+`RESIDENT_BACKGROUND` is deliberately not named `FROZEN` as product truth until WebKit scheduling behavior is proven for the relevant state and macOS version.
+
+The fixed healthy-state `target=2` must not survive as the final invariant. The exact replacement policy is gated on WP0 evidence. Two candidates remain open:
+
+- pressure-first + long-idle cleanup;
+- adaptive soft warm-set driven by machine class + recency/revisit facts, explicitly not a RAM budget.
+
+## Work-package gates
+
+```text
+WP0 = runtime characterization + restore timing evidence
+WP1 = restore first-frame continuity
+WP2 = adaptive healthy-state lifecycle policy
+WP3 = background resident scheduling characterization/integration
+WP4 = hibernate/restore policy integration + anti-thrash
+WP5 = broad machine verification + real-Mac human acceptance
+```
+
+Only WP0 is authorized now. Product lifecycle semantics must not change until WP0 evidence is reconciled into the task contract.
+
+## Preserved invariants
+
+- `SlotLifecycleCoordinator` remains the sole lifecycle policy writer.
+- `WebViewPool` remains Runtime create/hibernate/restore/release mechanism owner.
+- `PanelController` remains presentation/materialization owner.
+- `WebAttentionCoordinator` remains generation/Attention authority.
+- Browser Profile/cookies/session/configuration are never cleared as resource management.
+- warning/critical pressure ladder remains operational.
+- generating Runtime remains hard-protected unless a separately proven public scheduling behavior preserves generation continuity.
+- no private WebKit SPI, process killing, reload/reset workaround, guessed RAM attribution or second lifecycle writer.
 
 ## Next gate
 
 ```text
-PR_193_CONTROL_ONLY_CLOSEOUT
-→ final literal-head merge-boundary check
-→ merge #193
-→ refresh main
-→ open separate adaptive lifecycle / restore-latency audit + design task
+WP0
+→ characterize resident quick-revisit vs cold-reclaimed restore
+→ measure shell/restoring/runtime/readiness timing
+→ characterize detached idle / generating / media behavior
+→ decide pressure-first vs adaptive-soft-warm-set normal policy
+→ decide whether bounded memory-only visual snapshot is justified
+→ update contract with evidence
+→ only then authorize product behavior mutation
 ```
