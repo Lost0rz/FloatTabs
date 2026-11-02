@@ -2,298 +2,307 @@
 
 **Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
 **Title:** Adaptive Runtime lifecycle + fast restore + background efficiency  
-**Status:** `ACTIVE / WP0 PARTIAL — REAL SCENARIO CAPTURE PENDING`
-**Mode:** `AUDIT / DESIGN / WP0 CHARACTERIZATION`  
+**Status:** `ACTIVE / WP1 UNIFIED COLD-RESTORE PRESENTATION GATE AUTHORIZED`  
+**Mode:** `DESIGN / EXECUTE — WP1 PRESENTATION CORRECTIVE`  
 **Task class:** `WEB RUNTIME / LIFECYCLE / PERFORMANCE / RESTORE UX`  
 **Execution baseline:** `main@7e179aaf4dbf0c538c7c2221101fc74d16e49b98`  
 **Task branch:** `codex/adaptive-lifecycle-restore-001`
 
 ## Authorization
 
-The user explicitly opened this new lifecycle/performance task after accepting and merging PR #193.
+The user opened this lifecycle/performance task after accepting and merging PR #193. Controlled real-Mac WP0 restore evidence has now been independently reconciled.
 
-Authorized objective:
+The task remains the same task. This update authorizes the first bounded product corrective:
 
-1. diagnose and reduce the visible cold-restore delay after long inactivity;
-2. replace the rigid healthy-state `Automatic resident target = 2` as the final product policy;
-3. establish a supported background Runtime strategy that reduces unnecessary resource use without sacrificing fast revisit, generation continuity, media/fullscreen correctness or persistent Browser Profile/session state;
-4. preserve the existing progressive system-memory-pressure ladder;
-5. keep memory claims honest where WebContent/GPU attribution is not supportably available.
+> **WP1 only — unify all nonresident selected-Slot presentation paths behind one truthful native restoring gate so neither an empty shell nor a blank fresh WebView is exposed while cold materialization is incomplete.**
 
-Durable design/audit contract:
+Durable design authority:
 
-`docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md`
+`docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`
+
+V1 is superseded by V2 after the accepted WP0 restore-evidence reconciliation.
 
 ## Authority
 
 - Project rules: `AGENTS.md`
 - Current state: `CURRENT_STATUS.md`
-- Task authorization: this file
-- Design/audit contract: `docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md`
+- Active authorization: this file
+- Durable design contract: `docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`
 - Documentation routing: `docs/README.md`
+- Architecture routing: `docs/architecture/README.md`
 - Domain navigation: `docs/architecture/DOMAIN_MAP.md`
 - Production source/tests/fresh runtime evidence remain implementation truth.
 
-## Current verified baseline
+## Accepted WP0 restore evidence
 
-### Current normal policy
+Reviewed evidence head before this authority update:
 
-Production still has two independent healthy-state reclaim triggers:
+`0cc2c2a11a59200645380ae3f477d3803e67e6ab`
 
-```text
-Automatic inactive for ~30s
-→ hibernate if eligible
-
-Automatic resident count > 2
-→ reclaim eligible Automatic Runtime
-```
-
-These are current implementation facts, not accepted final tuning.
-
-### System pressure
-
-The delivered warning/critical ladder remains valid and in scope only as a regression boundary:
+Controlled Release build:
 
 ```text
-warning
-→ progressive eligible Automatic reclaim
-
-critical
-→ eligible Automatic first
-→ then inactive/unprotected Keep Loaded
+FloatTabs 0.5.8 (26)
+arm64
+macOS 26.6.2
+source_revision_exact = true
 ```
 
-### Restore path
+### Resident baseline
 
-`WebViewPool.hibernate` captures a transient opaque `interactionState`, then tears down the live Runtime. A non-resident revisit creates a new WKWebView and applies compatible restore state. `PanelController` already has deferred materialization and exact-current Runtime readiness; `WebPanelContainerView` already has a native restoring overlay.
+A short hide/reopen with the Runtime still resident completed presentation in roughly 35 ms and did not create a new Runtime.
 
-The user observed correct eventual Slot/session restore but an unacceptable roughly one-second-or-more interval where the shell/colored frame appears before useful Web content. The causal layer is not yet proven.
+### Normal cold summon
 
-`COLD_RESTORE_ROOT_CAUSE=UNKNOWN`.
-
-### WebKit background scheduling
-
-On macOS 14+, public `WKPreferences.inactiveSchedulingPolicy` exists and Apple's documented default is `.suspend` for a WebView not in a window. Current `WebViewFactory` does not override it. Suspended idle WebViews pause JavaScript/layout, while media/loading/interactive activity may be exempt.
-
-Therefore no implementation may introduce explicit `.suspend` as a presumed new optimization without first proving the current detached Runtime behavior. macOS 13 requires a compatible public-API path and no private SPI.
-
-### Aggregate RAM budget
-
-The Phase 8 WP0 measurement result remains binding evidence: dominant FloatTabs WebContent/GPU helper memory cannot be deterministically attributed using supported public production APIs. Do not ship a GiB budget backed by Runtime count, correlation heuristics, root-only tooling or private SPI.
-
-## Frozen architecture boundaries
-
-- `SlotLifecycleCoordinator` — sole lifecycle decision/writer.
-- `WebViewPool` — Runtime mechanism owner: create/reuse/hibernate/restore/release.
-- `WebViewFactory` — WKWebView configuration/mechanism; no lifecycle policy ownership.
-- `PanelController` + `WebPanelContainerView` — presentation/materialization/restoring UI.
-- `WebAttentionCoordinator` / bridge — generation protection facts.
-- Tabs/Profile persistence — Slot and Browser Profile/session configuration, never Runtime policy.
-- Diagnostics — evidence only.
-
-Conceptual facts to evaluate:
+After `automatic_grace_expired` hibernate, one controlled restore measured approximately:
 
 ```text
-ACTIVE_OR_PROTECTED
-RESIDENT_BACKGROUND
-NO_RUNTIME_WITH_RESTORE_STATE
-RESTORING
+materialization.deferred                  0 ms
+web_runtime.create.begin                ~12 ms
+web_runtime.created                     ~63 ms
+panel.materialization.attached          ~64 ms
+web_content_reveal_requested          ~3123 ms
+source.order_front                    ~3127 ms
+readiness_completed                   ~3132 ms
 ```
 
-Do not label `RESIDENT_BACKGROUND` as a guaranteed `FROZEN` state unless current WebKit scheduling evidence proves that exact condition.
+A second cold restore measured roughly 6.04 seconds deferred-to-readiness while fresh Runtime creation remained only tens of milliseconds.
 
-## WP0 — authorized now
+Human observation: shell/colored frame appeared first; useful Web content arrived roughly 2–3 seconds later.
 
-Purpose: obtain evidence sufficient to freeze the actual product policy before behavior mutation.
+The existing restoring surface was not actually visible during the long wait because its source window remained hidden until the reveal/readiness boundary.
 
-### WP0-A restore timeline
+### Notification-click cold restore
 
-Measure and correlate at minimum:
+Hidden ChatGPT generation remained protected through the Automatic grace boundary. Completion/notification succeeded, and the completed Automatic Runtime hibernated roughly 31.5 seconds after generation finished.
 
-1. resident quick revisit;
-2. non-resident revisit after current 30s hibernate;
-3. notification-click non-resident restore;
-4. repeated rapid switching/revisit.
-
-Use existing diagnostics where sufficient. Required boundaries include:
+After hibernate, notification click measured approximately:
 
 ```text
-panel summon / requested visible
-panel.materialization.deferred
-panel.materialization.attached
-web_runtime.create.begin
-web_runtime.created
-web_runtime.restore.completed or URL load path
-navigation commit/finish
-panel.materialization.readiness_completed / failed
-restoring surface show/hide
+notification.route.received               0 ms
+web_runtime.create.begin                  ~6 ms
+web_runtime.created                      ~67 ms
+panel.presentation.begin                 ~70 ms
+source.order_front                       ~77 ms
+navigation.commit                      ~1991 ms
 ```
 
-If current diagnostics cannot prove first visible restoring/content boundaries, the executor may add the smallest diagnostic-only timing seam after first recording that gap in control/design authority. Do not alter product lifecycle behavior in WP0.
+The notification target did not pass through the normal deferred-materialization/restoring/reveal sequence before its source window was exposed.
 
-#### Existing diagnostic gap recorded before instrumentation
+Human observation: the Web surface appeared immediately but was blank, then content loaded.
 
-On the installed exact-baseline 0.5.8 build, existing standard logs contain 31
-deferred/attached materializations and 21 readiness completions. Their
-unlabeled deferred-to-readiness spans are 1–5 seconds (median 2 seconds) with
-one-second timestamp resolution; they are not controlled scenario evidence.
-The source records no restoring-overlay visibility transition. Standard mode
-does not retain debug-level `navigation.finished`; readiness completion is the
-current overlay-hide/reveal boundary, not proof of first WebKit pixels.
+Exact Slot routing and eventual Browser Profile/session/conversation restoration remained correct.
 
-Recorded gap:
+## Accepted diagnosis
 
 ```text
-RESTORING_SURFACE_VISIBLE_WINDOW=UNOBSERVED
-FIRST_WEB_CONTENT_PIXEL=UNOBSERVED
+COLD_RESTORE_PRESENTATION_ROOT_CAUSE=KNOWN
+COLD_RESTORE_LATENCY_ROOT_CAUSE=NARROWED
+WEBKIT_FIRST_PIXEL=UNMEASURED
 ```
 
-The bounded WP0 instrumentation is implemented on this branch:
+Presentation defect:
 
-- `panel.restoring_surface.window_visible` records once per materialization
-  generation when the window that actually owns the restoring surface is
-  visible; it records only bounded window role/key/visibility facts.
-- `panel.materialization.web_content_reveal_requested` records immediately
-  after exact-current navigation readiness removes the restoring overlay and
-  exposes the WebView, correlated by Slot/materialization generation/Runtime
-  identity.
+1. normal cold summon hides the source window — and therefore its existing `Restoring…` surface — until Web readiness;
+2. notification cold route selects/materializes before the canonical deferred presentation path owns the route and exposes the fresh source WebView while it is still blank/loading.
 
-These events are content-free and diagnostic-only. They measure AppKit
-presentation boundaries, not a WebKit compositor first-pixel timestamp. The
-new regression plus all `ExternalShellTests` passed (111/111).
+Common cause:
 
-WP0 host observation is still partial. The available Mac is Apple M4, 16 GB,
-arm64, macOS 26.6.2. A fresh public `WKWebViewConfiguration` reports default
-`.suspend`, and `WebViewFactory` has no override; this is the API default, not
-empirical confirmation of detached idle/generation/media behavior. macOS 13 is
-`NOT_TESTED` because no compatible host is available. The installed app could
-not be inspected through Computer Use (`-10005` timeout), so the controlled
-resident/cold/notification/A-B-A/generation/media scenarios and per-state
-resource comparison remain pending. Do not infer those results from the
-unlabeled existing logs or unattributed WebKit helper processes.
+> FloatTabs does not currently have one canonical presentation gate for a selected nonresident Slot across all entry paths.
 
-### WP0-B background scheduling characterization
+Latency evidence:
 
-On supported real Macs, characterize:
+- fresh `WKWebView` creation is not the multi-second bottleneck;
+- the dominant measured cost is navigation/readiness after Runtime creation/attachment;
+- compositor first-useful-pixel timing remains unknown and must not be invented.
 
-- detached idle resident Runtime;
-- hidden active generation for at least one 60–120s response;
-- allowed background media if available;
-- quick reattach after detached residency;
-- current macOS 14+ default inactive scheduling behavior;
-- macOS 13 behavior when a compatible host is available, otherwise explicitly record `NOT_TESTED` rather than infer it.
+## WP1 — AUTHORIZED NOW
 
-Do not force `.none`, `.throttle` or `.suspend` into production during characterization.
+### Objective
 
-### WP0-C resource/revisit evidence
-
-Use public/runtime diagnostics plus external benchmark/profiling only as test evidence. Root/sudo benchmark attribution may be used locally for experiments but must never become a production dependency or product policy input.
-
-Compare relative behavior for:
+Make every nonresident selected-Slot presentation truthful and route-consistent:
 
 ```text
-resident visible
-resident detached/idle
-resident detached/generating
-hibernated/no Runtime
-cold restoring
+presentation request for nonresident Slot
+→ native Restoring… state becomes actually visible
+→ exact Runtime materializes/restores under that state
+→ unready blank Web content remains hidden by restoring presentation
+→ exact-current readiness validates Slot + materialization generation + Runtime identity
+→ reveal ready Web surface
+→ enable focus / interaction / unread acknowledgement for that exact Runtime
 ```
 
-Do not claim per-Slot exact RAM from unsupported attribution.
+### Entry paths in scope
 
-### WP0-D policy decision
+At minimum reconcile:
 
-Return evidence for choosing between the smallest credible healthy-state policies:
+1. menu-bar summon of the currently selected nonresident Slot;
+2. global-hotkey summon of the currently selected nonresident Slot;
+3. explicit switch to a nonresident Slot while FloatTabs is already presented;
+4. completion-notification route to an exact nonresident Slot.
 
-**Option A — pressure-first + long-idle cleanup**
-- remove normal count-driven `target=2` reclaim;
-- 30s becomes anti-thrash eligibility rather than unconditional lifetime;
-- recent inactive Runtime can stay resident while pressure is normal;
-- a bounded long-idle rule prevents indefinite growth;
-- system warning/critical remains the authoritative scarcity signal.
+Resident presentations must retain the fast path and must not unnecessarily enter restoring UI.
 
-**Option B — adaptive soft warm-set**
-- no fixed `2`;
-- derive a soft resident range from physical-memory class + recency/revisit facts;
-- explicitly not a GiB budget and not described as memory attribution;
-- pressure overrides the soft warm set.
+### Ownership boundary
 
-WP0 must recommend A, B, or a narrowly evidenced hybrid. Do not preselect a new magic count.
+- `PanelController` remains the one presentation/materialization coordinator.
+- `WebPanelContainerView` remains native restoring/Web surface mechanism owner.
+- `WebViewPool` remains create/restore/hibernate mechanism owner; it does not decide presentation policy.
+- `TabStore` remains persistent selection/configuration owner; it must not become a Runtime/presentation policy writer.
+- `SlotLifecycleCoordinator` remains the sole lifecycle/reclaim writer; WP1 must not change normal retention/reclaim semantics.
+- `WebAttentionCoordinator` remains generation protection authority.
 
-### WP0-E restore continuity decision
+### Required behavior
 
-Determine whether fixing first-frame ordering/restoring presentation is sufficient. Separately spike, if needed, a bounded memory-only WKWebView snapshot concept for cold restore continuity.
+The implementation must establish these invariants:
 
-A snapshot may be accepted only if it is:
+1. **No blank-shell cold wait.** Once shell presentation begins for a selected nonresident Slot, a truthful native restoring surface must become actually visible before the multi-second materialization wait can be observed.
+2. **No blank fresh WebView exposure.** A nonresident Runtime may be created/attached while restoring, but its unready Web content must not be presented as the user-facing surface.
+3. **One cold gate.** Notification routing and ordinary summon/switch must converge on the same nonresident materialization/presentation semantics rather than bypassing them.
+4. **Exact-current reveal only.** Stale materialization generation, foreign Slot, replaced Runtime or mismatched Runtime identity may never dismiss restoring state or gain focus.
+5. **Rapid switching safe.** A→B→A or a notification arriving during another restore must cancel/replace stale ownership without stale content flashing.
+6. **Resident fast path preserved.** Already-resident ready Runtime should remain effectively immediate and should not pay a cold-gate delay.
+7. **Focus and unread semantics preserved.** Focus transfer and unread acknowledgement occur only when the exact current presentation is actually ready/visible.
+8. **Notification contract preserved.** PR #193 notification content/privacy/exact-Slot semantics are regression boundaries.
 
-- memory-only;
-- bounded/downscaled;
-- exact-Slot/current-Runtime scoped;
-- non-interactive;
-- invalidated on navigation/Profile/removal/runtime mismatch;
-- immediately purgeable under pressure and after real content readiness;
-- never persisted, backed up or logged as page content.
+### Preferred smallest architecture
 
-## Planned later work — NOT YET AUTHORIZED FOR PRODUCT MUTATION
+Reuse the existing native `Restoring…` surface rather than introducing a screenshot/snapshot layer.
 
-### WP1 — restore first-frame continuity
+For normal cold summon the smallest acceptable shape is to make the existing restoring surface's presentation owner actually visible before Runtime readiness, while continuing to cover/hide unready Web content.
 
-Make a non-resident Slot present an immediate truthful native restoring surface, or an evidence-approved bounded snapshot, before slow Web materialization can expose an unexplained empty panel.
+For notification routing, change the presentation flow so exact-Slot selection cannot eagerly expose/create a blank target outside the same deferred materialization gate. The concrete local refactor must preserve `TabStore` ownership and should centralize the presentation transaction in `PanelController` rather than adding a second presentation owner.
 
-### WP2 — adaptive healthy-state policy
+Do not preselect a larger UI redesign if the existing restoring surface can satisfy the contract.
 
-Remove fixed `target=2` as normal product truth. Implement only the policy selected from WP0 evidence. Preserve deterministic candidate ordering, hard protection, one canonical writer and anti-thrash behavior.
+### Snapshot decision
 
-### WP3 — background resident scheduling
+```text
+SNAPSHOT_SPIKE=NOT_NEEDED_FOR_WP1
+```
 
-Use only public WebKit APIs. Explicit inactive scheduling overrides are allowed only when WP0 proves that the default behavior fails a required continuity/performance property. Preserve macOS 13 compatibility.
+Do not add `WKWebView.takeSnapshot` in WP1. Reconsider only if the corrected native restoring gate later fails explicit human acceptance.
 
-### WP4 — hibernate/restore integration
+## WP1 verification gate
 
-Integrate policy with one-at-a-time reclaim, exact-current identity revalidation, restore snapshot lifetime, pressure escalation and Keep Loaded semantics.
+### Focused regressions
 
-### WP5 — verification / acceptance
+Add/update tests that prove at minimum:
 
-Required before final merge of product behavior:
+- nonresident normal summon enters restoring before ready reveal;
+- nonresident notification route enters the same restoring gate;
+- source/Web surface is not exposed as ready before exact-current readiness;
+- resident summon bypasses cold restoring semantics;
+- stale/foreign Runtime finish cannot dismiss restoring;
+- rapid Slot replacement cancels stale materialization ownership;
+- notification exact-Slot routing remains correct;
+- unread acknowledgement remains gated by actual presentation readiness;
+- generation protection behavior is unchanged.
 
-- focused lifecycle/presentation/WebViewPool/Attention regressions;
+### Machine gate
+
+Before human acceptance:
+
+- focused presentation/materialization regressions;
+- affected notification routing regressions;
+- affected lifecycle/Attention regressions;
 - full XCTest;
-- Debug arm64;
-- Release arm64;
+- Debug arm64 build;
+- Release arm64 build;
 - native arm64 verification;
-- package-lock unchanged unless reconciled;
+- package-lock unchanged unless explicitly reconciled;
 - literal-head self-hosted macOS CI;
 - QA DMG;
-- fresh exact-diff/ownership/data-safety audit;
-- real-Mac human acceptance for warm restore, cold restore, generation continuity and resource behavior.
+- fresh exact-diff/ownership/data-safety audit.
+
+### Human real-Mac acceptance
+
+Human acceptance remains required after machine gate:
+
+1. resident short revisit remains effectively immediate;
+2. normal cold summon shows truthful `Restoring…` immediately instead of shell/frame + unexplained blank center;
+3. notification click after hibernate shows restoring or already-ready content — never a blank fresh Web page;
+4. exact notification Slot is restored;
+5. original conversation/login/session remains intact;
+6. rapid switching does not flash stale Slot content;
+7. hidden generation/notification behavior from PR #193 remains correct.
+
+`HUMAN_UI_ACCEPTANCE=PENDING` until the user explicitly accepts the exact-head QA build.
+
+## WP2 / WP3 / WP4 — NOT AUTHORIZED
+
+### Healthy-state policy direction
+
+Evidence now shows a large revisit delta:
+
+```text
+resident revisit = tens of milliseconds
+observed cold revisit = roughly 3–6 seconds
+```
+
+This is sufficient to reject `30s == mandatory destructive lifetime` as the final product invariant. The already-rejected universal healthy `target=2` also remains non-final.
+
+Current design direction:
+
+```text
+NORMAL_POLICY_RECOMMENDATION=A_FAVORED_NOT_FROZEN
+```
+
+Option A is pressure-first + bounded long-idle cleanup, with 30s potentially retained as an anti-thrash/minimum-eligibility fact rather than mandatory destruction.
+
+However no long-idle threshold, adaptive cleanup policy, explicit inactive-scheduling override or revised reclaim semantics may be implemented during WP1. Background idle/media/resource evidence remains partial.
 
 ## STOP conditions
 
-STOP and reconcile before behavior mutation if work requires or assumes:
+STOP and reconcile before continuing if the implementation requires or introduces:
 
-- guessed/correlated per-Slot or aggregate RAM as product truth;
-- GiB budget backed by Runtime count;
-- another fixed `N` resident invariant disguised as adaptive policy;
-- private WebKit SPI or direct WebKit helper-process killing;
-- a second lifecycle writer outside `SlotLifecycleCoordinator`;
-- destructive Browser Profile/cookie/session/cache reset;
-- reload/reset/restart as ordinary resource-management behavior;
-- forced inactive scheduling for an actively generating Runtime without evidence that continuity is preserved;
-- persisted/logged page screenshots or unbounded snapshot retention;
-- changing the warning/critical pressure ordering without new explicit authority;
-- claiming the blank-restore root cause before runtime timing evidence proves it.
+- lifecycle retention/reclaim changes under the WP1 presentation authorization;
+- removal/change of fixed `target=2` or 30s reclaim behavior during WP1;
+- a second lifecycle or presentation writer;
+- eager WebView exposure before restoring/readiness identity is established;
+- private WebKit SPI;
+- direct WebKit helper process killing;
+- Browser Profile/cookie/session/cache deletion or reset;
+- reload/reset/restart as ordinary restore behavior;
+- screenshot/snapshot persistence or unbounded visual retention;
+- notification privacy/routing regression;
+- generation-protection regression;
+- required test/build/CI failure caused by the task.
 
-## Required WP0 stopping state
+## Required WP1 return contract
 
 ```text
-WP0_EVIDENCE=COMPLETE
-COLD_RESTORE_TIMELINE=MEASURED
-BACKGROUND_SCHEDULING=CHARACTERIZED_OR_EXPLICITLY_PARTIAL
-RESOURCE_COMPARISON=BOUNDED_EVIDENCE
-NORMAL_POLICY_RECOMMENDATION=A_OR_B_OR_EVIDENCED_HYBRID
-SNAPSHOT_DECISION=ACCEPT_OR_REJECT_OR_NOT_NEEDED
-PRODUCT_MUTATION=NOT_STARTED
-HUMAN_UI_ACCEPTANCE=PENDING
+BASELINE_IDENTITY
+FINAL_BRANCH_HEAD
+CHANGED_FILES
+REMOTE_DELIVERY
+
+CANONICAL_COLD_PRESENTATION_GATE = IMPLEMENTED / NOT_IMPLEMENTED
+NORMAL_COLD_SUMMON_RESULT
+NOTIFICATION_COLD_ROUTE_RESULT
+RESIDENT_FAST_PATH_RESULT
+STALE_GENERATION_RESULT
+RAPID_SWITCH_RESULT
+UNREAD_FOCUS_GATING_RESULT
+NOTIFICATION_REGRESSION_RESULT
+GENERATION_PROTECTION_REGRESSION_RESULT
+
+FOCUSED_TESTS
+FULL_XCTEST
+DEBUG_BUILD
+RELEASE_BUILD
+ARM64_VERIFICATION
+PACKAGE_LOCK
+CI_STATE
+QA_DMG_STATE
+
+INDEPENDENT_AUDIT = PENDING / PASS / FINDINGS
+HUMAN_UI_ACCEPTANCE = PENDING
+
+WP2_POLICY_MUTATION = NOT_STARTED
+WP3_SCHEDULING_MUTATION = NOT_STARTED
+WP4_INTEGRATION_MUTATION = NOT_STARTED
+PR_STATE
 ```
 
-Return the evidence and recommendation for web/independent review before WP1–WP4 product implementation is authorized.
+Stop after machine evidence and independent/web review. Do not merge #194 and do not start WP2–WP4 without subsequent authority.
