@@ -131,6 +131,30 @@ restoring surface show/hide
 
 If current diagnostics cannot prove first visible restoring/content boundaries, the executor may add the smallest diagnostic-only timing seam after first recording that gap in control/design authority. Do not alter product lifecycle behavior in WP0.
 
+#### Existing diagnostic gap recorded before instrumentation
+
+On the installed exact-baseline 0.5.8 build, existing standard logs contain 31
+deferred/attached materializations and 21 readiness completions. Their
+unlabeled deferred-to-readiness spans are 1–5 seconds (median 2 seconds) with
+one-second timestamp resolution; they are not controlled scenario evidence.
+The source records no restoring-overlay visibility transition. Standard mode
+does not retain debug-level `navigation.finished`; readiness completion is the
+current overlay-hide/reveal boundary, not proof of first WebKit pixels.
+
+Recorded gap:
+
+```text
+RESTORING_SURFACE_VISIBLE_WINDOW=UNOBSERVED
+FIRST_WEB_CONTENT_PIXEL=UNOBSERVED
+```
+
+The bounded WP0 instrumentation may record (1) that the restoring surface is
+present in a visible panel window, correlated by Slot and materialization
+generation, and (2) the exact-current Web-content reveal request, correlated by
+Slot/materialization generation/Runtime identity. Both are content-free and
+diagnostic-only. They do not claim a compositor first-pixel timestamp. Do not
+capture page pixels or alter lifecycle/presentation behavior.
+
 ### WP0-B background scheduling characterization
 
 On supported real Macs, characterize:

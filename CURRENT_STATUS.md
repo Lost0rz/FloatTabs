@@ -94,6 +94,38 @@ macOS 13 does not expose this public API; compatibility behavior must remain evi
 
 The prior Phase 8 feasibility result remains authoritative: supported public production APIs cannot deterministically attribute dominant WebContent/GPU helper footprint to FloatTabs. Therefore no per-Slot or aggregate GiB limit may be implemented from guessed Runtime counts or process correlation.
 
+## WP0 diagnostics preflight — 2026-11-02
+
+The installed FloatTabs 0.5.8 build 26 identifies exact source revision
+`7e179aaf4dbf0c538c7c2221101fc74d16e49b98`, matching the PR #194 execution
+baseline. Existing standard diagnostics on this host recorded 31 deferred and
+31 attached materializations and 21 readiness completions. In those unlabeled
+observations, deferred-to-readiness spans were 1–5 seconds (median 2 seconds)
+at one-second timestamp resolution. They are not controlled or scenario-labeled
+WP0 measurements.
+
+Current events cover presentation begin/completion, deferred/attached
+materialization, Runtime create/restore, navigation commit, and readiness after
+navigation finish. The overlay's `showRestoringState` / `hideRestoringState`
+calls have no corresponding diagnostics. Standard logs also omit
+`navigation.finished` because it is a debug event. The existing readiness event
+marks when FloatTabs removes the overlay and permits Web content presentation;
+it does not prove when WebKit's first useful pixels reach the display.
+
+Therefore:
+
+```text
+RESTORING_SURFACE_VISIBLE_WINDOW=UNOBSERVED
+FIRST_WEB_CONTENT_PIXEL=UNOBSERVED
+COLD_RESTORE_ROOT_CAUSE=UNKNOWN
+```
+
+WP0 may add a content-free, Slot/materialization/Runtime-identity-bounded event
+when the restoring surface is present in a visible panel window and a second
+event at the exact-current Web-content reveal boundary. These events measure
+FloatTabs/AppKit state transitions, not compositor pixels. Do not add page
+content capture or change lifecycle/presentation behavior.
+
 ## Design direction
 
 The task will evaluate a layered runtime model using observable facts rather than fake memory attribution:
