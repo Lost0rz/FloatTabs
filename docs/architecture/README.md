@@ -4,16 +4,16 @@ Read [`../README.md`](../README.md) first. It is the repository-wide documentati
 
 ## Current Runtime Lifecycle / Memory authority
 
-For `FT-RUNTIME-LIFECYCLE-MEMORY-001`:
+For the current lifecycle/performance program:
 
-- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md) — **CURRENT / ACCEPTED / FROZEN** program contract;
-- [`FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — delivered Phase 6 scoped contract; PR #187 merged;
-- [`FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md) — **CURRENT PHASE 7 / ACCEPTED / FROZEN** implementation contract;
-- `CURRENT_STATUS.md` — verified current state/evidence;
+- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md) — **CURRENT / ACCEPTED / FROZEN DESIGN AUTHORITY**;
+- [`FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md) — **CURRENT PHASE 8 / ACCEPTED / FROZEN / IMPLEMENTATION NOT STARTED**;
+- `CURRENT_STATUS.md` — verified current shipped state + frozen target state;
 - `CURRENT_TASK.md` — only active mutation authorization;
-- [`DOMAIN_MAP.md`](DOMAIN_MAP.md) — navigation/current-source routing only.
+- [`DOMAIN_MAP.md`](DOMAIN_MAP.md) — derived navigation/current-source routing;
+- [`archive/FloatTabs_Runtime_Lifecycle_Phase7_Closeout_Snapshot_2026-11-02.md`](archive/FloatTabs_Runtime_Lifecycle_Phase7_Closeout_Snapshot_2026-11-02.md) — historical Phase 7/V5 closeout snapshot.
 
-V4 and earlier program contracts are historical for current execution.
+V5 and the Phase 7 implementation contract are delivered historical evidence for future construction. They remain valid descriptions of the Phase 7 work that produced `main@2b414982...`, but their fixed-count normal policy is superseded as the Phase 8 target.
 
 ## Delivered lifecycle foundations
 
@@ -31,15 +31,15 @@ Delivered / merged. Hidden valid completion can route back to the exact persiste
 
 ### Phase 4 — Managed Runtime budget foundation
 
-Delivered / merged. Deterministic resident-set evaluation, `lastUsedAt` ranking facts, memory-pressure input and `SlotLifecycleCoordinator` as sole lifecycle executor remain reusable; legacy Hot/Warm/Cold policy is superseded by Phase 7.
+Delivered / merged. Deterministic lifecycle decision support, `lastUsedAt`, memory-pressure input and `SlotLifecycleCoordinator` as sole lifecycle executor remain reusable. Old count/residency policy is historical.
 
 ### Phase 5 — Background Generation Thrift
 
-Delivered / merged. Generating remains Runtime-protected while hidden liveness fallback work is reduced.
+Delivered / merged. Generating remains Runtime-protected while hidden fallback work is reduced.
 
 ### Phase 6 — Perceived-fast Restore
 
-Delivered / merged in PR #187 at `main@54f2e43b0fbc224affa52d9662ac2ba5aa5b963c`.
+Delivered / merged in PR #187.
 
 Architecture:
 
@@ -49,87 +49,172 @@ reclaimed Slot selected/summoned
 → deferred current request
 → WebViewPool restore/create
 → exact-current Runtime readiness
-→ restoring state removed
+→ restoring surface removed
 → canonical focus/input resumes
 ```
 
-Phase 6 does not own residency policy.
+### Phase 7 — Automatic / Keep Loaded + legacy residency retirement
 
-## Phase 7 — Automatic Lifecycle Simplification
+Delivered / merged in PR #188 at:
 
-Implementation is complete on PR #188 and is at final merge closeout.
+`main@2b414982710b3f042fc7d6e9c88eb2d7117b4e38`
 
-Current product policy:
-
-```text
-Automatic   — default
-Keep Loaded — explicit normal-operation preference
-
-normal target = 2 Automatic runtimes
-inactive grace = 30s
-warning target = 1 Automatic runtime
-critical target = 0 Automatic runtimes
-```
-
-Legacy compatibility:
+Delivered structural result:
 
 ```text
-Hot       -> Keep Loaded
-Warm/Cold -> Automatic
+Automatic / Keep Loaded
+no hidden Hot host
+no current Hot/Warm/Cold product controls
+Runtime reclaim independent from website/session cleanup
+Phase 6 restore preserved
+Generating hard-protected
+Keep Loaded does not preload at launch
 ```
 
-Hard protections remain:
+The merged Phase 7 tuning remains current production truth until Phase 8 lands:
 
-- active / actually presented;
-- fullscreen source;
-- supplemental visible Web surface;
-- Attention Generating;
-- active/pending allowed-background-media protection;
-- current Phase 6 materialization/restoring ownership.
+```text
+normal Automatic target = 2
+inactive release path = 30s
+warning target = 1
+critical target = 0
+```
 
-Keep Loaded does not preload at launch, does not require hidden presentation ownership, survives ordinary reclaim and may be reclaimed under critical pressure when inactive and otherwise unprotected.
+These values are not the frozen Phase 8 target.
 
-Legacy Cold-based website-cache cleanup coupling is retired; Runtime reclaim and website-cache cleanup remain separate domains.
+## Phase 8 — Adaptive Memory Budget + Background Efficiency
 
-## Phase 7 verification status
+Phase 8 design is frozen; implementation has not started.
 
-Semantic/acceptance head:
+Target product model:
 
-`b894641a254e7ffb49c84b4ed32d9c70a3f28ad7`
+```text
+Memory Budget
+├─ Auto — Recommended
+├─ Custom GiB
+└─ Unlimited
+```
 
-Verified on that identity:
+Initial reference Auto formula:
 
-- required `Build & Test (Apple Silicon arm64)` / macOS CI #1349 — PASS;
-- QA DMG #668 — PASS;
-- Benchmark Tool CI #139 — PASS;
-- fresh product exact-diff audit — PASS;
-- bounded Real-Mac Automatic/Keep Loaded acceptance — PASS;
-- Keep Loaded relaunch non-preload check — PASS;
-- session continuity check — PASS;
-- no unresolved product/runtime defect found.
+```text
+clamp(physical RAM × 20%, 1.5 GiB, 6 GiB)
+```
 
-Control/routing status alignment may advance the literal PR head without changing product semantics. Before merge, the required repository-host check must pass on the final literal head and PR #188 must remain mergeable.
+Target reclaim semantics:
+
+```text
+under budget
+→ keep useful inactive Runtime resident
+→ no fixed resident-count ceiling
+
+above high watermark (105%)
+→ choose one eligible inactive Automatic Runtime
+→ hibernate through WebViewPool
+→ remeasure aggregate footprint
+→ stop <= low watermark (90%)
+→ otherwise repeat one at a time
+```
+
+System memory pressure remains independent:
+
+```text
+warning
+→ progressively reclaim eligible Automatic
+
+critical
+→ Automatic first
+→ inactive/unprotected Keep Loaded only if still required
+```
+
+The existing 30-second value becomes a normal-budget anti-thrash eligibility grace, not an unconditional Runtime lifetime.
+
+Proactive long-idle cleanup is OFF by default in the V6 baseline.
+
+## Resource measurement boundary
+
+A GiB budget requires a production-safe aggregate FloatTabs/WebKit footprint estimate.
+
+Desired observation:
+
+```text
+FloatTabs host
++ attributable WebContent
++ attributable WebKit Networking/GPU/other helper processes
+```
+
+This is application aggregate evidence only. Exact per-Slot WebContent memory attribution remains unsupported as a trustworthy public policy input.
+
+Phase 8 Gate 0 must prove a supported production mechanism before budget enforcement. Benchmark-only responsible-PID evidence does not automatically authorize an in-app implementation.
+
+A read-only `RuntimeResourceMonitor`-like component may supply resource facts; it must never become a lifecycle writer or kill/reload Runtime itself.
+
+## Background-generation architecture under V6
+
+Current accepted semantic chain remains:
+
+```text
+Generating
+→ hard Runtime protection
+→ completion sensing
+→ Ready/unread + native notification
+→ generating protection ends
+→ normal lifecycle resumes
+```
+
+Phase 8 may reduce host-side observer/probe/diagnostic work while hidden generation remains live, but it does not claim that arbitrary WKWebView JS/network work can be deeply frozen while continuing to generate.
+
+Private WebKit inactive-scheduling/freeze SPI is not authorized.
 
 ## Current ownership
 
-- `WebViewPool` — live Runtime creation/hibernate/restore and renderer recovery mechanism;
+- `WebViewPool` — live Runtime creation/hibernate/restore/rebuild/release mechanism;
 - `SlotLifecycleCoordinator` — sole Runtime lifecycle/budget executor;
-- Runtime budget policy/value logic — read-only deterministic decision support inside Web lifecycle;
-- `TabStore` / `WebAppProfile` — persistent Slot configuration and Automatic/Keep Loaded preference;
+- future aggregate resource monitor — read-only resource fact provider only;
+- `AppPreferencesStore` — durable global memory-budget configuration;
+- `TabStore` / `WebAppProfile` — persistent Slot configuration and per-Slot Automatic/Keep Loaded preference;
 - `WebAttentionCoordinator` — native Attention authority;
-- `PanelController` — presentation truth + Phase 6 orchestration;
-- `WebPanelContainerView` — presentation only, with no hidden Hot host ownership;
+- `ChatGPTAttentionBridge` — provider sensing / bounded liveness fallback;
+- `PanelController` — presentation truth + restore orchestration;
 - Website Cache domain — cache cleanup only, not Runtime lifecycle;
 - `RuntimeDiagnostics` — evidence only.
 
-## Program sequence from here
+## Frozen Phase 8 construction sequence
 
 ```text
-final control/routing alignment
-→ required check on literal PR head
-→ merge PR #188 if mergeable
-→ fresh post-merge integrated Phases 1-7 audit
-→ user-owned final integrated acceptance / release decision
+WP0 exact source audit + production measurement feasibility
+→ WP1 passive budget config/resource monitor
+→ WP2 memory-budget scheduler/progressive normal reclaim
+→ WP3 system-pressure ladder
+→ WP4 Advanced Runtime & Memory UI + persistence/backup
+→ WP5 background-generation/observer efficiency corrective
+→ WP6 Real-Mac + Phase7-vs-Phase8 A/B acceptance
+→ fresh exact-diff/ownership audit
+→ merge-readiness
 ```
 
-Do not treat old Stage residency docs, V1-V4 contracts or the Phase 4 planning document as current policy authority.
+The current design task authorizes documentation/control only. No `FloatTabs/**` product mutation begins until a later explicit implementation task is opened.
+
+## Reference-derived direction
+
+Design references support:
+
+- separating proactive inactivity from urgent pressure reclaim;
+- using user resource policy rather than a fixed tab count;
+- protecting active/media/generating work;
+- progressive reclaim/re-evaluation;
+- lazy materialization and real Runtime sleep/restore.
+
+Reference projects do not override FloatTabs ownership or WebKit public-API constraints.
+
+## Historical routing
+
+Treat these as historical for new construction:
+
+- `FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`;
+- `FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`;
+- V1-V4 lifecycle contracts;
+- old Phase 4 fixed-count/residency plans;
+- Stage Hot/Warm/Cold lifecycle/benchmark material.
+
+Preserve them as evidence; do not rewrite them into V6 wording.
