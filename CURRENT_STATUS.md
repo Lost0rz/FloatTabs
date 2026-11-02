@@ -6,11 +6,11 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 8 PRESSURE + EFFICIENCY RE-SCOPE COMPLETE / R5 PASS / PR #191 MERGE AUTHORIZED**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 8 PRESSURE + EFFICIENCY RE-SCOPE MERGED / MACHINE + INDEPENDENT AUDIT COMPLETE / PROGRAM-FINAL HUMAN ACCEPTANCE PENDING**
 
-Current task: `FT-RUNTIME-LIFECYCLE-MEMORY-001-PHASE8-PRESSURE-EFFICIENCY`.
+Current task: `FT-RUNTIME-LIFECYCLE-MEMORY-001-PHASE8-PRESSURE-EFFICIENCY` — **CLOSED / MERGED**.
 
-The user selected `D_COMBINE` on 2026-11-02: execute the measurement-independent work now (`B`) and defer the aggregate-memory-budget track until a supported deterministic attribution capability exists (`A`). Best-effort/correlation attribution (`C`) remains rejected.
+The user selected `D_COMBINE` on 2026-11-02: execute measurement-independent lifecycle improvements now and defer aggregate-memory-budget work until supported deterministic WebKit helper attribution exists. Best-effort/correlation attribution remains rejected.
 
 ## Repository / delivery state
 
@@ -31,13 +31,14 @@ BEST_EFFORT_ATTRIBUTION=FORBIDDEN
 RESCOPE_CONTRACT=ACCEPTED_FROZEN
 RESCOPE_SCOPE=PRESSURE_LADDER_PLUS_BACKGROUND_EFFICIENCY
 PR_190=MERGED_AT_MAIN_065D2923
-SUCCESSOR_PR=#191
-SUCCESSOR_BRANCH=codex/ft-pressure-efficiency-phase8-rescope-001
+PR_191=MERGED
+PR_191_HEAD=1C86E62B
+PR_191_SQUASH_MERGE=5BD54EF6
 RESCOPE_GATE_R0=PASS
 RESCOPE_GATE_R1=PASS
 RESCOPE_GATE_R2=PASS
 RESCOPE_GATE_R3=PASS
-RESCOPE_GATE_R4=PASS_ON_IMPLEMENTATION_HEAD
+RESCOPE_GATE_R4=PASS_LITERAL_HEAD_1C86E62B
 RESCOPE_GATE_R5=PASS_INDEPENDENT_WEB_AUDIT
 R1_SUSTAINED_PRESSURE_CORRECTIVE=PASS
 NORMAL_TARGET_2=PRESERVED
@@ -47,8 +48,7 @@ CRITICAL_ORDER=AUTOMATIC_THEN_KEEP_LOADED
 PRIVATE_SPI=NOT_ADDED
 PRODUCT_DATA_MUTATION=NONE
 HUMAN_UI_ACCEPTANCE=PENDING_PROGRAM_FINAL
-PR_191_MERGE_READINESS=YES
-NEXT_GATE=LITERAL_CONTROL_CLOSEOUT_HEAD_CI_THEN_SQUASH_MERGE
+NEXT_GATE=PROGRAM_FINAL_HUMAN_RUNTIME_UI_ACCEPTANCE
 ```
 
 Current re-scope contract:
@@ -59,17 +59,21 @@ WP0 evidence report:
 
 `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`
 
-## Phase 8 re-scope implementation result
+## Phase 8 re-scope merged result
 
 ### R1 — progressive system-memory-pressure ladder
 
-The fixed Phase 7 pressure count targets were retired. Healthy-state policy remains unchanged.
+Healthy-state Phase 7 policy is preserved:
 
 ```text
 normal
 → Automatic resident target = 2
 → Automatic inactive release = 30s
+```
 
+Pressure behavior now is:
+
+```text
 warning
 → progressively reclaim eligible inactive/unprotected Automatic
 → one Runtime at a time
@@ -88,31 +92,23 @@ normal pressure restored
 → future restore remains demand-driven
 ```
 
-The independent audit found one blocking R1 defect at the sustained-pressure `no_candidate` boundary: a Runtime that became eligible later could fail to re-enter the pressure ladder unless another same-level system pressure event arrived.
-
-That finding was corrected on PR #191 with an idempotent sustained-pressure re-entry seam driven by current lifecycle eligibility changes. Focused regressions prove:
-
-- warning + generation protection ends without another warning event → eligible Automatic is reclaimed;
-- critical + Keep Loaded protection ends without another critical event → Keep Loaded is reclaimed after eligible Automatic is exhausted;
-- warning → critical takeover cancels the stale warning continuation and preserves Automatic-before-Keep-Loaded ordering;
-- normal pressure clears stale pressure state before later eligibility changes;
-- repeated eligibility boundaries do not create duplicate reclaim chains.
+The independent audit found one blocking sustained-pressure `no_candidate` re-entry defect. PR #191 corrected it with an idempotent eligibility re-entry seam. Regressions prove sustained warning/critical re-entry, warning→critical takeover, stale-normal clearing and single reclaim-chain behavior.
 
 ### R2 — bounded background efficiency
 
-The verified remaining host-side cost center was sustained hidden generation watchdog cadence. The event bridge remains the primary completion signal; only the bounded fallback cadence changes:
+The verified host-side cost center was sustained hidden-generation watchdog cadence:
 
 ```text
-hidden generation < 30s   → 2s fallback interval
+hidden generation <30s    → 2s fallback interval
 hidden generation 30–120s → 5s fallback interval
 hidden generation >=120s  → 10s fallback interval
 ```
 
-No WebContent-memory claim is made from this host-side scheduling reduction. Generation protection, completion routing, unread/native notification behavior and document/runtime ownership remain unchanged.
+The event bridge remains the primary completion signal. No WebContent-memory reduction is claimed from this host-side scheduling change.
 
 ## Verification / audit closeout
 
-The implementation and corrective have passed:
+PR #191 literal merge head `1c86e62b7169407ec9cbf242eb29e31c9db3da2e` passed:
 
 - focused R1 lifecycle tests;
 - focused R2 watchdog/backoff tests;
@@ -121,11 +117,11 @@ The implementation and corrective have passed:
 - Release arm64 build;
 - native arm64 architecture verification;
 - package-lock unchanged check;
-- self-hosted `Build & Test (Apple Silicon arm64)` on the implementation/corrective literal head;
-- QA DMG on the same implementation/corrective literal head;
+- self-hosted `Build & Test (Apple Silicon arm64)` run `41389550011`;
+- QA DMG run `41389550006`;
 - fresh independent exact-diff / ownership audit.
 
-Independent audit verdict after corrective:
+Independent audit final verdict before merge:
 
 ```text
 BLOCKING_FINDINGS=0
@@ -138,43 +134,37 @@ SINGLE_TRANSACTION_INVARIANT=PASS
 R2_BACKGROUND_EFFICIENCY=PASS
 DIAGNOSTICS_SEMANTICS=PASS
 CODE_MERGE_READY=YES
-VERDICT=PASS_WITH_CONTROL_ALIGNMENT_FOLLOWUP
 ```
 
-This control-plane update is that follow-up. Because it creates a new literal PR head, the required repository-host CI must pass again before merge. The earlier implementation-head PASS is evidence for the code diff, not a substitute for the new literal-head merge gate.
+PR #191 was squash-merged to `main` as `5bd54ef63266dafff8f1a36f4b883367f2158516` on 2026-11-02.
 
 ## Source / ownership truth
 
 - `SlotLifecycleCoordinator` remains the sole lifecycle writer.
-- `WebViewPool` owns hibernate/release/runtime mechanics; its product semantics were not redesigned by the corrective.
+- `WebViewPool` owns hibernate/release/runtime mechanics.
 - `PanelController` constructs/wires the coordinator; it is not a second lifecycle writer.
-- `ChatGPTAttentionBridge` owns bounded provider sensing/liveness fallback; the R1 corrective did not change R2 semantics.
+- `ChatGPTAttentionBridge` owns bounded provider sensing/liveness fallback.
 - `RuntimeDiagnostics` remains evidence-only.
 
 ## Deferred / blocked work
 
-Still blocked until a supported deterministic aggregate measurement capability exists:
+Still platform-blocked until a supported deterministic aggregate measurement capability exists:
 
-- aggregate resource monitor as a lifecycle-budget input;
+- aggregate FloatTabs/WebKit memory monitor as lifecycle-budget input;
 - Auto/Custom/Unlimited aggregate memory-budget scheduler;
-- memory-budget Advanced UI/persistence projection;
+- memory-budget Settings UI/persistence projection;
 - aggregate-memory A/B claims requiring attributable FloatTabs/WebKit working-set evidence.
 
 Do not substitute transition correlation, guessed per-tab memory, Runtime count, private WebKit SPI, root-only tooling, restricted entitlements or destructive website/session operations.
 
-## Merge boundary
+## Next gate
 
-PR #191 is authorized to merge after this control-only closeout head passes the required self-hosted repository-host gate and remains clean/mergeable.
+No further product mutation is authorized by the closed Phase 8 re-scope task.
 
-Required sequence:
+The next lifecycle-program gate is:
 
 ```text
-1. literal control-closeout PR head required macOS CI = PASS
-2. QA DMG = PASS if triggered for that head
-3. fresh PR head/base/mergeability check = PASS
-4. mark #191 Ready for Review if still Draft
-5. squash merge #191 using expected literal head SHA
-6. verify fresh main contains the merged Phase 8 re-scope
+PROGRAM_FINAL_HUMAN_RUNTIME_UI_ACCEPTANCE
 ```
 
-Human runtime/UI acceptance remains `PENDING_PROGRAM_FINAL`; under the accepted re-scope contract it is not an earlier blocker for PR #191 merge.
+Human validation should exercise normal Slot switching/restoration, Automatic/Keep Loaded behavior, generation protection, background media protection and sustained use under ordinary system conditions. Aggregate memory-budget claims remain explicitly out of scope.
