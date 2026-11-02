@@ -6,9 +6,9 @@
 
 ## Mode
 
-**MODE: ADAPTIVE LIFECYCLE + RESTORE PERFORMANCE — AUDIT/DESIGN FROZEN / WP0 EVIDENCE GATE AUTHORIZED**
+**MODE: ADAPTIVE LIFECYCLE + RESTORE PERFORMANCE — WP0 PARTIAL / DIAGNOSTIC SEAM ADDED / REAL SCENARIOS PENDING**
 
-Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` — **ACTIVE / WP0 AUTHORIZED**.
+Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` — **ACTIVE / WP0 PARTIAL**.
 
 Task branch:
 
@@ -32,7 +32,7 @@ PR_193=MERGED
 PR_193_SQUASH_MERGE=7E179AAF
 NOTIFICATION_HUMAN_ACCEPTANCE=PASS
 TASK=FT-ADAPTIVE-LIFECYCLE-RESTORE-001
-TASK_STATE=ACTIVE_WP0_AUTHORIZED
+TASK_STATE=ACTIVE_WP0_PARTIAL
 PR_194=OPEN_DRAFT_UNMERGED
 PRODUCT_POLICY_MUTATION=BLOCKED_PENDING_WP0
 COLD_RESTORE_ROOT_CAUSE=UNKNOWN
@@ -94,7 +94,7 @@ macOS 13 does not expose this public API; compatibility behavior must remain evi
 
 The prior Phase 8 feasibility result remains authoritative: supported public production APIs cannot deterministically attribute dominant WebContent/GPU helper footprint to FloatTabs. Therefore no per-Slot or aggregate GiB limit may be implemented from guessed Runtime counts or process correlation.
 
-## WP0 diagnostics preflight — 2026-11-02
+## WP0 diagnostics and host characterization — 2026-11-02
 
 The installed FloatTabs 0.5.8 build 26 identifies exact source revision
 `7e179aaf4dbf0c538c7c2221101fc74d16e49b98`, matching the PR #194 execution
@@ -115,16 +115,39 @@ it does not prove when WebKit's first useful pixels reach the display.
 Therefore:
 
 ```text
-RESTORING_SURFACE_VISIBLE_WINDOW=UNOBSERVED
+RESTORING_SURFACE_VISIBLE_WINDOW=NOW_INSTRUMENTED_NOT_YET_OBSERVED
+WEB_CONTENT_REVEAL_REQUEST=NOW_INSTRUMENTED_NOT_YET_OBSERVED
 FIRST_WEB_CONTENT_PIXEL=UNOBSERVED
 COLD_RESTORE_ROOT_CAUSE=UNKNOWN
 ```
 
-WP0 may add a content-free, Slot/materialization/Runtime-identity-bounded event
-when the restoring surface is present in a visible panel window and a second
-event at the exact-current Web-content reveal boundary. These events measure
-FloatTabs/AppKit state transitions, not compositor pixels. Do not add page
-content capture or change lifecycle/presentation behavior.
+The diagnostic-only seam is now on this task branch:
+
+- `panel.restoring_surface.window_visible` records once per materialization
+  generation when the restoring surface's actual owner window is visible. The
+  bounded `surface_window_role` is `panel`, `source`, or `other`.
+- `panel.materialization.web_content_reveal_requested` records the exact-current
+  navigation-finished boundary immediately after FloatTabs removes the overlay.
+- Both events use only Slot/materialization/Runtime identity and bounded window
+  state. They contain no URL, page text, screenshot, or lifecycle decision.
+
+These are FloatTabs/AppKit transition times, not compositor first-pixel times.
+The new focused regression and `ExternalShellTests` passed (111/111).
+
+Host: Apple M4 Mac mini, 16 GB, arm64, macOS 26.6.2. Production
+`WebViewFactory` does not override `WKPreferences.inactiveSchedulingPolicy`; a
+fresh public `WKWebViewConfiguration` on this host reports `.suspend`. This
+confirms the current API default value, not measured detached page scheduling.
+No compatible macOS 13 host is available (`NOT_TESTED`).
+
+The app UI could not be inspected through Computer Use; binding the app timed
+out with `-10005`. Existing logs do not label the requested controlled
+scenarios, and WebKit helper processes cannot be deterministically attributed
+to FloatTabs on this host. Therefore resident quick revisit, long-idle cold
+restore, notification-click cold restore, rapid A/B/A, detached idle,
+60–120-second generation, media, and per-state resource comparisons remain
+uncharacterized in WP0. This is a tooling/evidence limitation, not a product
+runtime failure.
 
 ## Design direction
 

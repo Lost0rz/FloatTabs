@@ -280,6 +280,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private struct PendingRuntimeMaterialization {
         let generation: UInt64
         let slotID: UUID
+        var didRecordRestoringSurfaceWindowVisibility = false
     }
     private var runtimeMaterializationGeneration: UInt64 = 0
     private var pendingRuntimeMaterialization: PendingRuntimeMaterialization?
@@ -1331,6 +1332,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.orderFrontRegardless()
         activateFloatTabs(trace: trace)
         panel.makeKeyAndOrderFront(nil)
+        recordRestoringSurfaceWindowVisibilityIfNeeded()
         beginPresentationFocusHandshake(
             trace: trace,
             webFocusOwner: webFocusOwner
@@ -3138,6 +3140,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func beginDeferredRuntimeMaterialization(for profile: WebAppProfile) {
         if let pending = pendingRuntimeMaterialization, pending.slotID == profile.id {
             rootView.webPanelContainerView.showRestoringState()
+            recordRestoringSurfaceWindowVisibilityIfNeeded()
             return
         }
 
@@ -3168,9 +3171,45 @@ final class PanelController: NSObject, NSWindowDelegate {
                 "materialization_generation": .integer(Int64(request.generation))
             ]
         )
+        recordRestoringSurfaceWindowVisibilityIfNeeded()
         DispatchQueue.main.async { [weak self] in
             self?.performDeferredRuntimeMaterialization(request)
         }
+    }
+
+    /// Records when the restoring surface is attached to the currently visible
+    /// window that owns its container. This is a presentation boundary, not
+    /// proof that pixels have reached the display compositor.
+    private func recordRestoringSurfaceWindowVisibilityIfNeeded() {
+        let surfaceWindow = rootView.webPanelContainerView.window
+        guard var request = pendingRuntimeMaterialization,
+              !request.didRecordRestoringSurfaceWindowVisibility,
+              rootView.webPanelContainerView.isShowingRestoringState,
+              let surfaceWindow,
+              surfaceWindow.isVisible,
+              !surfaceWindow.isMiniaturized else {
+            return
+        }
+
+        request.didRecordRestoringSurfaceWindowVisibility = true
+        pendingRuntimeMaterialization = request
+        let surfaceWindowRole = surfaceWindow === panel
+            ? "panel"
+            : surfaceWindow === sourceHostController.window ? "source" : "other"
+        diagnostics.record(
+            event: "panel.restoring_surface.window_visible",
+            level: .notice,
+            subsystem: "panel",
+            fields: [
+                "slot_id": .string(request.slotID.uuidString),
+                "materialization_generation": .integer(Int64(request.generation)),
+                "panel_window_visible": .bool(panel.isVisible),
+                "panel_window_key": .bool(panel.isKeyWindow),
+                "surface_window_role": .string(surfaceWindowRole),
+                "surface_window_visible": .bool(surfaceWindow.isVisible),
+                "surface_window_key": .bool(surfaceWindow.isKeyWindow)
+            ]
+        )
     }
 
     private func performDeferredRuntimeMaterialization(
@@ -3329,6 +3368,20 @@ final class PanelController: NSObject, NSWindowDelegate {
         pendingRuntimeMaterialization = nil
         pendingRuntimeMaterializationIdentity = nil
         rootView.webPanelContainerView.hideRestoringState()
+        var revealFields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString),
+            "materialization_generation": .integer(Int64(pending.generation)),
+            "readiness_source": .string("navigation_finished"),
+            "panel_window_visible": .bool(panel.isVisible),
+            "panel_window_key": .bool(panel.isKeyWindow)
+        ]
+        revealFields.merge(runtimeIdentity.fields) { _, new in new }
+        diagnostics.record(
+            event: "panel.materialization.web_content_reveal_requested",
+            level: .notice,
+            subsystem: "panel",
+            fields: revealFields
+        )
         webFocusRouter.setCurrentWebView(readyWebView)
         acknowledgeAttentionIfActuallyVisible(slotID: slotID)
         beginPresentationFocusHandshake(

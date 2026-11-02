@@ -2,7 +2,7 @@
 
 **Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
 **Title:** Adaptive Runtime lifecycle + fast restore + background efficiency  
-**Status:** `ACTIVE / WP0 EVIDENCE GATE AUTHORIZED`  
+**Status:** `ACTIVE / WP0 PARTIAL — REAL SCENARIO CAPTURE PENDING`
 **Mode:** `AUDIT / DESIGN / WP0 CHARACTERIZATION`  
 **Task class:** `WEB RUNTIME / LIFECYCLE / PERFORMANCE / RESTORE UX`  
 **Execution baseline:** `main@7e179aaf4dbf0c538c7c2221101fc74d16e49b98`  
@@ -148,12 +148,29 @@ RESTORING_SURFACE_VISIBLE_WINDOW=UNOBSERVED
 FIRST_WEB_CONTENT_PIXEL=UNOBSERVED
 ```
 
-The bounded WP0 instrumentation may record (1) that the restoring surface is
-present in a visible panel window, correlated by Slot and materialization
-generation, and (2) the exact-current Web-content reveal request, correlated by
-Slot/materialization generation/Runtime identity. Both are content-free and
-diagnostic-only. They do not claim a compositor first-pixel timestamp. Do not
-capture page pixels or alter lifecycle/presentation behavior.
+The bounded WP0 instrumentation is implemented on this branch:
+
+- `panel.restoring_surface.window_visible` records once per materialization
+  generation when the window that actually owns the restoring surface is
+  visible; it records only bounded window role/key/visibility facts.
+- `panel.materialization.web_content_reveal_requested` records immediately
+  after exact-current navigation readiness removes the restoring overlay and
+  exposes the WebView, correlated by Slot/materialization generation/Runtime
+  identity.
+
+These events are content-free and diagnostic-only. They measure AppKit
+presentation boundaries, not a WebKit compositor first-pixel timestamp. The
+new regression plus all `ExternalShellTests` passed (111/111).
+
+WP0 host observation is still partial. The available Mac is Apple M4, 16 GB,
+arm64, macOS 26.6.2. A fresh public `WKWebViewConfiguration` reports default
+`.suspend`, and `WebViewFactory` has no override; this is the API default, not
+empirical confirmation of detached idle/generation/media behavior. macOS 13 is
+`NOT_TESTED` because no compatible host is available. The installed app could
+not be inspected through Computer Use (`-10005` timeout), so the controlled
+resident/cold/notification/A-B-A/generation/media scenarios and per-state
+resource comparison remain pending. Do not infer those results from the
+unlabeled existing logs or unattributed WebKit helper processes.
 
 ### WP0-B background scheduling characterization
 

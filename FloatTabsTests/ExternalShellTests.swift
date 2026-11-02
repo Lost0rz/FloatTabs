@@ -2173,7 +2173,8 @@ final class ExternalShellTests: XCTestCase {
     // MARK: Phase 6 restoring presentation
 
     private func makePhase6Harness(
-        slotName: String
+        slotName: String,
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
     ) throws -> (store: TabStore, pool: WebViewPool, controller: PanelController, profile: WebAppProfile) {
         let store = TabStore(repository: MemoryProfileRepository())
         let profile = try XCTUnwrap(
@@ -2181,14 +2182,16 @@ final class ExternalShellTests: XCTestCase {
         )
         let pool = WebViewPool(
             onURLChange: { _, _ in },
-            initialLoad: { _, _ in }
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
         )
         let controller = PanelController(
             tabStore: store,
             webViewPool: pool,
             attentionCoordinator: WebAttentionCoordinator(),
             frameStore: PanelFrameStore(),
-            preferencesStore: AppPreferencesStore()
+            preferencesStore: AppPreferencesStore(),
+            diagnostics: diagnostics
         )
         return (store, pool, controller, profile)
     }
@@ -2362,6 +2365,56 @@ final class ExternalShellTests: XCTestCase {
         )
         observer.webView(webView, didFinish: navigation)
 
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+    }
+
+    func testColdMaterializationTimingDiagnosticsAreIdentityBoundedAndContentFree() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (_, pool, controller, profile) = try makePhase6Harness(
+            slotName: "RestoreTiming",
+            diagnostics: diagnostics
+        )
+        pool.hibernate(slotID: profile.id)
+
+        controller.showFloatTabs()
+        drainMainThreadTurns()
+
+        let restoringSurface = try XCTUnwrap(
+            writer.events.first { $0.event == "panel.restoring_surface.window_visible" }
+        )
+        XCTAssertEqual(restoringSurface.fields["slot_id"], .string(profile.id.uuidString))
+        XCTAssertEqual(restoringSurface.fields["materialization_generation"], .integer(1))
+        XCTAssertEqual(restoringSurface.fields["surface_window_visible"], .bool(true))
+
+        let webView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        webView.navigationDelegate = nil
+        let navigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>ready</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didFinish: navigation)
+
+        let reveal = try XCTUnwrap(
+            writer.events.first {
+                $0.event == "panel.materialization.web_content_reveal_requested"
+            }
+        )
+        XCTAssertEqual(reveal.fields["slot_id"], .string(profile.id.uuidString))
+        XCTAssertEqual(reveal.fields["materialization_generation"], .integer(1))
+        XCTAssertEqual(
+            reveal.fields["runtime_generation"],
+            .integer(Int64(identity.runtimeGeneration))
+        )
+        XCTAssertEqual(
+            reveal.fields["webview_instance_id"],
+            .string(identity.webViewInstanceID.uuidString)
+        )
+        XCTAssertLessThan(restoringSurface.sequence, reveal.sequence)
+        XCTAssertNil(reveal.fields["url"])
+        XCTAssertNil(reveal.fields["content"])
+        XCTAssertNil(reveal.fields["page_text"])
         XCTAssertFalse(controller.debugIsShowingRestoringState)
     }
 
