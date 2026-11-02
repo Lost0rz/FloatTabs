@@ -6,11 +6,11 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 8 ADAPTIVE MEMORY BUDGET DESIGN FROZEN**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 8 IMPLEMENTATION / WP0 EXECUTED / GATE 0 FAIL / BUDGET CONSTRUCTION STOPPED / WAITING USER RECONCILIATION**
 
-Current design task: `FT-RUNTIME-LIFECYCLE-MEMORY-001-PHASE8-DESIGN`.
+Current task: `FT-RUNTIME-LIFECYCLE-MEMORY-001-PHASE8-IMPLEMENT`.
 
-Phase 7 is merged. A post-merge product review found that the delivered structural Runtime architecture is valid, but the initial Phase 7 fixed-count normal policy is too rigid for the intended product behavior. V6/Phase 8 now freezes the replacement design before any new production mutation.
+The user explicitly authorized Phase 8 implementation (2026-11-02) starting strictly at WP0 (measurement feasibility + exact source audit). WP0 was executed read-only. The measurement feasibility Gate (Gate 0) **failed**: aggregate FloatTabs/WebKit footprint attribution for the dominant WebContent processes cannot be built from supported public APIs. Production budget construction is stopped before WP2 per the frozen Phase 8 contract §6.
 
 ## Repository / delivery state
 
@@ -19,19 +19,39 @@ PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 JSC_ROOT_CAUSE=UNKNOWN
 
-MAIN=2b414982710b3f042fc7d6e9c88eb2d7117b4e38
 PHASE_7_PR=#188_MERGED
 PHASE_7_DELIVERY=COMPLETE
-
-CURRENT_DESIGN_BRANCH=codex/ft-runtime-memory-budget-phase8-design
-CURRENT_PROGRAM_CONTRACT=V6_ACCEPTED_FROZEN
-CURRENT_PHASE8_CONTRACT=ACCEPTED_FROZEN_IMPLEMENTATION_NOT_STARTED
-PRODUCT_MUTATION=NOT_AUTHORIZED_IN_CURRENT_DESIGN_TASK
+PROGRAM_CONTRACT=V6_ACCEPTED_FROZEN
+PHASE8_CONTRACT=ACCEPTED_FROZEN
+PHASE8_WP0=EXECUTED_2026-11-02
+PHASE8_GATE0=FAIL_AGGREGATE_ATTRIBUTION_NOT_PROVABLE
+PHASE8_BUDGET_CONSTRUCTION=STOPPED_BEFORE_WP2
+PRODUCT_MUTATION=NONE_IN_WP0
+NEXT_GATE=USER_RECONCILIATION_DECISION
 ```
 
-## Current production truth
+WP0 evidence report (authoritative detail):
 
-Until Phase 8 implementation lands, merged `main` still runs the Phase 7 policy:
+`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`
+
+## WP0 verdict summary
+
+Available and validated (public APIs, live-machine evidence):
+
+- per-pid footprint via `proc_pid_rusage` (`ri_phys_footprint`) for host and same-user WebKit helpers;
+- system-wide helper enumeration via `proc_listallpids` + `proc_pidpath`;
+- **deterministic Networking-helper attribution** via helper fd paths under FloatTabs' unique per-app WebKit root (`~/Library/WebKit/com.lost0rz.FloatTabs/...`);
+- physical memory and existing system memory-pressure dispatch source.
+
+Missing production capability (the Gate 0 blocker):
+
+- no supported public way to attribute `com.apple.WebKit.WebContent` (or GPU) XPC instances to the host app. ppid/pgid lineage dead (helpers are launchd children in own groups), no responsible-pid API in SDK, no public WebContent pid in WebKit headers (only private SPI), `launchctl procinfo` root-gated on current macOS (benchmark uses `sudo`), WebContent holds zero app-path fds even for storage-heavy pages.
+
+Because WebContent is the dominant memory consumer, partial aggregate (host + Networking only) cannot honestly drive the budget product. Per contract and user instruction: no guessing, no Runtime-count substitution, STOP.
+
+## Current production truth (unchanged)
+
+Merged `main` still runs the Phase 7 policy until a reconciled Phase 8 lands:
 
 ```text
 runtimeRetentionPreference = Automatic | Keep Loaded
@@ -41,173 +61,39 @@ warning Automatic target = 1
 critical Automatic target = 0
 ```
 
-The structural foundations remain accepted:
+All Phase 1-7 structural foundations remain accepted and untouched (see V6 §1). WP0 mutated no `FloatTabs/**` file.
 
-- persistent Slot/Profile/session is separate from live `WKWebView` Runtime;
-- `SlotLifecycleCoordinator` is the sole lifecycle writer/executor;
-- `WebViewPool` owns Runtime materialize/hibernate/restore;
-- Phase 6 restore path is preserved;
-- Attention `Generating` is hard Runtime protection;
-- `Ready`/durable unread/native completion notification do not require Runtime residency;
-- Keep Loaded has no hidden Hot host and does not preload at launch;
-- Runtime reclaim does not clear Browser Profile/login/cookie/session data;
-- website-cache cleanup is separate from Runtime reclaim.
+## Source audit owner map (frozen at WP0, baseline main@8372d122)
 
-## Post-merge policy finding
+- `SlotLifecycleCoordinator` — sole lifecycle writer; count targets 2/1/0 at lines 12/81, 30s graces lines 78-80, pressure handling lines 409/490-502.
+- `WebViewPool` — `hibernate` line 553, `release` line 567, `onResidentSetChange` lines 119/865/1110/1274, Phase 6 `interactionState` seams 188-192.
+- `PanelController.swift:222` constructs the lifecycle coordinator (AppCoordinator wires `WebViewPool` 115-136) — the literal wiring owner differs from the contract's WP0 wording; any future WP must freeze against this map.
+- `AppPreferencesStore` — legacy Warm/Cold keys lines 204-207 + NotificationCenter routes; additive-key pattern established; no budget concept yet.
+- Settings Advanced sections today: `[.runtimeDiagnostics, .backupRestore, .about]`.
+- Benchmark attribution is external-only: `sudo -n launchctl procinfo` responsible-pid parsing in `tools/benchmark/floattabs_benchmark.py`.
+- Production has no aggregate footprint measurement today.
 
-Fresh source review confirms:
+## Blocked vs unblocked Phase 8 packages
 
-```swift
-RuntimeBudgetPolicy.defaultManagedResidentTarget = 2
-```
+Blocked (need aggregate measurement): WP1 monitor, WP2 budget scheduler, WP4 budget UI, WP6 A/B memory claims.
 
-The current normal decision logic can reclaim an eligible Automatic Runtime when resident Automatic count exceeds `2`, even when the Mac has healthy memory headroom.
+Measurement-independent candidates for a possible re-scope (require a new accepted contract, not authorized here): WP3 system-pressure ladder, WP5 background-generation/observer efficiency, optional retirement of the normal fixed-count `2` target in favor of a pressure-only normal policy.
 
-This is now classified as a **policy-design limitation**, not a failure of the Phase 1-7 Runtime architecture.
-
-The user clarified the intended behavior:
-
-> FloatTabs should allow multiple pages to remain open while resources permit. The user should control an approximate memory budget, not a maximum page/runtime count. When budget or system pressure requires it, inactive work should be reclaimed progressively.
-
-## V6 target product truth
-
-Current design authority:
-
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`
-
-Target normal policy:
+## Reconciliation options awaiting user decision
 
 ```text
-Memory Budget = primary normal resource control
-
-Auto      = clamp(physical RAM × 20%, 1.5 GiB, 6 GiB) initial reference default
-Custom    = user-selected approximate GiB budget
-Unlimited = no normal budget-driven reclaim
-
-high watermark = 105% of effective budget
-low watermark  = 90% of effective budget
+A HOLD      keep Phase 7 policy; revisit when Apple ships a public attribution API
+B RE-SCOPE  new contract for pressure ladder + background efficiency only; budget deferred
+C AMEND     accept best-effort transition-correlation attribution (executor recommends against)
+D COMBINE   e.g. B now + A later
 ```
 
-Target behavior:
+## Safety boundary
 
-```text
-healthy + under budget
-→ no fixed Runtime-count ceiling
-→ 3/4/5+ useful Runtimes may remain resident
+Do not:
 
-above high watermark
-→ choose one safest eligible inactive Automatic Runtime
-→ revalidate
-→ hibernate through WebViewPool
-→ fresh measurement
-→ stop <= low watermark
-→ otherwise repeat one at a time
-```
-
-The old `2 / 1 / 0` resident-count targets are historical Phase 7 values and are **not** the Phase 8 target.
-
-## Protection hierarchy under V6 target
-
-Hard protection remains:
-
-- active / actually presented;
-- fullscreen source;
-- supplemental visible Web surface;
-- Attention Generating;
-- active/pending allowed-background-media protection;
-- current materialization/restoring ownership.
-
-Keep Loaded remains a strong normal-operation preference:
-
-- normal budget reclaims Automatic first;
-- Keep Loaded may temporarily prevent meeting the soft budget;
-- warning still prefers Automatic reclaim;
-- critical may reclaim inactive/unprotected Keep Loaded after Automatic candidates.
-
-## Background-generation truth
-
-Current production already provides:
-
-```text
-Generating
-→ Runtime protected
-→ hidden liveness fallback work is reduced
-→ generation completes
-→ Ready/unread + native notification
-→ generating protection ends
-→ Runtime may later be reclaimed
-```
-
-The current mechanism does **not** deeply reduce the WebContent heap while arbitrary page generation continues. Phase 8 therefore separates:
-
-- host/observer/probe efficiency work — authorized design target;
-- true renderer/WebContent deep-freeze while JS/network generation continues — not claimed and not authorized through private WebKit SPI.
-
-Phase 8 will audit event-first sensing, fallback watchdog cadence, redundant hidden diagnostics, response-identity work and task/observer cancellation while preserving generation continuity.
-
-## Resource measurement Gate
-
-The memory budget requires an aggregate FloatTabs/WebKit footprint estimate, not exact per-Slot attribution.
-
-Existing benchmark tooling can externally observe only processes whose launchd responsible PID belongs to the current FloatTabs host. That proves useful Real-Mac evidence, but it does not by itself authorize a production implementation.
-
-Phase 8 Gate 0 must prove a supported production-safe measurement mechanism before GiB budget enforcement is enabled.
-
-If production-safe aggregate measurement cannot be proven:
-
-- do not guess memory from Runtime count;
-- do not disguise Runtime count as Custom GiB;
-- preserve system memory-pressure handling;
-- STOP and reconcile the budget implementation.
-
-## Reference review
-
-Current external reference review supports the direction:
-
-- Chrome exposes Memory Saver aggressiveness and eligibility exceptions rather than a fixed tab-count ceiling;
-- current Chromium separates proactive inactivity heuristics from memory-pressure discard behavior and uses revisit/recency signals;
-- Kylmora uses lazy tabs, idle/memory-pressure sleep and per-tab Keep Awake;
-- Kestrel demonstrates WKWebView Runtime destruction/restoration with `interactionState` and memory-pressure-triggered sleep.
-
-These are design references, not FloatTabs Authority. Engine-level Chromium freeze/discard capabilities that require private/unsupported WebKit controls are not adopted.
-
-## Frozen Phase 8 plan
-
-Current implementation contract:
-
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md`
-
-Frozen sequence:
-
-```text
-WP0 measurement feasibility + exact source audit
-WP1 additive budget configuration + passive resource monitor
-WP2 memory-budget decision engine + progressive normal reclaim
-WP3 system-pressure ladder + anti-thrash integration
-WP4 Advanced Runtime & Memory UI + persistence/backup
-WP5 background-generation / observer efficiency corrective
-WP6 Real-Mac + identical-workload Phase7-vs-Phase8 A/B acceptance
-```
-
-No production construction begins from this design branch/task.
-
-## Historical backup / routing
-
-Phase 7/V5 delivered policy is preserved, not rewritten:
-
-`docs/architecture/archive/FloatTabs_Runtime_Lifecycle_Phase7_Closeout_Snapshot_2026-11-02.md`
-
-V5 and the Phase 7 contract remain historical evidence for why the delivered architecture exists. Their fixed-count policy values must not be used as current Phase 8 goals.
-
-## Current next gate
-
-```text
-finish documentation/control alignment
-→ verify design branch contains docs/control only
-→ freeze design receipt
-→ STOP
-→ user explicitly authorizes Phase 8 implementation
-→ then create bounded implementation branch/PR and execute WP0 first
-```
-
-No release/version change and no `FloatTabs/**` product mutation is authorized by the current design task.
+- implement budget enforcement on host+Networking-only measurement or Runtime-count heuristics;
+- use private WebKit SPI (`_webProcessIdentifier`) or root-gated `launchctl` in production;
+- mutate production lifecycle/runtime code while the task is STOPPED at Gate 0;
+- clear, migrate or overwrite Browser Profile cookies/session/site data;
+- treat the WP0 probes (`/tmp/wkprobe/`, outside the repo) as product evidence of anything beyond the reported matrix.

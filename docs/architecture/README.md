@@ -7,7 +7,8 @@ Read [`../README.md`](../README.md) first. It is the repository-wide documentati
 For the current lifecycle/performance program:
 
 - [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md) — **CURRENT / ACCEPTED / FROZEN DESIGN AUTHORITY**;
-- [`FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md) — **CURRENT PHASE 8 / ACCEPTED / FROZEN / IMPLEMENTATION NOT STARTED**;
+- [`FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md) — **CURRENT PHASE 8 / ACCEPTED / FROZEN / IMPLEMENTATION STOPPED AT GATE 0**;
+- [`FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md) — **CURRENT PHASE 8 / WP0 EXECUTED 2026-11-02 / GATE 0 VERDICT: FAIL — aggregate WebContent attribution not provable with supported public APIs; budget construction stopped before WP2; awaiting user reconciliation decision**;
 - `CURRENT_STATUS.md` — verified current shipped state + frozen target state;
 - `CURRENT_TASK.md` — only active mutation authorization;
 - [`DOMAIN_MAP.md`](DOMAIN_MAP.md) — derived navigation/current-source routing;
@@ -145,7 +146,7 @@ FloatTabs host
 
 This is application aggregate evidence only. Exact per-Slot WebContent memory attribution remains unsupported as a trustworthy public policy input.
 
-Phase 8 Gate 0 must prove a supported production mechanism before budget enforcement. Benchmark-only responsible-PID evidence does not automatically authorize an in-app implementation.
+Phase 8 Gate 0 must prove a supported production mechanism before budget enforcement. Benchmark-only responsible-PID evidence does not automatically authorize an in-app implementation. **Gate 0 was executed 2026-11-02 (WP0) and FAILED**: the WP0 measurement feasibility report records that public per-pid footprint reading and Networking attribution exist, but WebContent/GPU attribution to the host app does not; budget construction is stopped before WP2 pending user reconciliation.
 
 A read-only `RuntimeResourceMonitor`-like component may supply resource facts; it must never become a lifecycle writer or kill/reload Runtime itself.
 

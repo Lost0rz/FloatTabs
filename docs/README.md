@@ -21,7 +21,8 @@ Historical documents remain evidence only unless current Authority explicitly re
 For the current lifecycle/performance program:
 
 - [`architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`](architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md) — **CURRENT / ACCEPTED / FROZEN DESIGN AUTHORITY**; supersedes V5 for future lifecycle/performance construction while preserving Phase 1-7 delivered architecture;
-- [`architecture/FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md) — **CURRENT PHASE 8 / ACCEPTED / FROZEN / IMPLEMENTATION NOT STARTED**;
+- [`architecture/FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md) — **CURRENT PHASE 8 / ACCEPTED / FROZEN / IMPLEMENTATION STOPPED AT GATE 0**;
+- [`architecture/FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md) — **CURRENT PHASE 8 / WP0 EXECUTED / GATE 0 VERDICT: FAIL (aggregate WebContent attribution not provable with public APIs); budget construction stopped before WP2; awaiting user reconciliation**;
 - [`architecture/README.md`](architecture/README.md) — architecture routing/status;
 - [`architecture/DOMAIN_MAP.md`](architecture/DOMAIN_MAP.md) — derived source/test/navigation map;
 - [`architecture/archive/FloatTabs_Runtime_Lifecycle_Phase7_Closeout_Snapshot_2026-11-02.md`](architecture/archive/FloatTabs_Runtime_Lifecycle_Phase7_Closeout_Snapshot_2026-11-02.md) — archived Phase 7/V5 closeout snapshot.
