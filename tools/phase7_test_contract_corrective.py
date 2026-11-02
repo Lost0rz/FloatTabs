@@ -207,6 +207,33 @@ replace_once(
     "func testThreeInactiveWarmRuntimesRemainUntilTTLWithoutMemoryPressure()",
     "func testThreeInactiveAutomaticRuntimesRespectNormalBudgetBeforeGrace()",
 )
+replace_function(
+    "FloatTabsTests/WebViewPoolTests.swift",
+    "testColdLifecycleActivationCancelsPendingRelease",
+    '''    func testVisibleActivationCancelsPendingAutomaticRelease() async throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "AutomaticCancel")
+        profile.runtimeRetentionPreference = .automatic
+        _ = try pool.webView(for: profile)
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            coldReleaseDelay: 0.01,
+            warmReleaseDelay: 0.01,
+            installsMemoryPressureSource: false
+        )
+
+        lifecycle.setPanelVisible(true, activeProfile: profile)
+        lifecycle.deactivate(profile: profile)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
+
+        lifecycle.activate(profile: profile)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+    }''',
+)
 
 # Attention lifecycle expectations now follow normal target 2 / warning target 1.
 replace_all("FloatTabsTests/WebAttentionLifecycleTests.swift", "pendingColdReleaseCount", "pendingWarmReleaseCount", minimum=3)
@@ -344,4 +371,43 @@ replace_once(
     "FloatTabsTests/WebAttentionCrossFeatureTests.swift",
     "func testReadyWarmCanBeReclaimedWhileUnreadSurvivesMemoryPressure()",
     "func testReadyAutomaticCanBeReclaimedWhileUnreadSurvivesMemoryPressure()",
+)
+replace_function(
+    "FloatTabsTests/WebAttentionCrossFeatureTests.swift",
+    "testNonInteractivePresentationDoesNotAcknowledgeReadyAndLaterDeactivationStartsFreshColdLifecycle",
+    '''    func testNonInteractivePresentationKeepsAutomaticLifecycleUntilInteractionReturns() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "Plain", url: "https://example.com/plain")
+            ]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        setResidency(.cold, for: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        defer { controller.hideFloatTabs() }
+
+        acceptBaseline(generating: true, bridge: bridge, webView: webView)
+        controller.hideFloatTabs()
+        acceptState(generating: false, bridge: bridge, webView: webView)
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+
+        controller.acknowledgeAttentionIfActuallyVisible(slotID: slot.id)
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+
+        controller.showFloatTabs()
+        let webInteractionRegained = controller.isAttentionUserVisible(slotID: slot.id)
+        XCTAssertEqual(coordinator.state(for: slot.id), webInteractionRegained ? .idle : .ready)
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+        XCTAssertTrue(pool.contains(slotID: slot.id))
+        XCTAssertEqual(controller.debugPendingWarmReleaseCount, webInteractionRegained ? 0 : 1)
+
+        try select(named: "Plain", in: store)
+        XCTAssertEqual(controller.debugPendingWarmReleaseCount, 1)
+        XCTAssertNotNil(controller.debugInactivePlanToken(slotID: slot.id))
+        XCTAssertTrue(pool.contains(slotID: slot.id))
+    }''',
 )
