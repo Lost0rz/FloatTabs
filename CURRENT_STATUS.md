@@ -1,16 +1,16 @@
 # FloatTabs Current Status
 
-**Status date:** `2026-11-01`  
+**Status date:** `2026-11-02`  
 **Repository:** `Lost0rz/FloatTabs`  
 **Default branch:** `main`
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — CONTRACT RECONCILED / PHASE 6 CLOSEOUT + PHASE 7 AUTOMATIC LIFECYCLE**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 7 FINAL CLOSEOUT / MERGE GATE**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `V5 CONTRACT FROZEN / PR #187 PHASE 6 CLOSEOUT PENDING / PHASE 7 IMPLEMENTATION NOT STARTED`.
+Phase 7 product construction, machine verification and bounded Real-Mac acceptance are complete. The final product semantic/acceptance identity is `b894641a254e7ffb49c84b4ed32d9c70a3f28ad7`. Current branch movement after that identity is control/document-routing closeout only; product/runtime mutation remains frozen.
 
 ## Canonical state
 
@@ -19,110 +19,132 @@ PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 JSC_ROOT_CAUSE=UNKNOWN
 
-PHASE_1_SAFE_HIBERNATE_RESTORE=COMPLETE / MERGED
-PHASE_2_READY_UNREAD_DECOUPLING=COMPLETE / MERGED
-PHASE_3_NATIVE_COMPLETION_NOTIFICATION=COMPLETE / MERGED
-PHASE_4_REFERENCE_DERIVED_RUNTIME_MANAGEMENT=DELIVERED FOUNDATION / TARGET POLICY SUPERSEDED BY V5 PHASE 7
-PHASE_5_BACKGROUND_GENERATION_THRIFT=COMPLETE / MERGED
-
-PHASE_6_PR=#187 OPEN / DRAFT / UNMERGED
-PHASE_6_CURRENT_PRODUCT_HEAD=76c092523fe343eacc0592bfac25086da0d0d83d
-PHASE_6_GATE0=COMPLETE / OUTCOME_A / NAVIGATION_BACKED_READINESS
-PHASE_6_CORRECTIVE=C1-C4 FUNCTIONAL CORRECTIVE APPLIED
-PHASE_6_REQUIRED_CI=PASS / RUN 1312 / HEAD 76c092523fe343eacc0592bfac25086da0d0d83d
-PHASE_6_QA_DMG=PASS / RUN 637
-PHASE_6_REAL_MAC_QA=STARTED ON CORRECTIVE BUILD
-PHASE_6_EXACT_DIFF_FRESH_AUDIT=PENDING
-PHASE_6_MERGE=BLOCKED PENDING BOUNDED SMOKE + FRESH EXACT_DIFF AUDIT
-
-REAL_MAC_MEMORY_OBSERVATION=MULTIPLE LEGACY HOT CHATGPT RUNTIMES REMAIN RESIDENT / HIGH MEMORY
-POLICY_ROOT_CAUSE=KNOWN / LEGACY HOT EXCLUDED FROM AUTOMATIC EVICTION BY DESIGN
-PROGRAM_CONTRACT_AUDIT=V4 STOP FOR FINAL ACCEPTANCE
-PROGRAM_CONTRACT=V5 ACCEPTED / FROZEN
-TARGET_POLICY=AUTOMATIC + KEEP_LOADED
+PROGRAM_CONTRACT=V5_ACCEPTED_FROZEN
+TARGET_POLICY=AUTOMATIC_PLUS_KEEP_LOADED
 NORMAL_AUTOMATIC_TARGET=2
 AUTOMATIC_INACTIVE_GRACE=30S
 WARNING_AUTOMATIC_TARGET=1
 CRITICAL_AUTOMATIC_TARGET=0
 
-PHASE_7_CONTRACT=ACCEPTED / FROZEN
-PHASE_7_IMPLEMENTATION=NOT_STARTED
-PHASE_7_PREDECESSOR_GATE=MERGE PR #187 FIRST
-PHASE_7_NEXT_USER_START_REQUIRED=YES
-PROGRAM_HUMAN_ACCEPTANCE=PENDING
-CI_RUNNER=macmini-floattabs-01 / self-hosted / macOS / ARM64 / mac-mini-ci
+PHASE_6=MERGED
+PHASE_6_MAIN_HEAD=54f2e43b0fbc224affa52d9662ac2ba5aa5b963c
+
+PHASE_7_CONTRACT=ACCEPTED_FROZEN
+PHASE_7_PR=#188
+PHASE_7_BRANCH=codex/ft-runtime-lifecycle-phase7-automatic-001
+PHASE_7_SEMANTIC_ACCEPTANCE_HEAD=b894641a254e7ffb49c84b4ed32d9c70a3f28ad7
+PHASE_7_PRODUCT_IMPLEMENTATION=COMPLETE
+PHASE_7_REAL_MAC_WP5=PASS
+PHASE_7_FRESH_PRODUCT_AUDIT=PASS
+PHASE_7_CONTROL_ALIGNMENT=COMPLETE_ON_BRANCH
+PHASE_7_MERGE_AUTHORIZED=YES_AFTER_LITERAL_HEAD_HOST_GATE
 ```
 
-## Contract reconciliation result
-
-Fresh source/contract audit found that V4's Phase 4 policy is a hybrid model rather than the intended final automatic lifecycle:
-
-- Hot is a permanent normal/critical automatic-budget exclusion;
-- Warm/Cold remain separate persisted classes with independent timers;
-- the current Tab menu still exposes Hot/Warm/Cold;
-- Performance Settings still exposes Warm retention and Cold release delay;
-- inactive Hot keeps a hidden attached WebView host;
-- normal managed target `3` is an unmeasured reference-derived assumption;
-- Phase 6 explicitly froze those semantics, so restore work alone cannot satisfy the final memory objective.
-
-The Phase 6 restore architecture remains valid. The program now adds one final structural Phase 7 to retire the legacy residency product model.
-
-## Current authority
-
-Program contract:
-
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`
-
-Phase 6 PR-scoped implementation contract:
-
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`
-
-Phase 7 implementation contract:
-
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`
-
-`CURRENT_TASK.md` remains the only active mutation authorization.
-
-## Phase 7 frozen target
+## Verified product truth
 
 ```text
-legacy Hot            -> Keep Loaded compatibility mapping
-legacy Warm / Cold    -> Automatic compatibility mapping
-new Slot              -> Automatic
-
-Automatic inactive
-→ 30s grace
-→ normal target 2 / warning 1 / critical 0
-→ LRU eligible reclaim
-→ existing WebViewPool hibernate
-→ Phase 6 restore on next use
-
-Keep Loaded
-→ no proactive launch materialization
-→ retained during normal operation when already live
-→ no hidden Hot host presentation
-→ critical pressure may reclaim if inactive and otherwise unprotected
+persistent Slot/Profile/session
+→ runtimeRetentionPreference = Automatic | Keep Loaded
+→ Automatic inactive grace = 30s
+→ normal / warning / critical Automatic targets = 2 / 1 / 0
+→ SlotLifecycleCoordinator is the sole lifecycle writer
+→ WebViewPool owns Runtime materialization / hibernate / restore
+→ Phase 6 restores reclaimed Runtime on demand
 ```
 
-Hard protection remains active/presented, fullscreen, supplemental-visible, Attention generating and allowed active/pending background media.
+Hard protection remains:
 
-Runtime reclaim no longer authorizes legacy Cold-based website-cache cleanup.
+- active / actually presented;
+- fullscreen source;
+- supplemental visible Web surface;
+- Attention Generating;
+- active/pending allowed-background-media protection;
+- current materialization/restoring ownership.
 
-## PR #187 disposition
+Keep Loaded:
 
-PR #187 remains Phase 6 only. Do not add Phase 7 product-source mutation to it.
+- does not proactively preload at launch;
+- does not use a hidden Hot host;
+- survives ordinary reclaim;
+- may be reclaimed under critical pressure when inactive and otherwise unprotected.
 
-Before merge:
+Hot/Warm/Cold remain bounded compatibility inputs/projections only. They are not current UI, Settings, shortcuts, lifecycle policy or acceptance terminology.
 
-1. finish bounded Real-Mac restore smoke on the corrective head;
-2. reconcile the known comment-only exact-diff churn;
-3. obtain fresh independent exact-diff audit PASS;
-4. merge only if those Phase 6 gates pass.
+Runtime reclaim does not authorize clearing Browser Profile, cookie, login or website-session data and no longer carries the retired Cold → website-cache-cleanup coupling.
 
-The Real-Mac high-memory observation does not invalidate the Phase 6 restore implementation; it invalidates V4 as the final program policy.
+## Machine verification
 
-## Next action
+Semantic/acceptance head `b894641a254e7ffb49c84b4ed32d9c70a3f28ad7` passed:
 
-Hold Phase 7 product mutation until PR #187 is dispositioned/merged and the user explicitly starts Phase 7 construction.
+- Benchmark Tool CI #139;
+- QA DMG #668;
+- macOS CI #1349;
+- required `Build & Test (Apple Silicon arm64)` check;
+- Debug arm64 build;
+- Release arm64 build;
+- native Release architecture verification;
+- Unit tests;
+- benchmark harness self-tests and Stage 5E retirement check.
 
-Then create a fresh Phase 7 branch/worktree from updated `main` and execute the frozen Phase 7 contract WP1-WP5.
+`main` remained `54f2e43b0fbc224affa52d9662ac2ba5aa5b963c` through the fresh merge-boundary audit.
+
+## Real-Mac acceptance
+
+Final `acceptance-result.json`:
+
+```text
+OVERALL=PASS
+AUTOMATIC_CONVERGENCE=PASS
+RAPID_A_B_A=PASS
+BACKGROUND_GENERATION=PASS
+KEEP_LOADED_ORDINARY=PASS
+RESTORE_SESSION_CONTINUITY=PASS
+KEEP_LOADED_RELAUNCH=PASS
+WARNINGS=NONE
+```
+
+The relaunch check used a real process restart (`40186` → `56993`), preserved the Keep Loaded preference and verified that the Keep Loaded Slot was not proactively materialized after relaunch.
+
+Aggregate FloatTabs/WebKit PID/RSS evidence is directional support only; no exact per-Slot WebContent memory attribution is claimed.
+
+Warning target `1` and critical target `0` are proven by deterministic machine tests because the current Debug control intentionally has no unsafe system-memory-pressure injection path.
+
+## Fresh closeout audit
+
+Fresh merge-boundary review found:
+
+- no second lifecycle writer;
+- no hidden Hot/persistent presentation workaround;
+- no current Hot/Warm/Cold UI/settings/shortcut surface;
+- additive legacy decode/encode compatibility preserved;
+- Browser Profile/session data boundary preserved;
+- Phase 6 restore architecture preserved;
+- required production changes remain inside the accepted Phase 7 scope;
+- no unresolved review thread;
+- no overlapping open PR;
+- no new product/runtime defect.
+
+The only closeout finding was stale current-status/document-routing text left from pre-acceptance state. `CURRENT_STATUS.md`, `CURRENT_TASK.md`, `docs/README.md` and `docs/architecture/README.md` are aligned in the current control-only closeout sequence.
+
+## Current merge boundary
+
+Control-only alignment advances the literal PR head after the verified semantic head. This is `CONTROL_ONLY_DRIFT` under `AGENTS.md`; it does not invalidate product/Real-Mac evidence. It does require the repository-host required check to pass on the final literal head before merge.
+
+Final gate:
+
+```text
+verify current PR literal HEAD
+verify main still 54f2e43b0fbc224affa52d9662ac2ba5aa5b963c
+verify closeout introduced no FloatTabs/** product change
+required Build & Test (Apple Silicon arm64) = success on literal HEAD
+auxiliary PR workflows = no failure
+PR mergeable / no unresolved thread
+→ mark ready if required
+→ merge #188 with expected_head_sha
+```
+
+No release/version mutation is authorized here.
+
+## After merge
+
+Per the frozen Phase 7 contract, the next program boundary is one fresh integrated read-only audit across Phases 1–7 before final user acceptance/release disposition.

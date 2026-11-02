@@ -663,16 +663,16 @@ final class WebsiteCacheCleanupTests: XCTestCase, @unchecked Sendable {
         )
     }
 
-    func testPerformanceSettingsShowsResidencyDefaultsAndStoredChoices() {
+    func testPerformanceSettingsDoesNotProjectLegacyResidencyTimingControls() {
         let preferences = AppPreferencesStore(defaults: defaults)
         preferences.warmWebViewRetentionDelay = 600
         preferences.coldWebViewReleaseDelay = 120
-
         let controller = PerformanceSettingsViewController(preferencesStore: preferences)
         controller.loadView()
 
-        XCTAssertEqual(controller.displayedWarmRetention, "10 minutes")
-        XCTAssertEqual(controller.displayedColdRelease, "2 minutes")
+        XCTAssertEqual(preferences.warmWebViewRetentionDelay, 600)
+        XCTAssertEqual(preferences.coldWebViewReleaseDelay, 120)
+        XCTAssertEqual(controller.displayedWebsiteCacheUsage, "Unavailable")
     }
 
     func testAutomaticCollisionUsesPositiveRetryWithoutUpdatingSuccessTime() {

@@ -9,11 +9,12 @@ enum SlotMemoryPressureLevel {
 }
 
 private struct RuntimeBudgetPolicy {
-    static let defaultManagedResidentTarget = 3
+    static let defaultManagedResidentTarget = 2
+    static let warningManagedResidentTarget = 1
 
     struct Candidate {
         let slotID: UUID
-        let residencyPolicy: SlotResidencyPolicy
+        let retentionPreference: SlotRuntimeRetentionPreference
         let lastUsedAt: Date
         let isProtected: Bool
     }
@@ -25,49 +26,60 @@ private struct RuntimeBudgetPolicy {
         let oversubscribedBy: Int
     }
 
-    static func decide(candidates: [Candidate], target: Int) -> Decision {
+    static func decide(
+        candidates: [Candidate],
+        target: Int,
+        critical: Bool = false
+    ) -> Decision {
         let normalizedTarget = max(target, 0)
-        let managedResidentCount = candidates.count
-        let requiredEvictions = max(managedResidentCount - normalizedTarget, 0)
+        let automatic = candidates.filter { $0.retentionPreference == .automatic }
+        let eligibleAutomatic = automatic
+            .filter { !$0.isProtected }
+            .sorted(by: evictionOrder)
+        let requiredAutomaticEvictions = max(automatic.count - normalizedTarget, 0)
+        var evictSlotIDs = Array(
+            eligibleAutomatic.prefix(requiredAutomaticEvictions).map(\.slotID)
+        )
 
-        let eligible = candidates
-            .filter { !$0.isProtected && $0.residencyPolicy != .hot }
-            .sorted { lhs, rhs in
-                let lhsRank = evictionRank(lhs.residencyPolicy)
-                let rhsRank = evictionRank(rhs.residencyPolicy)
-                if lhsRank != rhsRank {
-                    return lhsRank < rhsRank
-                }
-                if lhs.lastUsedAt != rhs.lastUsedAt {
-                    return lhs.lastUsedAt < rhs.lastUsedAt
-                }
-                return lhs.slotID.uuidString < rhs.slotID.uuidString
-            }
+        if critical {
+            let selected = Set(evictSlotIDs)
+            let remainingAutomatic = eligibleAutomatic.filter { !selected.contains($0.slotID) }
+            evictSlotIDs.append(contentsOf: remainingAutomatic.map(\.slotID))
+            let eligibleKeepLoaded = candidates
+                .filter { !$0.isProtected && $0.retentionPreference == .keepLoaded }
+                .sorted(by: evictionOrder)
+            evictSlotIDs.append(contentsOf: eligibleKeepLoaded.map(\.slotID))
+        }
 
-        let evictSlotIDs = Array(eligible.prefix(requiredEvictions).map(\.slotID))
-        let remainingManaged = managedResidentCount - evictSlotIDs.count
+        let selectedAutomaticCount = evictSlotIDs.reduce(into: 0) { count, slotID in
+            if automatic.contains(where: { $0.slotID == slotID }) { count += 1 }
+        }
+        let remainingAutomatic = automatic.count - selectedAutomaticCount
         return Decision(
             target: normalizedTarget,
-            managedResidentCount: managedResidentCount,
+            managedResidentCount: automatic.count,
             evictSlotIDs: evictSlotIDs,
-            oversubscribedBy: max(remainingManaged - normalizedTarget, 0)
+            oversubscribedBy: max(remainingAutomatic - normalizedTarget, 0)
         )
     }
 
-    private static func evictionRank(_ policy: SlotResidencyPolicy) -> Int {
-        switch policy {
-        case .cold: return 0
-        case .warm: return 1
-        case .hot: return 2
+    private static func evictionOrder(_ lhs: Candidate, _ rhs: Candidate) -> Bool {
+        if lhs.lastUsedAt != rhs.lastUsedAt {
+            return lhs.lastUsedAt < rhs.lastUsedAt
         }
+        return lhs.slotID.uuidString < rhs.slotID.uuidString
     }
 }
 
 @MainActor
 final class SlotLifecycleCoordinator {
+    // Compatibility constants remain for older tests/callers; current
+    // product policy uses one Automatic inactivity grace.
     nonisolated static let defaultColdReleaseDelay: TimeInterval = 30
     nonisolated static let defaultWarmReleaseDelay: TimeInterval = 120
-    nonisolated static let defaultHiddenActiveGraceDelay: TimeInterval = 120
+    nonisolated static let defaultAutomaticReleaseDelay: TimeInterval = 30
+    nonisolated static let warningManagedResidentTarget = RuntimeBudgetPolicy.warningManagedResidentTarget
+    nonisolated static let defaultHiddenActiveGraceDelay: TimeInterval = 0
     nonisolated static let defaultMediaProtectionPollDelay: TimeInterval = 10
     nonisolated static let defaultManagedResidentTarget = RuntimeBudgetPolicy.defaultManagedResidentTarget
 
@@ -81,7 +93,7 @@ final class SlotLifecycleCoordinator {
     private struct InactivePlan {
         let token: UUID
         let profile: WebAppProfile
-        let residencyPolicy: SlotResidencyPolicy
+        let retentionPreference: SlotRuntimeRetentionPreference
         let backgroundMediaPolicy: BackgroundMediaPolicy
     }
 
@@ -92,8 +104,7 @@ final class SlotLifecycleCoordinator {
 
     private let webViewPool: WebViewPool
     private unowned let container: WebPanelContainerView
-    private var coldReleaseDelay: TimeInterval
-    private var warmReleaseDelay: TimeInterval
+    private var automaticReleaseDelay: TimeInterval
     private let hiddenActiveGraceDelay: TimeInterval
     private let mediaProtectionPollDelay: TimeInterval
     private let managedResidentTarget: Int
@@ -136,8 +147,10 @@ final class SlotLifecycleCoordinator {
     ) {
         self.webViewPool = webViewPool
         self.container = container
-        self.coldReleaseDelay = max(coldReleaseDelay, 0)
-        self.warmReleaseDelay = max(warmReleaseDelay, 0)
+        // Legacy constructor knobs are retained only as a deterministic
+        // test/rollback seam. Production no longer reads the user Warm/Cold
+        // settings; the smaller value maps to the single Automatic grace.
+        automaticReleaseDelay = max(min(coldReleaseDelay, warmReleaseDelay), 0)
         self.hiddenActiveGraceDelay = max(hiddenActiveGraceDelay, 0)
         self.mediaProtectionPollDelay = max(mediaProtectionPollDelay, 0.01)
         self.managedResidentTarget = max(managedResidentTarget, 0)
@@ -162,27 +175,21 @@ final class SlotLifecycleCoordinator {
         }
     }
 
+    /// Compatibility seam for older tests. Production no longer observes
+    /// Warm/Cold settings; both values collapse to one Automatic grace.
     func updateReleaseDelays(
         coldReleaseDelay: TimeInterval,
         warmReleaseDelay: TimeInterval
     ) {
-        let normalizedColdDelay = max(coldReleaseDelay, 0)
-        let normalizedWarmDelay = max(warmReleaseDelay, 0)
-        guard normalizedColdDelay != self.coldReleaseDelay
-                || normalizedWarmDelay != self.warmReleaseDelay else {
-            return
-        }
-
-        self.coldReleaseDelay = normalizedColdDelay
-        self.warmReleaseDelay = normalizedWarmDelay
+        let normalized = max(min(coldReleaseDelay, warmReleaseDelay), 0)
+        guard normalized != automaticReleaseDelay else { return }
+        automaticReleaseDelay = normalized
 
         let profiles = inactivePlans.values.map(\.profile)
-        for profile in profiles {
-            guard profile.residencyPolicy == .warm || profile.residencyPolicy == .cold,
-                  webViewPool.contains(slotID: profile.id),
-                  !isVisibleSlot(profile.id) else {
-                continue
-            }
+        for profile in profiles where
+            profile.runtimeRetentionPreference == .automatic
+                && webViewPool.contains(slotID: profile.id)
+                && !isVisibleSlot(profile.id) {
             let preserveMediaProtection = mediaProtectedSlotIDs.contains(profile.id)
             cancelInactivePlan(
                 slotID: profile.id,
@@ -190,19 +197,16 @@ final class SlotLifecycleCoordinator {
             )
             createInactivePlan(for: profile)
         }
-        enforceRuntimeBudget(reason: "retention_settings_changed")
+        enforceRuntimeBudget(reason: "automatic_grace_changed")
     }
 
     func reconcile(profiles: [WebAppProfile]) {
         knownProfiles = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
         let validIDs = Set(profiles.map(\.id))
-        let hotIDs = Set(profiles.filter { $0.residencyPolicy == .hot }.map(\.id))
 
         if let activeSlotID, !validIDs.contains(activeSlotID) {
             self.activeSlotID = nil
         }
-
-        container.retainHotSlots(hotIDs)
 
         for slotID in Array(inactivePlans.keys) where
             !validIDs.contains(slotID) || !webViewPool.contains(slotID: slotID) {
@@ -222,13 +226,7 @@ final class SlotLifecycleCoordinator {
             if profile.backgroundMediaPolicy == .pauseWhenInactive {
                 mediaPauseAction(profile.id)
             }
-
-            switch profile.residencyPolicy {
-            case .hot:
-                cancelInactivePlan(slotID: profile.id)
-            case .warm, .cold:
-                ensureInactivePlan(for: profile)
-            }
+            ensureInactivePlan(for: profile)
         }
 
         enforceRuntimeBudget(reason: "reconcile")
@@ -303,9 +301,8 @@ final class SlotLifecycleCoordinator {
         knownProfiles[profile.id] = profile
         let slotID = profile.id
         guard let existingPlan = inactivePlans[slotID],
-              existingPlan.residencyPolicy == profile.residencyPolicy,
+              existingPlan.retentionPreference == profile.runtimeRetentionPreference,
               existingPlan.backgroundMediaPolicy == profile.backgroundMediaPolicy,
-              profile.residencyPolicy == .warm || profile.residencyPolicy == .cold,
               webViewPool.contains(slotID: slotID),
               !isVisibleSlot(slotID),
               !attentionProtectionQuery(slotID) else {
@@ -452,12 +449,12 @@ final class SlotLifecycleCoordinator {
         )
     }
 
-    var pendingColdReleaseCount: Int {
-        inactivePlans.values.filter { $0.residencyPolicy == .cold }.count
-    }
+    /// Legacy debug counters retained for old fixtures. Automatic plans
+    /// are projected as Warm; Cold no longer exists as a current policy.
+    var pendingColdReleaseCount: Int { 0 }
 
     var pendingWarmReleaseCount: Int {
-        inactivePlans.values.filter { $0.residencyPolicy == .warm }.count
+        inactivePlans.values.filter { $0.retentionPreference == .automatic }.count
     }
 
     var mediaProtectedIDs: Set<UUID> {
@@ -474,7 +471,10 @@ final class SlotLifecycleCoordinator {
         return [
             "lifecycle_slot_active": .bool(activeSlotID == slotID),
             "lifecycle_pending_release": .bool(plan != nil),
-            "lifecycle_pending_release_class": .string(plan?.residencyPolicy.rawValue ?? "none"),
+            "lifecycle_pending_release_class": .string(plan?.retentionPreference.rawValue ?? "none"),
+            "lifecycle_runtime_retention": .string(
+                knownProfiles[slotID]?.runtimeRetentionPreference.rawValue ?? "unknown"
+            ),
             "lifecycle_media_protected": .bool(protection.media),
             "lifecycle_attention_protected": .bool(protection.attention),
             "lifecycle_managed_resident_target": .integer(Int64(managedResidentTarget))
@@ -515,18 +515,12 @@ final class SlotLifecycleCoordinator {
         if profile.backgroundMediaPolicy == .pauseWhenInactive {
             mediaPauseAction(profile.id)
         }
-
-        switch profile.residencyPolicy {
-        case .hot:
-            cancelInactivePlan(slotID: profile.id)
-        case .warm, .cold:
-            ensureInactivePlan(for: profile)
-        }
+        ensureInactivePlan(for: profile)
     }
 
     private func ensureInactivePlan(for profile: WebAppProfile) {
         if let existing = inactivePlans[profile.id],
-           existing.residencyPolicy == profile.residencyPolicy,
+           existing.retentionPreference == profile.runtimeRetentionPreference,
            existing.backgroundMediaPolicy == profile.backgroundMediaPolicy,
            existing.profile.browserProfileID == profile.browserProfileID {
             return
@@ -540,7 +534,7 @@ final class SlotLifecycleCoordinator {
         let plan = InactivePlan(
             token: UUID(),
             profile: profile,
-            residencyPolicy: profile.residencyPolicy,
+            retentionPreference: profile.runtimeRetentionPreference,
             backgroundMediaPolicy: profile.backgroundMediaPolicy
         )
         inactivePlans[profile.id] = plan
@@ -551,7 +545,7 @@ final class SlotLifecycleCoordinator {
             fields: [
                 "slot_id": .string(profile.id.uuidString),
                 "inactive_plan_id": .string(plan.token.uuidString),
-                "residency": .string(profile.residencyPolicy.rawValue)
+                "runtime_retention": .string(profile.runtimeRetentionPreference.rawValue)
             ]
         )
 
@@ -626,18 +620,10 @@ final class SlotLifecycleCoordinator {
         for profile: WebAppProfile,
         plan: InactivePlan
     ) {
-        guard planMatches(plan, slotID: profile.id) else { return }
+        guard planMatches(plan, slotID: profile.id),
+              profile.runtimeRetentionPreference == .automatic else { return }
         mediaProtectedSlotIDs.remove(profile.id)
-
-        let delay: TimeInterval
-        switch profile.residencyPolicy {
-        case .hot:
-            return
-        case .warm:
-            delay = warmReleaseDelay
-        case .cold:
-            delay = coldReleaseDelay
-        }
+        let delay = automaticReleaseDelay
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self,
@@ -651,7 +637,7 @@ final class SlotLifecycleCoordinator {
                 let protection = self.protectionState(slotID: profile.id)
                 self.recordProtectionObservations(
                     slotID: profile.id,
-                    boundary: "release_timer",
+                    boundary: "automatic_grace",
                     planToken: plan.token,
                     protection: protection
                 )
@@ -663,39 +649,17 @@ final class SlotLifecycleCoordinator {
                 self.mediaPlayingQuery(profile.id) { [weak self] isPlaying in
                     guard let self,
                           self.planMatches(plan, slotID: profile.id),
-                          !self.isVisibleSlot(profile.id) else {
-                        return
-                    }
+                          !self.isVisibleSlot(profile.id) else { return }
                     self.mediaProtectionPendingSlotIDs.remove(profile.id)
-                    guard !self.isProactivelyProtected(slotID: profile.id) else {
-                        let protection = self.protectionState(slotID: profile.id)
-                        self.recordProtectionObservations(
-                            slotID: profile.id,
-                            boundary: "release_timer",
-                            planToken: plan.token,
-                            protection: protection
-                        )
-                        return
-                    }
+                    guard !self.isProactivelyProtected(slotID: profile.id) else { return }
                     if isPlaying {
-                        let wasProtected = self.mediaProtectedSlotIDs.insert(profile.id).inserted
-                        if wasProtected {
-                            self.diagnostics.record(
-                                event: "slot_lifecycle.media_protected",
-                                level: .notice,
-                                subsystem: "lifecycle",
-                                fields: [
-                                    "slot_id": .string(profile.id.uuidString),
-                                    "inactive_plan_id": .string(plan.token.uuidString)
-                                ]
-                            )
-                        }
+                        self.mediaProtectedSlotIDs.insert(profile.id)
                         self.scheduleMediaProtectionRecheck(for: profile, plan: plan)
                     } else {
                         self.releaseInactiveSlot(
                             slotID: profile.id,
                             expectedPlan: plan,
-                            releaseReason: "retention_timer"
+                            releaseReason: "automatic_grace_expired"
                         )
                     }
                 }
@@ -703,7 +667,7 @@ final class SlotLifecycleCoordinator {
                 self.releaseInactiveSlot(
                     slotID: profile.id,
                     expectedPlan: plan,
-                    releaseReason: "retention_timer"
+                    releaseReason: "automatic_grace_expired"
                 )
             }
         }
@@ -758,29 +722,36 @@ final class SlotLifecycleCoordinator {
 
     private func budgetCandidates() -> [RuntimeBudgetPolicy.Candidate] {
         webViewPool.residentSlotIDs.compactMap { slotID in
-            guard let profile = knownProfiles[slotID],
-                  profile.residencyPolicy == .warm || profile.residencyPolicy == .cold else {
-                return nil
-            }
-
+            guard let profile = knownProfiles[slotID] else { return nil }
             let hasInactivePlan = inactivePlans[slotID] != nil
             let protected = isVisibleSlot(slotID)
                 || isProactivelyProtected(slotID: slotID)
                 || !hasInactivePlan
             return RuntimeBudgetPolicy.Candidate(
                 slotID: slotID,
-                residencyPolicy: profile.residencyPolicy,
+                retentionPreference: profile.runtimeRetentionPreference,
                 lastUsedAt: profile.lastUsedAt,
                 isProtected: protected
             )
         }
     }
 
-    private func budgetDecision(for pressure: SlotMemoryPressureLevel? = nil) -> RuntimeBudgetPolicy.Decision {
-        let target = pressure == .critical ? 0 : managedResidentTarget
+    private func budgetDecision(
+        for pressure: SlotMemoryPressureLevel? = nil
+    ) -> RuntimeBudgetPolicy.Decision {
+        let target: Int
+        switch pressure {
+        case .warning:
+            target = RuntimeBudgetPolicy.warningManagedResidentTarget
+        case .critical:
+            target = 0
+        case nil:
+            target = managedResidentTarget
+        }
         return RuntimeBudgetPolicy.decide(
             candidates: budgetCandidates(),
-            target: target
+            target: target,
+            critical: pressure == .critical
         )
     }
 
@@ -840,10 +811,10 @@ final class SlotLifecycleCoordinator {
             let plan = inactivePlans[slotID]
             let protection = protectionState(slotID: slotID)
             let visible = isVisibleSlot(slotID)
-            let policy = knownProfiles[slotID]?.residencyPolicy
-                ?? plan?.residencyPolicy
-                ?? webViewPool.residencyPolicy(for: slotID)
-            let managed = policy == .warm || policy == .cold
+            let preference = knownProfiles[slotID]?.runtimeRetentionPreference
+                ?? plan?.retentionPreference
+                ?? webViewPool.runtimeRetentionPreference(for: slotID)
+            let managed = preference == .automatic
             let selectedForRelease = selected.contains(slotID)
             let decisionName: String
             let releaseReason: String
@@ -863,11 +834,11 @@ final class SlotLifecycleCoordinator {
                 "slot_id": .string(slotID.uuidString),
                 "level": .string(pressureLevel),
                 "pressure_level": .string(pressureLevel),
-                "residency_policy": .string(policy?.rawValue ?? "unknown"),
+                "runtime_retention_preference": .string(preference?.rawValue ?? "unknown"),
                 "is_active": .bool(activeSlotID == slotID),
                 "is_visible": .bool(visible),
                 "pending_release": .bool(plan != nil),
-                "pending_release_class": .string(plan?.residencyPolicy.rawValue ?? "none"),
+                "pending_release_class": .string(plan?.retentionPreference.rawValue ?? "none"),
                 "media_protected": .bool(protection.media),
                 "attention_protected": .bool(protection.attention),
                 "managed_runtime": .bool(managed),

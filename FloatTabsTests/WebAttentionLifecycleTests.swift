@@ -101,7 +101,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
-    func testThreeInactiveWarmRuntimesRemainResidentBeforeConfiguredTTL() throws {
+    func testThreeInactiveAutomaticRuntimesRespectNormalBudgetBeforeGrace() throws {
         let pool = makePool()
         let profiles = [
             makeProfile(name: "WarmOne", policy: .warm),
@@ -120,50 +120,27 @@ final class WebAttentionLifecycleTests: XCTestCase {
             makeInactive(lifecycle, profile: profile)
         }
 
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
-        for profile in profiles {
-            XCTAssertTrue(
-                pool.contains(slotID: profile.id),
-                "Warm runtime \(profile.name) should remain resident until its TTL expires."
-            )
-        }
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 2)
+        XCTAssertEqual(pool.count, 2)
+        XCTAssertEqual(profiles.filter { pool.contains(slotID: $0.id) }.count, 2)
     }
 
-    func testMemoryWarningKeepsEligibleWarmRuntimesAndTheirPlans() throws {
+    func testMemoryWarningReducesAutomaticRuntimesToOne() throws {
         let pool = makePool()
         let profiles = [
-            makeProfile(name: "WarningWarmOne", policy: .warm),
-            makeProfile(name: "WarningWarmTwo", policy: .warm),
-            makeProfile(name: "WarningWarmThree", policy: .warm)
+            makeProfile(name: "WarningOne", policy: .warm),
+            makeProfile(name: "WarningTwo", policy: .warm),
+            makeProfile(name: "WarningThree", policy: .warm)
         ]
-        for profile in profiles {
-            _ = try pool.webView(for: profile)
-        }
-        let lifecycle = makeLifecycle(
-            pool: pool,
-            warmReleaseDelay: 600
-        )
+        for profile in profiles { _ = try pool.webView(for: profile) }
+        let lifecycle = makeLifecycle(pool: pool, warmReleaseDelay: 600)
+        for profile in profiles { makeInactive(lifecycle, profile: profile) }
 
-        for profile in profiles {
-            makeInactive(lifecycle, profile: profile)
-        }
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, profiles.count)
-        let planTokens = try profiles.reduce(into: [UUID: UUID]()) { tokens, profile in
-            tokens[profile.id] = try XCTUnwrap(
-                lifecycle.debugInactivePlanToken(slotID: profile.id)
-            )
-        }
-
+        XCTAssertEqual(pool.count, 2)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 2)
         lifecycle.handleMemoryPressure(.warning)
-
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, profiles.count)
-        for profile in profiles {
-            XCTAssertTrue(pool.contains(slotID: profile.id))
-            XCTAssertEqual(
-                lifecycle.debugInactivePlanToken(slotID: profile.id),
-                planTokens[profile.id]
-            )
-        }
+        XCTAssertEqual(pool.count, 1)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
     }
 
     func testRepeatedMemoryWarningsPreserveWarmDeadlineUntilNormalExpiry() async throws {
@@ -257,9 +234,9 @@ final class WebAttentionLifecycleTests: XCTestCase {
         lifecycle.handleMemoryPressure(.warning)
 
         XCTAssertTrue(pool.contains(slotID: protected.id))
-        XCTAssertTrue(pool.contains(slotID: eligibleB.id))
-        XCTAssertTrue(pool.contains(slotID: eligibleC.id))
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
+        XCTAssertFalse(pool.contains(slotID: eligibleB.id))
+        XCTAssertFalse(pool.contains(slotID: eligibleC.id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
     }
 
     func testMemoryWarningPreservesMediaProtectedAndEligibleWarm() throws {
@@ -283,9 +260,9 @@ final class WebAttentionLifecycleTests: XCTestCase {
 
         XCTAssertTrue(pool.contains(slotID: protected.id))
         XCTAssertTrue(lifecycle.mediaProtectedIDs.contains(protected.id))
-        XCTAssertTrue(pool.contains(slotID: eligibleB.id))
-        XCTAssertTrue(pool.contains(slotID: eligibleC.id))
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
+        XCTAssertFalse(pool.contains(slotID: eligibleB.id))
+        XCTAssertFalse(pool.contains(slotID: eligibleC.id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
     }
 
     func testMemoryWarningPreservesActiveVisibleWarmRuntime() throws {
@@ -345,8 +322,8 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: generating.id), .generating)
         XCTAssertEqual(coordinator.state(for: ready.id), .ready)
         XCTAssertTrue(pool.contains(slotID: generating.id))
-        XCTAssertTrue(pool.contains(slotID: ready.id))
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 2)
+        XCTAssertFalse(pool.contains(slotID: ready.id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
     }
 
     func testMemoryWarningDiagnosticIsObserveOnlyAndHasNoReleaseEvidence() throws {
@@ -484,7 +461,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         )
         XCTAssertEqual(event.level, .info)
         XCTAssertEqual(event.fields["slot_id"], .string(profile.id.uuidString))
-        XCTAssertEqual(event.fields["boundary"], .string("release_timer"))
+        XCTAssertEqual(event.fields["boundary"], .string("automatic_grace"))
     }
 
     func testStandardDiagnosticsPersistPlanIdentityAcrossProtectionAndCancellation() async throws {
@@ -578,7 +555,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(events.filter { $0.event == "slot_lifecycle.inactive_plan.created" }.allSatisfy {
             $0.level == .info
                 && $0.fields["slot_id"] == .string(profile.id.uuidString)
-                && $0.fields["residency"] == .string(profile.residencyPolicy.rawValue)
+                && $0.fields["runtime_retention"] == .string(profile.runtimeRetentionPreference.rawValue)
         })
         XCTAssertTrue(events.filter { $0.event == "slot_lifecycle.inactive_plan.cancelled" }.allSatisfy {
             $0.level == .info
@@ -661,7 +638,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
             1
         )
         lifecycle.deactivate(profile: profile)
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
     }
 
     func testRemovingAttentionAloneDoesNotBypassMediaProtection() async throws {
@@ -843,13 +820,13 @@ final class WebAttentionLifecycleTests: XCTestCase {
         // protection boundary instead of merely having been scheduled.
         let reachedEvictionProtectionBoundary = try await waitUntil {
             !lifecycle.isHiddenActiveGracePending
-                && lifecycle.pendingColdReleaseCount == 1
+                && lifecycle.pendingWarmReleaseCount == 1
                 && attentionProtectionQueryCount >= 1
                 && pool.contains(slotID: profile.id)
         }
         XCTAssertTrue(reachedEvictionProtectionBoundary)
         XCTAssertFalse(lifecycle.isHiddenActiveGracePending)
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
         XCTAssertGreaterThanOrEqual(attentionProtectionQueryCount, 1)
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
@@ -866,7 +843,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         makeInactive(lifecycle, profile: profile)
         try await wait(milliseconds: 50)
 
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
         XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
@@ -891,7 +868,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         )
 
         XCTAssertEqual(coordinator.state(for: profile.id), .idle)
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
     }
 
     func testReadyAcknowledgementWhileVisibleDoesNotCreateInactiveTimer() async throws {
@@ -915,9 +892,9 @@ final class WebAttentionLifecycleTests: XCTestCase {
         coordinator.acknowledge(slotID: profile.id, userVisible: true)
         lifecycle.restartAfterAttentionProtectionEnded(profile: profile)
 
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
         lifecycle.deactivate(profile: profile)
-        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
         try await wait(milliseconds: 70)
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }

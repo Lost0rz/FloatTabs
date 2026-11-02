@@ -222,11 +222,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     private lazy var slotLifecycleCoordinator = SlotLifecycleCoordinator(
         webViewPool: webViewPool,
         container: rootView.webPanelContainerView,
-        coldReleaseDelay: preferencesStore.coldWebViewReleaseDelay,
-        warmReleaseDelay: preferencesStore.warmWebViewRetentionDelay,
-        onRuntimeReleased: { [weak self] profile in
-            self?.handleRuntimeReleased(profile)
-        },
         attentionProtectionQuery: { [weak self] slotID in
             self?.attentionCoordinator.isAttentionProtected(slotID) ?? false
         },
@@ -1733,13 +1728,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func handleRuntimeReleased(_ profile: WebAppProfile) {
-        guard profile.residencyPolicy == .cold else { return }
-        let identity = BrowserProfileIdentity(browserProfileID: profile.browserProfileID)
-        guard webViewPool.residentSlotIDs(using: identity).isEmpty else { return }
-        websiteCacheCleanupCoordinator?.requestColdCleanup(for: identity)
-    }
-
     private func prepareForWebsiteCacheCleanup(
         identity: BrowserProfileIdentity,
         allowActive: Bool
@@ -2443,6 +2431,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 "id": profile.id.uuidString,
                 "order": profile.order,
                 "name": profile.name,
+                "runtime_retention": profile.runtimeRetentionPreference.rawValue,
                 "residency": profile.residencyPolicy.rawValue,
                 "background_media": profile.backgroundMediaPolicy.rawValue,
                 "website_mode": profile.renderingProfile.websiteMode.rawValue,
@@ -2819,12 +2808,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             name: .floatTabsFixedWindowSizeDidChange,
             object: preferencesStore
         )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(slotRetentionPreferenceDidChange(_:)),
-            name: .floatTabsSlotRetentionDidChange,
-            object: preferencesStore
-        )
     }
 
     @objc private func appearancePreferenceDidChange(_ notification: Notification) {
@@ -2867,12 +2850,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         applySharedFixedViewport(preferencesStore.fixedViewportSize, animated: panel.isVisible)
     }
 
-    @objc private func slotRetentionPreferenceDidChange(_ notification: Notification) {
-        slotLifecycleCoordinator.updateReleaseDelays(
-            coldReleaseDelay: preferencesStore.coldWebViewReleaseDelay,
-            warmReleaseDelay: preferencesStore.warmWebViewRetentionDelay
-        )
-    }
 
     private func synchronizePreferencePresentation() {
         synchronizeAppearance()
@@ -2946,8 +2923,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         rail.onSetZoom = { [weak self] id, zoom in
             _ = self?.tabStore.updateZoom(id: id, zoom: zoom)
         }
-        rail.onSetResidency = { [weak self] id, policy in
-            _ = self?.setResidency(policy, for: id)
+        rail.onSetRuntimeRetention = { [weak self] id, preference in
+            _ = self?.tabStore.updateRuntimeRetentionPreference(
+                id: id,
+                preference: preference
+            )
         }
         rail.onSetBackgroundMedia = { [weak self] id, policy in
             _ = self?.tabStore.updateResourcePolicy(id: id, backgroundMediaPolicy: policy)
@@ -4276,16 +4256,13 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     @discardableResult
     func setResidency(_ policy: SlotResidencyPolicy, for id: UUID) -> Bool {
-        guard tabStore.updateResourcePolicy(id: id, residencyPolicy: policy),
-              let updatedProfile = tabStore.profiles.first(where: { $0.id == id }) else {
+        // Legacy IPC/test adapter only. The canonical product state is
+        // Automatic / Keep Loaded and no current UI projects legacy labels.
+        guard tabStore.updateResourcePolicy(id: id, residencyPolicy: policy) else {
             return false
         }
-
-        handleRuntimeReleased(updatedProfile)
-
         if tabStore.activeTabID == id {
             synchronizeTransientUIHost()
-            statusHUDView.show(residency: policy)
         }
         return true
     }

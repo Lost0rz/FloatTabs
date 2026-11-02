@@ -31,33 +31,23 @@ This file is a **derived navigation map**. It does not replace `AGENTS.md`, `CUR
 | Website Cache / Storage | re-downloadable website-cache measurement/cleanup | `FloatTabs/Storage/WebsiteCacheCleanupCoordinator.swift`, `WebsiteCacheCleanupService.swift`, `WebsiteCachePolicy.swift` | cache cleanup is not Runtime cleanup; Phase 7 retires legacy Cold coupling |
 | Menu / Status Projection | menu-bar/status projection and entry actions | `FloatTabs/MenuBar/StatusItemController.swift` | projection only |
 | Tab Rail / Current Runtime Controls | Tab menu, Automatic/Keep Loaded control projection, Browser Profile/media controls | `FloatTabs/UI/ExternalTabRail.swift` | UI projects Tab configuration; does not decide lifecycle |
-| Global Settings | application settings and Browser/Performance presentation | `FloatTabs/UI/GlobalSettingsController.swift`, `SettingsInformationArchitecture.swift` | Phase 7 removes active Warm/Cold timing controls |
+| Global Settings | application settings and Browser/Performance presentation | `FloatTabs/UI/GlobalSettingsController.swift`, `SettingsInformationArchitecture.swift` | Warm/Cold timing controls are retired from current lifecycle |
 
-## Current production lifecycle truth before Phase 7 lands
+## Current Phase 7 lifecycle truth
 
-Current source still implements the legacy Phase 4 hybrid model:
-
-```text
-Hot       -> explicit automatic-eviction exclusion + hidden attached Hot host
-Warm/Cold -> managed budget + separate timers
-normal managed target -> 3
-```
-
-This is **current production truth**, but it is no longer the accepted final product target.
-
-## Accepted Phase 7 target
+The active PR implements the accepted Phase 7 model:
 
 ```text
 Slot persistent configuration
 → runtimeRetentionPreference = Automatic | Keep Loaded
 → WebViewPool owns live Runtime cache
 → SlotLifecycleCoordinator gathers protection/recency facts
-→ deterministic automatic policy
+→ deterministic Automatic policy
 → existing hibernate boundary releases eligible Runtime
 → Phase 6 restores reclaimed Runtime on demand
 ```
 
-Initial target policy:
+Current policy:
 
 ```text
 Automatic default
@@ -94,7 +84,9 @@ native completion notification
 mere presence of a restore snapshot
 ```
 
-## Persistence compatibility route for Phase 7
+Legacy Hot/Warm/Cold remains bounded compatibility input/projection only. It is not current UI, settings, shortcut, lifecycle-policy or acceptance terminology.
+
+## Persistence compatibility route
 
 Primary files:
 
@@ -125,6 +117,14 @@ Relevant tests include:
 
 Required repository host gate remains `Build & Test (Apple Silicon arm64)` on `macmini-floattabs-01`.
 
+Phase 7 bounded Real-Mac acceptance entry:
+
+```text
+tools/benchmark/floattabs_phase7_acceptance.py
+```
+
+It validates current Automatic/Keep Loaded semantics, aggregate FloatTabs/WebKit resource evidence, restore/session continuity and Keep Loaded non-preload behavior. `tools/benchmark/floattabs_lifecycle_benchmark.py` is the retired Stage 5E Hot/Warm/Cold entry point and is not current evidence.
+
 ## Incident routing
 
 For runtime failures, classify the boundary before changing code:
@@ -149,7 +149,7 @@ Correlate fresh evidence by Slot/session/runtime/navigation generation and time 
 ## Structural notes
 
 - `SlotLifecycleCoordinator` remains the only release/hibernate decision executor.
-- current private `RuntimeBudgetPolicy` is reusable decision machinery, but its Hot/Warm/Cold semantics are Phase 7 migration targets.
+- current private `RuntimeBudgetPolicy` is reusable decision machinery under the Phase 7 Automatic/Keep Loaded model.
 - `WebViewPool.onResidentSetChange` is an event trigger, not a policy writer.
 - `TabStore.lastUsedAt` remains the LRU fact source.
 - Phase 6 restore and Phase 7 reclaim policy are separate ownership concerns.

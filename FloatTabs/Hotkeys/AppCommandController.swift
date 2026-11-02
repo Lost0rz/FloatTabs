@@ -136,18 +136,6 @@ extension KeyboardShortcuts.Name {
     static let zoomOut = Self("zoomOut", initial: .init(.minus, modifiers: [.command]))
     static let resetZoom = Self("resetZoom", initial: .init(.zero, modifiers: [.command]))
     static let togglePin = Self("togglePin", initial: .init(.p, modifiers: [.command, .shift]))
-    static let setHotResidency = Self(
-        "setHotResidency",
-        initial: .init(.h, modifiers: [.control, .option])
-    )
-    static let setWarmResidency = Self(
-        "setWarmResidency",
-        initial: .init(.w, modifiers: [.control, .option])
-    )
-    static let setColdResidency = Self(
-        "setColdResidency",
-        initial: .init(.c, modifiers: [.control, .option])
-    )
     static let floatTabsSettings = Self("floatTabsSettings", initial: .init(.comma, modifiers: [.command]))
 }
 
@@ -191,11 +179,6 @@ enum AppShortcutCatalog {
         .init(title: "Pin / Auto-hide", command: .togglePin, name: .togglePin),
     ]
 
-    static let residencyBindings: [AppShortcutBinding] = [
-        .init(title: "Set Hot Mode", command: .setResidency(.hot), name: .setHotResidency),
-        .init(title: "Set Warm Mode", command: .setResidency(.warm), name: .setWarmResidency),
-        .init(title: "Set Cold Mode", command: .setResidency(.cold), name: .setColdResidency),
-    ]
 
     static let applicationBindings: [AppShortcutBinding] = [
         .init(title: "Global Settings", command: .settings, name: .floatTabsSettings),
@@ -205,7 +188,6 @@ enum AppShortcutCatalog {
         slotBindings
             + navigationBindings
             + viewBindings
-            + residencyBindings
             + applicationBindings
     }
 

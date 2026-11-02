@@ -191,17 +191,10 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertEqual(webPoint.y, webView.bounds.midY, accuracy: 0.5)
     }
 
-    func testHotHostsPreserveInactiveViewportAcrossDifferentSlotSizes() {
+    func testInactiveRuntimeDetachesFromPresentationAndRestoresAtCurrentSize() {
         _ = NSApplication.shared
-        let container = WebPanelContainerView(
-            frame: NSRect(x: 0, y: 0, width: 600, height: 820)
-        )
-        let window = NSWindow(
-            contentRect: container.frame,
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 600, height: 820))
+        let window = NSWindow(contentRect: container.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = container
         container.layoutSubtreeIfNeeded()
 
@@ -210,37 +203,31 @@ final class WebViewFactoryTests: XCTestCase {
         let first = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
         let second = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
 
-        container.show(webView: first, slotID: firstID, residencyPolicy: .hot)
+        container.show(webView: first, slotID: firstID, residencyPolicy: .warm)
         container.layoutSubtreeIfNeeded()
         let firstSize = first.frame.size
         XCTAssertEqual(first.frame.width, 1024, accuracy: 0.001)
-        XCTAssertEqual(container.websiteLayoutScale, 600.0 / 1024.0, accuracy: 0.001)
         XCTAssertTrue(first.window === window)
 
-        container.deactivate(slotID: firstID, residencyPolicy: .hot)
-        XCTAssertTrue(first.superview?.isHidden == true)
+        container.deactivate(slotID: firstID, residencyPolicy: .warm)
+        XCTAssertNil(first.superview)
+        XCTAssertNil(first.window)
         container.setFrameSize(NSSize(width: 1080, height: 850))
         container.layoutSubtreeIfNeeded()
-
         XCTAssertEqual(first.frame.size, firstSize)
-        XCTAssertTrue(first.window === window)
 
-        container.show(webView: second, slotID: secondID, residencyPolicy: .hot)
+        container.show(webView: second, slotID: secondID, residencyPolicy: .warm)
         container.layoutSubtreeIfNeeded()
         XCTAssertEqual(second.frame.width, 1440, accuracy: 0.001)
-        XCTAssertEqual(container.websiteLayoutScale, 1080.0 / 1440.0, accuracy: 0.001)
-        XCTAssertEqual(first.frame.size, firstSize)
-        XCTAssertTrue(first.window === window)
+        XCTAssertNil(first.superview)
         XCTAssertTrue(second.window === window)
-        XCTAssertTrue(first.superview?.isHidden == true)
 
-        container.show(webView: first, slotID: firstID, residencyPolicy: .hot)
+        container.show(webView: first, slotID: firstID, residencyPolicy: .warm)
         container.layoutSubtreeIfNeeded()
-        XCTAssertFalse(first.superview?.isHidden ?? true)
         XCTAssertTrue(container.currentWebView === first)
         XCTAssertEqual(first.frame.width, 1440, accuracy: 0.001)
-        XCTAssertEqual(container.websiteLayoutScale, 1080.0 / 1440.0, accuracy: 0.001)
         XCTAssertTrue(first.window === window)
+        XCTAssertNil(second.superview)
     }
 
     func testDesktopLogicalHostKeepsNativeWindowClickHitTestingWorking() {

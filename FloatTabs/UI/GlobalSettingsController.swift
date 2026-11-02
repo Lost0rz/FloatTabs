@@ -1394,8 +1394,6 @@ final class ShortcutsSettingsViewController: NSViewController {
         views.append(contentsOf: AppShortcutCatalog.navigationBindings.map(shortcutRecorderRow(for:)))
         views.append(contentsOf: [spacer(10), sectionTitle("View")])
         views.append(contentsOf: AppShortcutCatalog.viewBindings.map(shortcutRecorderRow(for:)))
-        views.append(contentsOf: [spacer(10), sectionTitle("Mode")])
-        views.append(contentsOf: AppShortcutCatalog.residencyBindings.map(shortcutRecorderRow(for:)))
         views.append(contentsOf: [spacer(10), sectionTitle("Application")])
         views.append(contentsOf: AppShortcutCatalog.applicationBindings.map(shortcutRecorderRow(for:)))
 
@@ -1585,8 +1583,6 @@ final class PerformanceSettingsViewController: NSViewController {
     private let websiteCacheManager: WebsiteCacheManagementClient
     private let embedsInSettingsPage: Bool
 
-    private let warmRetentionPopup = NSPopUpButton()
-    private let coldReleasePopup = NSPopUpButton()
     private let websiteCacheUsageLabel = NSTextField(labelWithString: "Unavailable")
     private let websiteCacheLastCleanupLabel = NSTextField(labelWithString: "Never")
     private let websiteCacheAutomaticSwitch = NSSwitch()
@@ -1603,8 +1599,6 @@ final class PerformanceSettingsViewController: NSViewController {
     private(set) var displayedWebsiteCacheLastCleanup = "Never"
     private(set) var isReleaseCacheEnabled = false
     private(set) var websiteCacheResultMessage = ""
-    private(set) var displayedWarmRetention = WarmWebViewRetentionOption.twoMinutes.displayName
-    private(set) var displayedColdRelease = ColdWebViewReleaseOption.thirtySeconds.displayName
 
     init(
         preferencesStore: AppPreferencesStore,
@@ -1630,21 +1624,6 @@ final class PerformanceSettingsViewController: NSViewController {
         let document = SettingsDocumentView()
         document.translatesAutoresizingMaskIntoConstraints = false
 
-        warmRetentionPopup.addItems(withTitles: WarmWebViewRetentionOption.allCases.map(\.displayName))
-        for (index, option) in WarmWebViewRetentionOption.allCases.enumerated() {
-            warmRetentionPopup.item(at: index)?.representedObject = option.rawValue
-        }
-        warmRetentionPopup.target = self
-        warmRetentionPopup.action = #selector(warmRetentionChanged(_:))
-        warmRetentionPopup.widthAnchor.constraint(equalToConstant: 150).isActive = true
-
-        coldReleasePopup.addItems(withTitles: ColdWebViewReleaseOption.allCases.map(\.displayName))
-        for (index, option) in ColdWebViewReleaseOption.allCases.enumerated() {
-            coldReleasePopup.item(at: index)?.representedObject = option.rawValue
-        }
-        coldReleasePopup.target = self
-        coldReleasePopup.action = #selector(coldReleaseChanged(_:))
-        coldReleasePopup.widthAnchor.constraint(equalToConstant: 150).isActive = true
 
         websiteCacheAutomaticSwitch.target = self
         websiteCacheAutomaticSwitch.action = #selector(websiteCacheAutomaticChanged(_:))
@@ -1682,11 +1661,8 @@ final class PerformanceSettingsViewController: NSViewController {
         websiteCacheResultLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 510).isActive = true
 
         let stack = NSStackView(views: [
-            sectionTitle("Tab Residency"),
-            detailLabel("Hot recovers a terminated renderer in the background. Warm follows its retention setting during normal operation; critical memory pressure may shorten it. Cold releases after its delay."),
-            websiteCacheSettingRow("Warm WebView retention", control: warmRetentionPopup),
-            websiteCacheSettingRow("Cold release delay", control: coldReleasePopup),
-            detailLabel("Choose Hot, Warm, or Cold from each Tab's menu."),
+            sectionTitle("Runtime Lifecycle"),
+            detailLabel("Web App runtimes are managed automatically by default. Use Runtime Retention → Keep Loaded on a Tab only when you want an already loaded inactive runtime retained during normal operation; critical memory pressure may still reclaim it."),
             spacer(10),
             sectionTitle("Website Storage"),
             detailLabel("Only re-downloadable webpage caches are removed."),
@@ -1762,13 +1738,9 @@ final class PerformanceSettingsViewController: NSViewController {
     }
 
     func refreshPerformanceSettings() {
+        // Legacy Warm/Cold values remain stored for rollback compatibility but
+        // are no longer consulted by the current product lifecycle.
         guard isViewLoaded else { return }
-        let warm = WarmWebViewRetentionOption(seconds: preferencesStore.warmWebViewRetentionDelay)
-        let cold = ColdWebViewReleaseOption(seconds: preferencesStore.coldWebViewReleaseDelay)
-        displayedWarmRetention = warm.displayName
-        displayedColdRelease = cold.displayName
-        warmRetentionPopup.selectItem(withTitle: warm.displayName)
-        coldReleasePopup.selectItem(withTitle: cold.displayName)
     }
 
     func refreshWebsiteCache() {
@@ -1823,22 +1795,6 @@ final class PerformanceSettingsViewController: NSViewController {
     private func endWebsiteCacheMeasurement(sequence: Int) {
         guard websiteCacheMeasurementSequence == sequence else { return }
         isWebsiteCacheMeasurementInFlight = false
-    }
-
-    @objc private func warmRetentionChanged(_ sender: NSPopUpButton) {
-        guard let raw = (sender.selectedItem?.representedObject as? NSNumber)?.intValue
-                ?? (sender.selectedItem?.representedObject as? Int),
-              let option = WarmWebViewRetentionOption(rawValue: raw) else { return }
-        preferencesStore.warmWebViewRetentionDelay = option.seconds
-        refreshPerformanceSettings()
-    }
-
-    @objc private func coldReleaseChanged(_ sender: NSPopUpButton) {
-        guard let raw = (sender.selectedItem?.representedObject as? NSNumber)?.intValue
-                ?? (sender.selectedItem?.representedObject as? Int),
-              let option = ColdWebViewReleaseOption(rawValue: raw) else { return }
-        preferencesStore.coldWebViewReleaseDelay = option.seconds
-        refreshPerformanceSettings()
     }
 
     @objc private func websiteCacheAutomaticChanged(_ sender: NSSwitch) {

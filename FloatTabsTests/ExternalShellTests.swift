@@ -906,7 +906,7 @@ final class ExternalShellTests: XCTestCase {
             .map(\.title)
         XCTAssertEqual(
             actionTitles,
-            ["Return to Home", "Reload", "Website Mode", "Window Size", "Zoom", "Profile", "Open in New Tab with Profile", "Residency", "Background Media", "Edit Web App…", "Remove Web App…"]
+            ["Return to Home", "Reload", "Website Mode", "Window Size", "Zoom", "Profile", "Open in New Tab with Profile", "Runtime Retention", "Background Media", "Edit Web App…", "Remove Web App…"]
         )
         let reload = try! XCTUnwrap(menu.item(withTitle: "Reload"))
         assertShortcut(reload, matches: .reload)
@@ -926,7 +926,7 @@ final class ExternalShellTests: XCTestCase {
         assertShortcut(zoomItems[2], matches: .resetZoom)
         XCTAssertTrue(zoomItems[3].isSeparatorItem)
 
-        XCTAssertEqual(menu.item(withTitle: "Residency")?.submenu?.items.map(\.title), ["Hot", "Warm", "Cold"])
+        XCTAssertEqual(menu.item(withTitle: "Runtime Retention")?.submenu?.items.map(\.title), ["Automatic", "Keep Loaded"])
         XCTAssertEqual(
             menu.item(withTitle: "Background Media")?.submenu?.items.map(\.title),
             ["Pause When Inactive", "Allow Background Audio"]

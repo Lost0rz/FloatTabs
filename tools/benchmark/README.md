@@ -1,13 +1,29 @@
-# FloatTabs Benchmark Runbook
+# FloatTabs Phase 7 Real-Mac Acceptance Runbook
 
-This directory contains two macOS-only benchmark tools:
+Phase 7 current product semantics are **Automatic / Keep Loaded**.
 
-- `floattabs_benchmark.py` — short steady-state Hot/Warm/Cold comparison.
-- `floattabs_lifecycle_benchmark.py` — continuous long-cycle Active/Hot/Warm/Cold timeline.
+The historical Stage 5E Hot/Warm/Cold lifecycle acceptance path is retired. `floattabs_lifecycle_benchmark.py` now exits with a retirement notice and must not be used as Phase 7 evidence. Historical implementation remains available in Git history only.
 
-Both tools use only the Python standard library plus macOS built-in process tools. The long-cycle runner talks to the Debug FloatTabs benchmark control channel and restores changed Slot policy / active Slot / panel visibility on exit.
+Current entry points:
 
-## 1. Build and launch the current Debug app
+- `floattabs_phase7_acceptance.py` — Phase 7 Real-Mac lifecycle acceptance;
+- `floattabs_benchmark.py` — low-level process attribution, doctor utilities and ChatGPT observer-effect diagnostics. Its historical Hot/Warm/Cold comparison modes are not Phase 7 acceptance.
+
+## 1. Required source identity
+
+Run acceptance only from the exact PR head intended for review. The harness records:
+
+- Git branch and SHA;
+- macOS / hardware information;
+- selected Slot IDs;
+- original Runtime Retention / media settings;
+- FloatTabs host PID.
+
+The checkout must be clean for final evidence.
+
+## 2. Build the Debug app from the acceptance head
+
+The Real-Mac harness uses the Debug-only loopback benchmark control channel. QA DMG validates packaging and manual product behavior, but the DMG does not expose this debug control channel.
 
 ```bash
 cd ~/Documents/Code/FloatTabs
@@ -27,125 +43,180 @@ xcodebuild \
 open .derivedData/Build/Products/Debug/FloatTabs.app
 ```
 
-Use only one running FloatTabs process for clean attribution.
+Use exactly one running FloatTabs process.
 
-## 2. Check benchmark prerequisites
+## 3. Preflight
+
+Precise aggregate WebKit process attribution uses `launchctl procinfo` and may request the administrator password once:
 
 ```bash
 python3 tools/benchmark/floattabs_benchmark.py doctor --sudo
 ```
 
-The tool may ask for the macOS administrator password once because `launchctl procinfo` is used to attribute WebKit helper processes to the current FloatTabs host process.
+Prepare at least **three real ChatGPT Slots**. The main run will temporarily set the selected A/B/C Slots to `Automatic` + `Pause When Inactive` where needed and restores their original settings afterward.
 
-## 3. Long-cycle lifecycle benchmark
+Before starting:
 
-Recommended acceptance run:
+- A/B/C must not already be generating;
+- leave WebKit fullscreen;
+- do not use reload/reset/restart to make a scenario pass;
+- do not clear cookies, site data or Browser Profiles.
 
-```bash
-python3 tools/benchmark/floattabs_lifecycle_benchmark.py run \
-  --preset full \
-  --slots 2 \
-  --interval 2 \
-  --tail-seconds 30 \
-  --session stage5e-full
-```
-
-Keep at least one extra configured Slot unselected; it is used as the inactive control Slot.
-
-The tool prompts for the test Slots, then automatically runs:
-
-1. baseline visible sampling;
-2. Hot Active;
-3. Hot inactive;
-4. Warm Active;
-5. Warm inactive past the 120s Warm TTL;
-6. Cold Active;
-7. Cold inactive past the 30s Cold grace;
-8. Hot selected + panel hidden;
-9. Warm selected + panel hidden past 120s hidden grace + 120s Warm TTL;
-10. Cold selected + panel hidden past 120s hidden grace + 30s Cold grace.
-
-The full preset takes roughly 19–21 minutes depending on Slot load waits and sampling overhead. The final 30 seconds of each phase are reported separately as the stable tail, and release phases also report pre-release RSS, post-release stable RSS, and reclaimed memory.
-
-For a harness plumbing check only:
+## 4. Main Phase 7 run
 
 ```bash
-python3 tools/benchmark/floattabs_lifecycle_benchmark.py run \
-  --preset quick \
-  --slots 2 \
-  --session stage5e-quick
+python3 tools/benchmark/floattabs_phase7_acceptance.py run \
+  --session phase7-real-mac-final
 ```
 
-`quick` intentionally does not cross every production timer and must not be used to judge Warm lifecycle behavior.
+The harness prompts for A/B/C when Slot IDs are not supplied explicitly.
 
-## 4. Long-cycle outputs
+It covers:
 
-Results are written under:
+1. **3 Automatic Slots / normal budget / grace convergence**
+   - load A → B → C;
+   - verify the normal Automatic budget converges through deterministic LRU;
+   - after the 30-second inactivity grace, verify only the active Automatic Slot remains among A/B/C;
+   - record aggregate FloatTabs/WebKit RSS/helper PID evidence before/after reclaim.
+
+2. **Rapid A → B → A**
+   - machine-check final active/resident Slot A;
+   - ask the user to confirm there is no persistent wrong-Slot attachment or wrong page.
+
+3. **Background generation protection**
+   - user starts a sufficiently long ChatGPT response in B;
+   - B becomes inactive;
+   - verify B remains resident past the Automatic grace while generation is active;
+   - after generation completes, verify B becomes reclaimable normally.
+
+4. **Keep Loaded ordinary inactivity**
+   - Keep Loaded A is activated, then left inactive while C is active;
+   - verify A survives ordinary inactivity past the Automatic grace without a hidden Hot presentation path.
+
+5. **Reclaim → Phase 6 restore → session continuity**
+   - reclaim Automatic A;
+   - select A again and verify Runtime materializes;
+   - user confirms Browser Profile/login/session/page continuity without reset/reload.
+
+### Optional development-only flags
+
+```text
+--slot-id <UUID>       pass exactly three times to avoid the interactive Slot picker
+--skip-generation      skips the generation scenario; final result becomes incomplete
+--no-sudo              skips precise responsible-PID attribution
+--allow-dirty          development only; never use for final evidence
+```
+
+## 5. Keep Loaded relaunch check
+
+The main run restores original Slot settings, then reports `PENDING_RELAUNCH`. The non-preload requirement is verified separately so the harness never silently restarts the app.
+
+Prepare:
+
+```bash
+python3 tools/benchmark/floattabs_phase7_acceptance.py prepare-relaunch \
+  --session phase7-real-mac-final
+```
+
+Then:
+
+1. quit FloatTabs normally;
+2. relaunch the **same Debug build from the same checkout**;
+3. do not select the prepared Keep Loaded test Slot A;
+4. verify:
+
+```bash
+python3 tools/benchmark/floattabs_phase7_acceptance.py verify-relaunch \
+  --session phase7-real-mac-final
+```
+
+PASS requires:
+
+- the Keep Loaded preference persisted;
+- the inactive Keep Loaded Slot was **not proactively materialized solely because of the preference**.
+
+If the relaunch sequence is interrupted, restore the saved A/B/C configuration with:
+
+```bash
+python3 tools/benchmark/floattabs_phase7_acceptance.py restore \
+  --session phase7-real-mac-final
+```
+
+## 6. Evidence outputs
+
+Results are written to:
 
 ```text
 .benchmark-results/<session>/
 ```
 
-Important files:
+Expected files:
 
 ```text
+session.json
 lifecycle-timeline.csv
 lifecycle-events.json
 lifecycle-summary.json
 lifecycle-report.md
 lifecycle-chart.html
-session.json
+acceptance-result.json
+relaunch-check.json        # after prepare-relaunch
 ```
 
-Open the curve report with:
+`acceptance-result.json` distinguishes:
 
-```bash
-open .benchmark-results/stage5e-full/lifecycle-chart.html
+- machine-observed Runtime resident-set facts;
+- aggregate process/RSS supporting evidence;
+- user-observed visual/session continuity;
+- the separate Keep Loaded relaunch result.
+
+## 7. Evidence boundary
+
+The harness intentionally does **not** claim exact per-Slot WebContent memory or PID attribution. Public WebKit evidence does not support that claim reliably.
+
+Allowed interpretation:
+
+```text
+product resident_slot_ids / active_slot_id
++ aggregate FloatTabs-responsible WebKit helper PID/RSS trends
++ user-visible session continuity
+→ bounded Real-Mac lifecycle evidence
 ```
 
-The continuous timeline records:
+Do not infer exact Slot memory from helper RSS alone.
 
-- FloatTabs host RSS / CPU;
-- attributed WebContent / Networking / GPU RSS and CPU;
-- total process-tree RSS / CPU;
-- WebContent/helper process counts;
-- actual `resident_slot_count` from `WebViewPool`;
-- tracked live Slot count;
-- pending Cold/Warm release counts;
-- media-protected Slot count;
-- hidden-active grace state;
-- active Slot and panel visibility.
+## 8. Warning / critical pressure
 
-Phase and runtime transitions are written as events so resource drops can be matched to the exact lifecycle transition instead of inferred from Activity Monitor.
+Phase 7 machine tests cover:
 
-## 5. ChatGPT measurement observer-effect smoke
-
-Build and launch the Debug app from this checkout. In FloatTabs, leave the intended ChatGPT Slot selected and configured Hot, and keep the panel visible. The command refuses to activate a different Slot or change Slot policy. It runs one disabled window followed by one enabled window on the same runtime/document, checking Slot, runtime generation, WebView, navigation generation, and document epoch for every sample.
-
-```bash
-python3 tools/benchmark/floattabs_benchmark.py chatgpt-ab \
-  --seconds 30 \
-  --interval 2 \
-  --settle 2
+```text
+warning Automatic target = 1
+critical Automatic target = 0
+critical ordering may reclaim inactive unprotected Keep Loaded after Automatic
 ```
 
-The harness asks for administrator authentication when needed for WebKit helper attribution. It changes only the in-memory Debug measurement switch and counters, then tries to disable measurement at closeout. It does not change profile settings or collect page content. A session is written under `.benchmark-results/` with paired CPU/RSS and ChatGPT snapshots, raw CSV samples, and an observer-effect report. The report gives the measured enabled-minus-disabled delta without a pass threshold; sequential-window timing, generation state, document visibility, sample rejection counts, and system/site noise remain relevant when interpreting it.
+The current Debug control channel does not expose a safe explicit memory-pressure injection action. The Real-Mac harness therefore **does not manufacture real system memory pressure**. The accepted Phase 7 contract explicitly allows critical-pressure Keep Loaded ordering to be proven deterministically through tests instead.
 
-### Stable-tail metrics
+## 9. QA DMG / human UI acceptance
 
-`lifecycle-summary.json` and `lifecycle-report.md` separate whole-phase load/switch spikes from the final steady-state window. They include stable-tail RSS/CPU, first/all release timestamps, RSS immediately before the first release, post-release stable RSS/CPU, reclaimed RSS, and how long the run observed the fully released state. Override the default window with `--tail-seconds`.
+Real-Mac lifecycle evidence uses the Debug build. Separately, the same final acceptance head must pass required macOS CI and QA DMG. After the harness passes, use the QA DMG for final product-facing checks such as:
 
-## 6. Baseline policy
+- Runtime Retention UI shows only Automatic / Keep Loaded;
+- no Hot/Warm/Cold current controls remain;
+- ordinary switching/focus remains usable;
+- login/session behavior remains intact.
 
-The long-cycle baseline forces selected test Slots to `Pause When Inactive` while each Residency policy is measured. This intentionally isolates Hot/Warm/Cold lifecycle behavior from video decode, audio playback and site-specific background activity.
+QA DMG success alone is not lifecycle acceptance.
 
-`Allow Background Audio` protection should be measured as a separate media scenario after the residency baseline is accepted.
-
-## 7. Self-tests
+## 10. Self-tests
 
 ```bash
 python3 -m py_compile tools/benchmark/floattabs_benchmark.py
+python3 -m py_compile tools/benchmark/floattabs_phase7_acceptance.py
 python3 -m py_compile tools/benchmark/floattabs_lifecycle_benchmark.py
+
 python3 tools/benchmark/floattabs_benchmark.py --self-test
-python3 tools/benchmark/floattabs_lifecycle_benchmark.py --self-test
+python3 tools/benchmark/floattabs_phase7_acceptance.py --self-test
 ```
+
+The retired Stage 5E script intentionally exits non-zero when invoked.

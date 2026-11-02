@@ -858,99 +858,6 @@ final class ResizeReadoutView: NSView {
 /// class frame, so WebKit sees the requested CSS viewport while ordinary AppKit
 /// ancestor coordinate conversion maps pointer events into WebKit coordinates.
 /// No NSScrollView magnification is involved.
-final class WebSlotHostView: NSView {
-    private(set) weak var webView: WKWebView?
-    private(set) var websiteLayoutScale: CGFloat = 1
-    private var isApplyingWebsiteLayout = false
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        translatesAutoresizingMaskIntoConstraints = true
-        autoresizingMask = []
-    }
-
-    convenience init(webView: WKWebView) {
-        self.init(frame: .zero)
-        attach(webView)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    func attach(_ webView: WKWebView) {
-        if self.webView !== webView {
-            if let previous = self.webView, previous.superview === self {
-                previous.removeFromSuperview()
-            }
-            self.webView = webView
-        }
-
-        // Weak identity is only bookkeeping. Fullscreen/companion presentation
-        // can legitimately reparent the same WKWebView while this host still
-        // remembers it, so physical ownership must be checked independently.
-        if webView.superview !== self {
-            webView.removeFromSuperview()
-            webView.translatesAutoresizingMaskIntoConstraints = true
-            webView.autoresizingMask = []
-            addSubview(webView)
-        }
-        applyWebsiteLayoutIfNeeded()
-    }
-
-    func detachOwnedWebView() {
-        if let webView, webView.superview === self {
-            webView.removeFromSuperview()
-        }
-        webView = nil
-    }
-
-    override func layout() {
-        super.layout()
-        applyWebsiteLayoutIfNeeded()
-    }
-
-    private func applyWebsiteLayoutIfNeeded() {
-        guard !isApplyingWebsiteLayout,
-              let webView,
-              webView.superview === self,
-              frame.width > 0,
-              frame.height > 0 else {
-            return
-        }
-
-        let visibleSize = frame.size
-        let mode = (webView as? FloatTabsWebView)?.websiteMode
-            ?? (webView.configuration.defaultWebpagePreferences.preferredContentMode == .mobile
-                ? .mobile
-                : .desktop)
-        let logicalSize = WebsiteLayoutViewport.logicalSize(
-            forVisibleSize: visibleSize,
-            websiteMode: mode
-        )
-        guard logicalSize.width > 0, logicalSize.height > 0 else { return }
-
-        isApplyingWebsiteLayout = true
-        websiteLayoutScale = visibleSize.width / logicalSize.width
-
-        if abs(bounds.width - logicalSize.width) > 0.5
-            || abs(bounds.height - logicalSize.height) > 0.5
-            || bounds.origin != .zero {
-            bounds = NSRect(origin: .zero, size: logicalSize)
-        }
-
-        if abs(webView.frame.width - logicalSize.width) > 0.5
-            || abs(webView.frame.height - logicalSize.height) > 0.5
-            || webView.frame.origin != .zero {
-            webView.frame = NSRect(origin: .zero, size: logicalSize)
-        }
-        isApplyingWebsiteLayout = false
-    }
-}
-
 /// Phase 6 lightweight native restoring surface. Presentation only: a neutral
 /// indicator explaining that the Slot's Web runtime is materializing. It owns
 /// no runtime lifecycle, navigation, page content, screenshot or interaction
@@ -1005,10 +912,9 @@ private final class WebRestoringOverlayView: NSView {
     }
 }
 
-/// Owns the visible FloatTabs web surface. Warm/Cold use the accepted Stage 4
-/// transient host. Hot Slots instead receive one independent host each, so an
-/// inactive Hot WebView can stay attached to the FloatTabs window without being
-/// resized when another Slot has a different Window Size preset.
+/// Owns the visible FloatTabs web surface. Runtime residency is owned by
+/// `SlotLifecycleCoordinator` / `WebViewPool`; this view only presents the
+/// selected Runtime and detaches it when presentation changes.
 final class WebPanelContainerView: NSView {
     private let clipView = NSView()
     private let logicalHostView = NSView()
@@ -1019,7 +925,6 @@ final class WebPanelContainerView: NSView {
     private weak var hostedWebView: WKWebView?
     private weak var activeWebView: WKWebView?
     private var activeSlotID: UUID?
-    private var hotHostViews: [UUID: WebSlotHostView] = [:]
 
     private(set) var websiteLayoutScale: CGFloat = 1
 
@@ -1064,12 +969,8 @@ final class WebPanelContainerView: NSView {
         slotID: UUID,
         residencyPolicy: SlotResidencyPolicy
     ) {
-        switch residencyPolicy {
-        case .hot:
-            showHot(webView: webView, slotID: slotID)
-        case .warm, .cold:
-            showTransient(webView: webView, slotID: slotID)
-        }
+        _ = residencyPolicy // legacy call-site projection only
+        showTransient(webView: webView, slotID: slotID)
     }
 
     // MARK: Phase 6 restoring presentation
@@ -1122,46 +1023,19 @@ final class WebPanelContainerView: NSView {
     }
 
     func deactivate(slotID: UUID, residencyPolicy: SlotResidencyPolicy) {
+        _ = residencyPolicy // legacy call-site projection only
         guard activeSlotID == slotID else { return }
-
-        switch residencyPolicy {
-        case .hot:
-            if let host = hotHostViews[slotID] {
-                // Freeze the outgoing Hot viewport before another Slot changes
-                // the panel size. Only an active Hot host follows live resizing.
-                //
-                // Keep the independent host and WKWebView attached so Hot keeps
-                // its DOM/SPA/runtime state, but stop presenting an inactive Hot
-                // page. Reactivation unhides this exact same host in `showHot`.
-                host.autoresizingMask = []
-                host.isHidden = true
-            }
-        case .warm, .cold:
-            detachHostedTransientIfOwned()
-        }
-
+        detachHostedTransientIfOwned()
         activeSlotID = nil
         activeWebView = nil
     }
 
-    func retainHotSlots(_ validHotSlotIDs: Set<UUID>) {
-        let staleHotSlotIDs = hotHostViews.keys.filter { !validHotSlotIDs.contains($0) }
-        for slotID in staleHotSlotIDs {
-            guard let host = hotHostViews.removeValue(forKey: slotID) else { continue }
-            host.detachOwnedWebView()
-            host.removeFromSuperview()
-        }
-    }
 
     func removeSlot(_ slotID: UUID) {
         if activeSlotID == slotID {
             detachHostedTransientIfOwned()
             activeWebView = nil
             activeSlotID = nil
-        }
-        if let host = hotHostViews.removeValue(forKey: slotID) {
-            host.detachOwnedWebView()
-            host.removeFromSuperview()
         }
     }
 
@@ -1200,33 +1074,16 @@ final class WebPanelContainerView: NSView {
     }
 
     private func prepareForNonWebPresentation() {
-        // Presentation bookkeeping must be cleared even when the current
-        // placeholder is already the last transient content view. Hot
-        // presentation is independent from currentContentView, so cleanup must
-        // explicitly release the active WebView and hide every Hot host.
         detachHostedTransientIfOwned()
         activeWebView = nil
         activeSlotID = nil
         websiteLayoutScale = 1
         logicalHostView.bounds = NSRect(origin: .zero, size: logicalHostView.frame.size)
-        for host in hotHostViews.values {
-            host.autoresizingMask = []
-            host.isHidden = true
-        }
     }
 
     override func layout() {
         super.layout()
-        if let activeSlotID,
-           hostedWebView == nil,
-           let hotHost = hotHostViews[activeSlotID],
-           !hotHost.isHidden {
-            hotHost.frame = clipView.bounds
-            hotHost.layoutSubtreeIfNeeded()
-            websiteLayoutScale = hotHost.websiteLayoutScale
-        } else if activeSlotID == nil || hostedWebView != nil {
-            updateWebsiteLayoutIfNeeded()
-        }
+        updateWebsiteLayoutIfNeeded()
         layer?.shadowPath = CGPath(
             roundedRect: bounds,
             cornerWidth: PanelMetrics.webPanelCornerRadius,
@@ -1238,44 +1095,6 @@ final class WebPanelContainerView: NSView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         updateSemanticColors()
-        for host in hotHostViews.values {
-            host.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        }
-    }
-
-    private func showHot(webView: WKWebView, slotID: UUID) {
-        detachHostedTransientIfOwned()
-        currentContentView?.isHidden = true
-
-        let host: WebSlotHostView
-        if let existing = hotHostViews[slotID] {
-            host = existing
-            host.attach(webView)
-        } else {
-            host = WebSlotHostView(webView: webView)
-            hotHostViews[slotID] = host
-            host.frame = clipView.bounds
-            clipView.addSubview(host)
-        }
-
-        // A host that survived bookkeeping but was physically detached must be
-        // restored to this container before it can present the slot again.
-        if host.superview !== clipView {
-            host.removeFromSuperview()
-            clipView.addSubview(host)
-        }
-        host.frame = clipView.bounds
-        host.autoresizingMask = [.width, .height]
-        host.isHidden = false
-        host.layoutSubtreeIfNeeded()
-        bringToFront(host)
-        // A Hot host attaches beneath an active restoring surface; readiness
-        // completion owns when the overlay disappears.
-        bringRestoringOverlayToFront()
-
-        websiteLayoutScale = host.websiteLayoutScale
-        activeSlotID = slotID
-        activeWebView = webView
     }
 
     private func showTransient(webView: WKWebView, slotID: UUID?) {

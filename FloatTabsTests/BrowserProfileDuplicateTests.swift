@@ -40,7 +40,7 @@ final class BrowserProfileDuplicateTests: XCTestCase {
             menu.items.filter { !$0.isSeparatorItem }.map(\.title),
             [
                 "Return to Home", "Reload", "Website Mode", "Window Size", "Zoom",
-                "Profile", "Open in New Tab with Profile", "Residency",
+                "Profile", "Open in New Tab with Profile", "Runtime Retention",
                 "Background Media", "Edit Web App…", "Remove Web App…",
             ]
         )
