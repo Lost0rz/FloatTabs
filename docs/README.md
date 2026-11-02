@@ -20,81 +20,70 @@ Historical documents remain evidence only unless current Authority explicitly re
 
 For `FT-RUNTIME-LIFECYCLE-MEMORY-001`:
 
-- [`architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`](architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md) — **CURRENT / ACCEPTED / FROZEN** program contract; supersedes V4 for current execution;
-- [`architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — **CURRENT PR #187-SCOPED PHASE 6 CONTRACT**; Phase 6 closeout remains pending;
-- [`architecture/FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md) — **CURRENT PHASE 7 / ACCEPTED / FROZEN / IMPLEMENTATION NOT STARTED**;
-- [`architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md) — Phase 6 rationale evidence;
+- [`architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`](architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md) — **CURRENT / ACCEPTED / FROZEN** program contract;
+- [`architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — delivered Phase 6 scoped contract; PR #187 merged into `main@54f2e43b0fbc224affa52d9662ac2ba5aa5b963c`;
+- [`architecture/FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md) — **CURRENT PHASE 7 / ACCEPTED / FROZEN** implementation contract; product implementation and Real-Mac acceptance are complete on PR #188 pending final merge-host gate;
 - [`architecture/README.md`](architecture/README.md) — architecture routing/status;
 - [`architecture/DOMAIN_MAP.md`](architecture/DOMAIN_MAP.md) — derived source/test navigation only.
 
 Current mutation authorization comes only from `CURRENT_TASK.md`.
 
-## 3. Contract reconciliation
+## 3. Current lifecycle product truth
 
-Fresh Real-Mac QA plus source audit showed that V4 cannot be the program-final contract because current Phase 4 semantics remain a hybrid legacy model:
-
-```text
-Hot       -> explicit normal/critical automatic-budget exclusion
-Warm/Cold -> automatic budget + separate user timers
-managed target -> 3
-```
-
-Current UI and persistence still expose those classes. Several legacy Hot ChatGPT Slots may therefore remain resident indefinitely by design.
-
-V5 retains all delivered lifecycle foundations and Phase 6 restore, but adds a final Phase 7 that retires Hot/Warm/Cold from current product semantics.
-
-Target model:
+Phase 7 retires Hot/Warm/Cold as current product policy. The current model is:
 
 ```text
-Automatic (default)
-Keep Loaded (normal-operation preference)
+Automatic   — default
+Keep Loaded — normal-operation retention preference
+
+normal Automatic target   = 2
+Automatic inactive grace  = 30 seconds
+warning Automatic target  = 1
+critical Automatic target = 0
 ```
 
-Initial Automatic defaults:
+Legacy compatibility remains bounded:
 
 ```text
-normal target 2
-30s inactive grace
-warning target 1
-critical target 0
+hot       -> Keep Loaded
+warm/cold -> Automatic
 ```
 
-Legacy Hot maps to Keep Loaded; Warm/Cold map to Automatic. Browser Profile/session data remains untouched.
+Browser Profile, cookie, login and website-session data are not lifecycle-reclaim data and must not be cleared by Runtime recovery/reclaim.
 
 ## 4. Program phase status
 
-- Phase 1 Safe Hibernate + Restore — delivered.
-- Phase 2 Ready / Unread Decoupling — delivered.
-- Phase 3 Native Completion Notification — delivered.
-- Phase 4 Reference-derived managed budget — delivered foundation; final Hot/Warm/Cold policy superseded by V5 Phase 7 target.
-- Phase 5 Background Generation Thrift — delivered.
-- Phase 6 Perceived-fast Restore — implemented on PR #187; corrective head machine gates pass; bounded Real-Mac smoke + fresh exact-diff audit still required before merge.
-- Phase 7 Automatic Lifecycle Simplification + Legacy Residency Retirement — contract frozen; implementation held until Phase 6 merge and explicit user start.
+- Phase 1 Safe Hibernate + Restore — delivered / merged.
+- Phase 2 Ready / Unread Decoupling — delivered / merged.
+- Phase 3 Native Completion Notification — delivered / merged.
+- Phase 4 managed Runtime-budget foundation — delivered / merged; legacy Hot/Warm/Cold policy superseded by Phase 7.
+- Phase 5 Background Generation Thrift — delivered / merged.
+- Phase 6 Perceived-fast Restore — delivered / merged in PR #187.
+- Phase 7 Automatic Lifecycle Simplification + Legacy Residency Retirement — implementation complete on PR #188; required machine checks and bounded Real-Mac acceptance passed on semantic head `b894641a254e7ffb49c84b4ed32d9c70a3f28ad7`; final control-only closeout and literal-head merge gate remain.
 
 ## 5. Phase 6 / Phase 7 boundary
 
-Phase 6 owns only the restore experience after a Runtime has been reclaimed.
+Phase 6 owns restore presentation/readiness after a Runtime has been reclaimed.
 
-Phase 7 owns the final automatic policy deciding which inactive Runtime may remain resident.
-
-Do not solve Phase 7 by expanding PR #187 product code. Finish and merge the Phase 6 prerequisite first, then implement Phase 7 from fresh main.
+Phase 7 owns the policy deciding which inactive Runtime may remain resident. `SlotLifecycleCoordinator` remains the sole lifecycle writer; `WebViewPool` remains the Runtime mechanism owner.
 
 ## 6. Current vs historical lifecycle docs
 
 Current:
 
 - `FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`;
-- Phase 6 implementation contract for PR #187 scope;
-- Phase 7 implementation contract for next construction.
+- Phase 7 implementation contract for the current merge boundary;
+- `architecture/README.md` and `architecture/DOMAIN_MAP.md` for routing/navigation.
 
-Historical/superseded for current execution:
+Delivered/historical evidence:
 
+- Phase 6 implementation contract after PR #187 merge;
 - `FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md` through V4;
 - old Phase 4 automatic-budget plan;
 - delivered Phase 1-5 plans;
-- old Stage residency/resource lifecycle docs.
+- old Stage residency/resource lifecycle docs and Stage 5E Hot/Warm/Cold benchmark material.
 
-Do not rewrite historical documents to mimic current truth.
+Do not rewrite historical evidence into current product truth.
 
 ## 7. Other bounded current contracts
 
