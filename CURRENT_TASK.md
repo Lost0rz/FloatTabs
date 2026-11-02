@@ -1,19 +1,19 @@
 # FloatTabs Current Task
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
-**Title:** Runtime Lifecycle / Memory redesign — Phase 7 Real-Mac acceptance preparation  
-**Status:** `ACTIVE / PHASE 7 REAL-MAC ACCEPTANCE PREPARATION`  
-**Mode:** `ACCEPTANCE TOOLING / REAL-MAC EVIDENCE / HUMAN VALIDATION`  
+**Title:** Runtime Lifecycle / Memory redesign — Phase 7 final closeout and merge boundary  
+**Status:** `ACTIVE / PHASE 7 FINAL CLOSEOUT / MERGE AUTHORIZED AFTER LITERAL-HEAD HOST GATE`  
+**Mode:** `EVIDENCE AUDIT / CONTROL ALIGNMENT / MERGE`  
 **Task class:** `WEB RUNTIME / LIFECYCLE / MEMORY`  
 **JSC root cause:** `UNKNOWN`
 
 ## Authorization state
 
-Phase 7 PR #188 remains `OPEN / DRAFT / UNMERGED`.
+The user authorized a fresh independent closeout audit and, if no blocking issue remains, merge of PR #188.
 
-The previous final literal machine head `d401a156a9a1d8419221240f4a9b1d099e16db43` passed required macOS CI #1343 and QA DMG #662 on the same head. Product construction and corrective work are complete.
+Phase 7 product implementation is frozen. No further `FloatTabs/**` runtime/lifecycle mutation is authorized unless new evidence proves a defect and this task is reconciled first.
 
-The user has now explicitly authorized proceeding to Phase 7 acceptance preparation. This task authorizes benchmark/runbook/test-tooling changes only. Production lifecycle/runtime behavior is frozen unless new Real-Mac evidence proves a defect and authority is reconciled first.
+The fresh closeout audit found no blocking product/runtime defect. It did find stale current-status/routing projections that still described Phase 7 as not started or only preparing for Real-Mac acceptance. Those control/routing files are being aligned as control-only closeout; this does not change the verified product semantics.
 
 ## Current authority
 
@@ -21,23 +21,24 @@ Program contract:
 
 `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`
 
-Phase 7 frozen execution contract:
+Phase 7 frozen implementation contract:
 
 `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`
 
-Domain navigation:
+Documentation routing:
 
+`docs/README.md`
+
+Domain/navigation:
+
+`docs/architecture/README.md`  
 `docs/architecture/DOMAIN_MAP.md`
 
-Implementation/acceptance branch:
+PR:
 
-`codex/ft-runtime-lifecycle-phase7-automatic-001`
+`#188 — codex/ft-runtime-lifecycle-phase7-automatic-001 → main`
 
-Current PR:
-
-`#188 OPEN / DRAFT / UNMERGED`
-
-## Frozen product policy under acceptance
+## Frozen product policy
 
 ```text
 Automatic   (default)
@@ -49,7 +50,7 @@ warning Automatic target  = 1
 critical Automatic target = 0
 ```
 
-Hard protection:
+Hard protection remains:
 
 - active / actually presented;
 - fullscreen source;
@@ -58,122 +59,92 @@ Hard protection:
 - active/pending allowed-background-media protection;
 - current materialization/restoring ownership.
 
-Keep Loaded resists ordinary reclaim but may be reclaimed under critical pressure when inactive and otherwise unprotected.
+Keep Loaded resists ordinary reclaim, is not proactively materialized at launch, and may be reclaimed under critical pressure when inactive and otherwise unprotected.
 
-Legacy Hot/Warm/Cold is compatibility-only and must not appear as current acceptance semantics.
+Legacy Hot/Warm/Cold is compatibility-only and must not return as current product UI/settings/shortcut/lifecycle policy.
 
-## Machine gate evidence
+## Verified semantic / acceptance identity
 
-Exact head `d401a156a9a1d8419221240f4a9b1d099e16db43`:
+Product + Real-Mac acceptance semantic head:
+
+`b894641a254e7ffb49c84b4ed32d9c70a3f28ad7`
+
+Verified on that identity:
 
 ```text
-MACOS_CI_1343=PASS
-DEBUG_ARM64=PASS
-RELEASE_ARM64=PASS
-NATIVE_RELEASE_ARCH=PASS
-UNIT_TESTS=PASS
-QA_DMG_662=PASS
-EXACT_DIFF_AUDIT=PASS
-PR_IDENTITY=OPEN_DRAFT_UNMERGED
+MACOS_CI_1349=PASS
+REQUIRED_BUILD_AND_TEST_ARM64=PASS
+QA_DMG_668=PASS
+BENCHMARK_TOOL_CI_139=PASS
+PRODUCT_EXACT_DIFF_AUDIT=PASS
+REAL_MAC_ACCEPTANCE=PASS
+KEEP_LOADED_RELAUNCH_NON_PRELOAD=PASS
+SESSION_CONTINUITY=PASS
+WARNINGS=NONE
 ```
 
-This clears the project to enter Phase 7 Real-Mac acceptance preparation.
+Real-Mac evidence establishes:
 
-## Acceptance tooling problem
+1. Automatic normal-budget/LRU convergence;
+2. 30-second grace behavior;
+3. active Slot protection;
+4. Rapid A → B → A correctness;
+5. Background Generation protection followed by ordinary reclaim;
+6. Keep Loaded ordinary retention;
+7. reclaim → restore with Browser Profile/session continuity;
+8. Keep Loaded preference persistence without proactive relaunch materialization;
+9. aggregate WebKit/RSS directional support without unsupported exact per-Slot memory attribution.
 
-The existing benchmark harness is a historical Stage 5E Hot/Warm/Cold workflow. It currently encodes old policy names, separate Warm/Cold timing, old hidden-active grace and old acceptance phases. It must not be used as Phase 7 evidence without replacement.
+Warning target `1` / critical target `0` remain deterministically covered by machine tests because current Debug control has no safe explicit system-pressure injection trigger.
 
-## Authorized work packages
+## Fresh closeout audit disposition
 
-### A1 — retire historical current-use acceptance semantics
+Audit basis: fresh repository/PR/CI evidence review at the merge boundary.
 
-Update benchmark documentation and lifecycle harness so current acceptance no longer instructs users to configure or judge Hot/Warm/Cold behavior.
-
-Historical compatibility code/data may remain only when clearly labeled non-current and not used by the Phase 7 run path.
-
-### A2 — Phase 7 acceptance model
-
-The new Real-Mac path must collect evidence for:
-
-1. three or more loaded Automatic Slots;
-2. selected/active Slot protection;
-3. Automatic inactive plan and reclaim after the 30s grace;
-4. normal steady-state Automatic resident target `2`;
-5. deterministic LRU ordering when observable from the control/status evidence;
-6. Keep Loaded surviving ordinary reclaim pressure;
-7. warning target `1` and critical target `0` only if the current debug control already provides a safe explicit trigger;
-8. Phase 6 restore after reclaim;
-9. Browser Profile/login/Cookie/session continuity checked by the user on restored real sites;
-10. RSS/WebKit process-tree trends as supporting evidence, not exact per-Slot WebContent attribution.
-
-### A3 — evidence outputs
-
-A Phase 7 acceptance session should produce at least:
+Required claims:
 
 ```text
-session.json
-lifecycle-timeline.csv
-lifecycle-events.json
-lifecycle-summary.json
-lifecycle-report.md
-lifecycle-chart.html
-acceptance-result.json or equivalent explicit PASS/FAIL/NOT_PROVEN disposition
+CURRENT_BASE_MAIN=54f2e43b0fbc224affa52d9662ac2ba5aa5b963c
+SEMANTIC_HEAD=b894641a254e7ffb49c84b4ed32d9c70a3f28ad7
+BASE_DRIFT=NONE
+PRODUCT_SCOPE=PASS
+CANONICAL_LIFECYCLE_WRITER=PASS
+LEGACY_ACTIVE_POLICY_RETIRED=PASS
+HIDDEN_HOT_HOST_RETIRED=PASS
+SESSION_DATA_SAFETY=PASS
+PHASE6_RESTORE_PRESERVED=PASS
+REAL_MAC_WP5=PASS
+OPEN_REVIEW_THREADS=NONE
+OVERLAPPING_OPEN_PRS=NONE
 ```
 
-The report must distinguish machine-observed facts from user-observed session/login continuity.
+The only audit finding was stale control/document-routing status; it is being corrected without product-source mutation.
 
-### A4 — validation
+## Final merge gate
 
-Before asking the user to run Real-Mac acceptance:
+Control-only closeout commits may advance the literal PR HEAD beyond the semantic head above. Per `AGENTS.md`, that does not invalidate product implementation/acceptance evidence, but repository-host protection still applies to the literal final HEAD.
 
-- Python syntax/compile PASS;
-- harness self-tests PASS;
-- no current Hot/Warm/Cold acceptance instructions remain in the active Phase 7 runbook;
-- diff scope is limited to authorized tooling/docs/tests;
-- if the repository head changes, rerun required macOS CI and QA DMG on the exact resulting head before using it as acceptance evidence.
+Before merge:
 
-## Authorized paths
+1. verify PR #188 final literal HEAD and unchanged `main@54f2e43b0fbc224affa52d9662ac2ba5aa5b963c`;
+2. verify no production `FloatTabs/**` change was introduced by closeout alignment;
+3. required `Build & Test (Apple Silicon arm64)` check must be `success` on that literal HEAD;
+4. required auxiliary PR workflows must have no failure;
+5. PR must remain mergeable with no unresolved review thread;
+6. mark Draft PR ready for review if GitHub requires it;
+7. merge using `expected_head_sha` so a moved head cannot be merged accidentally.
 
-Primary:
+Do not perform release/version work in this task.
 
-- `CURRENT_STATUS.md`
-- `CURRENT_TASK.md`
-- `tools/benchmark/README.md`
-- `tools/benchmark/floattabs_lifecycle_benchmark.py`
+## After merge
 
-Conditional:
-
-- `tools/benchmark/floattabs_benchmark.py` only for canonical Phase 7 status/config projection;
-- benchmark-specific tests/self-test fixtures;
-- architecture/acceptance docs needed to define Phase 7 Real-Mac evidence.
-
-## Production mutation boundary
-
-**No production `FloatTabs/**` lifecycle/runtime mutation is authorized in this work package.**
-
-If the current debug benchmark control lacks a required safe trigger or canonical field, STOP and reconcile instead of extending production/debug host behavior silently.
-
-## Acceptance completion gate
-
-Phase 7 may move to merge-readiness only after:
-
-1. acceptance harness/runbook is Phase 7-native;
-2. exact acceptance head passes required CI + QA if changed;
-3. Real-Mac Automatic/Keep Loaded evidence is captured;
-4. user verifies login/session continuity and the intended UI/runtime behavior;
-5. evidence review has no unresolved lifecycle correctness defect;
-6. fresh final exact-diff audit PASS.
-
-## Current execution state
+The Runtime Lifecycle / Memory program remains active for the contract-required post-merge integrated Phases 1–7 audit. That audit is a new read-only program-final acceptance boundary, not additional Phase 7 product construction.
 
 ```text
-PHASE7_PR=#188_OPEN_DRAFT_UNMERGED
-MACHINE_VERIFICATION=PASS
-PHASE7_REAL_MAC_WP5=PREPARING
-CURRENT_STAGE=PHASE7_REAL_MAC_ACCEPTANCE_PREPARATION
-AUTHORIZED_MUTATION=BENCHMARK_DOCS_TEST_TOOLING_ONLY
-PRODUCTION_RUNTIME_MUTATION=FROZEN
-HUMAN_UI_ACCEPTANCE=READY_AFTER_HARNESS_GATE
-PR_188_MERGE_READY=NO
-NEXT_REQUIRED_GATE=PHASE7_NATIVE_ACCEPTANCE_HARNESS
+CURRENT_STAGE=PHASE7_FINAL_MERGE_GATE
+PRODUCT_RUNTIME_MUTATION=FROZEN
+SEMANTIC_ACCEPTANCE_HEAD=b894641a254e7ffb49c84b4ed32d9c70a3f28ad7
+CONTROL_ONLY_CLOSEOUT=ACTIVE
+PR_188_MERGE_AUTHORIZED=YES_AFTER_LITERAL_HEAD_HOST_GATE
+POST_MERGE_NEXT=INTEGRATED_PHASES_1_TO_7_AUDIT
 ```
