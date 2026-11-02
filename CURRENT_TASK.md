@@ -2,21 +2,21 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001-PHASE8-PRESSURE-EFFICIENCY`  
 **Title:** Phase 8 measurement-independent continuation — pressure ladder + background efficiency  
-**Status:** `ACTIVE / R1+R2 IMPLEMENTED ON SUCCESSOR BRANCH / AWAITING SELF-HOSTED CI + INDEPENDENT EXACT-DIFF AUDIT`  
-**Mode:** `IMPLEMENTATION VERIFICATION / NO AUTO-MERGE`  
+**Status:** `ACTIVE / R0-R5 PASS / CORRECTIVE CLOSED / MERGE AUTHORIZED`  
+**Mode:** `CONTROL CLOSEOUT / LITERAL-HEAD CI / MERGE`  
 **Task class:** `WEB RUNTIME / LIFECYCLE / PERFORMANCE`  
-**Execution baseline:** `fresh main after PR #190 merge; must contain this task + re-scope contract`
+**Execution baseline:** `main@065d2923f0516694689ee71f2787b76c8719bfe8 after merged PR #190`
 
 ## Authorization
 
-The user selected `D_COMBINE` on 2026-11-02 and explicitly asked to update repository Authority and issue a local construction card.
-
-This task authorizes the measurement-independent continuation only:
+The user selected `D_COMBINE` on 2026-11-02 and authorized the measurement-independent continuation only:
 
 1. progressive system-memory-pressure reclaim in the existing lifecycle owner;
 2. bounded host-side background observer/task/generation efficiency corrections.
 
 The aggregate-memory-budget track remains deferred/platform-blocked by Phase 8 Gate 0.
+
+After independent audit and one bounded R1 corrective, the user explicitly authorized merge closeout for PR #191.
 
 ## Frozen authority
 
@@ -27,172 +27,131 @@ The aggregate-memory-budget track remains deferred/platform-blocked by Phase 8 G
 - **Current implementation contract:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md`
 - Navigation: `docs/architecture/DOMAIN_MAP.md`, `docs/README.md`
 
-The current implementation contract owns the bounded re-scope where it differs from the original Phase 8 budget sequence. V6 remains the long-term design direction; blocked budget semantics are not current implementation authorization.
+The re-scope contract owns the bounded implementation where it differs from the blocked original Phase 8 budget sequence. V6 remains long-term architecture direction; blocked budget semantics are not current production truth.
 
-## Predecessor closeout gate
+## Completed implementation scope
 
-PR #190 remains the WP0/reconciliation closeout vehicle. Product mutation under this task MUST NOT begin on the #190 branch.
+### R1 — progressive system-memory-pressure ladder
 
-Required predecessor sequence:
+Primary owner: `FloatTabs/Web/SlotLifecycleCoordinator.swift`.
+
+Implemented and verified:
+
+- warning reclaims only eligible inactive/unprotected `Automatic` Runtime;
+- warning preserves `Keep Loaded`;
+- critical reclaims eligible Automatic first, then inactive/unprotected Keep Loaded;
+- active/presented, fullscreen, supplemental-visible, generating, protected background-media and other hard-protected Runtime remain protected;
+- at most one reclaim continuation is pending;
+- every continuation re-evaluates latest pressure and current Runtime/protection facts;
+- pressure returning to normal cancels not-yet-started progression and does not mass-restore;
+- healthy-state Automatic target=2 and 30s inactive release remain unchanged.
+
+### R1 independent-audit corrective
+
+The first independent audit found one blocking sustained-pressure defect: after progression stopped at `no_candidate`, later eligibility changes did not re-enter the pressure ladder unless the system emitted another same-level pressure event.
+
+Corrective design:
 
 ```text
-#190 literal new head required CI = PASS
-fresh #190 exact-diff / base-head / mergeability check = PASS
-#190 merge = COMPLETE
-fresh main contains this CURRENT_TASK + re-scope contract
-→ only then create/use one successor implementation branch/PR
+reconcileProgressivePressureIfNeeded()
+  guard latestMemoryPressureLevel != nil
+  guard pressureReclaimWorkItem == nil
+  → beginProgressivePressureReclaim(latest level)
 ```
 
-The previous pre-reconciliation #190 head `b775975968f7eecc46940ed69e1b2fab0e41cab3` already passed macOS CI run `41380640917`, but that does not satisfy the literal-head gate after these control/doc commits.
+Eligibility re-entry is driven from the inactive-plan creation choke point and the media-protection-ended boundary. It does not add polling, a second scheduler or a second lifecycle writer.
 
-## Scope A — progressive system-memory-pressure ladder
+Mandatory regressions passed:
 
-Primary lifecycle owner: `FloatTabs/Web/SlotLifecycleCoordinator.swift`.
+- sustained warning + generation protection ends without new warning event;
+- sustained critical + Keep Loaded protection ends without new critical event;
+- warning → critical immediate takeover with stale warning continuation cancelled;
+- normal pressure clears stale state before later eligibility changes;
+- repeated eligibility boundaries produce a single reclaim chain.
 
-Replace only the current pressure count targets (`warning=1`, `critical=0`) with progressive, one-at-a-time behavior driven by the existing supported memory-pressure state.
+The diagnostics field `budget_target` was renamed to `normal_managed_resident_target` so pressure diagnostics do not imply a warning/critical count target.
 
-Required semantics:
+### R2 — background lifecycle efficiency
 
-### Warning
+Primary changed owner: `FloatTabs/Web/ChatGPTAttentionBridge.swift`.
 
-- eligible inactive/unprotected `Automatic` only;
-- deterministic candidate ordering from current lifecycle facts;
-- `Keep Loaded` preserved;
-- active/presented, fullscreen, supplemental-visible, generating, protected background-media, restoring/materializing and other hard-protected Runtime untouched;
-- at most one reclaim transaction in flight;
-- after each completion, revalidate latest pressure + current Runtime/protection ownership before any continuation;
-- no precomputed multi-Runtime purge from one stale signal.
+Verified bounded change:
 
-### Critical
+```text
+hidden generation <30s    → 2s fallback watchdog
+hidden generation 30–120s → 5s fallback watchdog
+hidden generation >=120s  → 10s fallback watchdog
+```
 
-- eligible Automatic first;
-- only after Automatic is exhausted may inactive/unprotected Keep Loaded be considered;
-- active/hard-protected Runtime remains untouched;
-- one Runtime at a time with current-state revalidation between steps.
+Event-driven completion remains primary. No provider-semantic redesign, WebContent-memory claim, generation-protection change or session/data mutation is authorized or present.
 
-### Return to normal pressure
+## Deferred / out of scope
 
-- stop/cancel not-yet-started progressive continuation;
-- do not mass-restore reclaimed Runtime;
-- restore remains demand-driven through existing Slot materialization/restore behavior.
-
-## Scope B — background lifecycle efficiency
-
-Audit first; mutate only verified cost centers. Candidate areas include:
-
-- hidden `ChatGPTAttentionBridge` liveness/fallback work;
-- repeated detector scheduling/evaluation;
-- redundant response-identity work;
-- diagnostic/health probes continuing without need while hidden;
-- navigation/observer tasks surviving document/runtime generation changes;
-- presentation-only host work surviving detach/reclaim;
-- duplicate observer registration or uncancelled Swift concurrency tasks across hibernate/restore/rebuild.
-
-Allowed outcomes include event-first completion sensing, bounded/adaptive fallback, coalescing/suppressing redundant host work, prompt stale-task cancellation and exact-current ownership checks.
-
-Do not redesign provider semantics.
-
-## Explicitly out of scope / deferred
-
-Do NOT implement in this task:
+Do NOT implement under this task:
 
 - aggregate FloatTabs/WebKit memory monitor as lifecycle input;
 - Auto/Custom/Unlimited memory budget;
 - budget watermarks;
-- memory-budget settings UI or persistence/backup schema;
+- memory-budget Settings UI or persistence/backup schema;
 - aggregate-memory A/B acceptance claims;
 - best-effort WebContent/GPU process attribution;
-- healthy-state normal-policy redesign.
+- healthy-state target=2 / 30s redesign;
+- private WebKit SPI, root-only helpers or restricted-entitlement attribution;
+- Browser Profile/session/site-data reset or migration.
 
-Healthy/normal production behavior remains:
-
-```text
-normal Automatic resident target = 2
-Automatic inactive release path = 30s
-```
-
-Changing those two normal-policy semantics requires a new reconciliation.
-
-## Expected source/test boundary
-
-Inspect first:
+## Gate results
 
 ```text
-FloatTabs/Web/SlotLifecycleCoordinator.swift
-FloatTabs/Web/WebViewPool.swift
-FloatTabs/Web/ChatGPTAttentionBridge.swift
-FloatTabsTests/WebViewPoolTests.swift
-FloatTabsTests/WebAttentionLifecycleTests.swift
-FloatTabsTests/ChatGPTAttentionBridgeTests.swift
+GATE_R0_FOCUSED_SOURCE_RECONCILIATION=PASS
+GATE_R1_PRESSURE_LADDER=PASS
+R1_SUSTAINED_PRESSURE_CORRECTIVE=PASS
+GATE_R2_BACKGROUND_EFFICIENCY=PASS
+GATE_R3_FULL_XCTEST=PASS
+GATE_R3_DEBUG_ARM64=PASS
+GATE_R3_RELEASE_ARM64=PASS
+GATE_R3_NATIVE_ARCH=PASS
+GATE_R3_PACKAGE_LOCK=UNCHANGED
+GATE_R4_SELF_HOSTED_CI_IMPLEMENTATION_HEAD=PASS
+QA_DMG_IMPLEMENTATION_HEAD=PASS
+GATE_R5_INDEPENDENT_EXACT_DIFF_OWNERSHIP_AUDIT=PASS
+BLOCKING_FINDINGS=0
+IMPORTANT_FINDINGS=0
+CODE_MERGE_READY=YES
 ```
 
-Mechanically related files are allowed only when Gate R0 proves the dependency and the change remains inside the current Web/runtime/Attention ownership boundary. `PanelController.swift` is conditional wiring only; it must not become a lifecycle writer.
+Independent audit confirmed:
 
-No Settings, Browser Profile, website-data, backup-schema or user-session migration path is authorized.
+- sustained-pressure eligibility re-entry coverage is sufficient;
+- warning → critical takeover preserves single-chain semantics and ordering;
+- R2 was unchanged by the corrective;
+- no aggregate/best-effort attribution was introduced;
+- no private WebKit SPI was introduced;
+- no second lifecycle writer was introduced;
+- no destructive Browser Profile/session/cache coupling exists;
+- healthy-state target=2 / 30s remains intact.
 
-## Execution gates
+## Current merge closeout gate
 
-### Gate R0 — focused source reconciliation before product mutation
+This control-plane closeout changes the literal PR head. Therefore the prior implementation-head CI/QA PASS cannot be reused as the final repository-host identity gate.
 
-Against fresh merged main:
+Before merge:
 
-- confirm `SlotLifecycleCoordinator` remains sole lifecycle writer;
-- confirm current pressure source/state path and reclaim boundary;
-- confirm current hard-protection/candidate facts;
-- confirm hidden generation observer/task ownership and exact tests;
-- compare against the WP0 owner map.
+```text
+1. literal control-closeout #191 head required Build & Test (Apple Silicon arm64) = PASS
+2. QA DMG = PASS if triggered on that literal head
+3. fresh #191 head/base/mergeability = clean
+4. mark PR Ready for Review if still Draft
+5. squash merge using expected literal head SHA
+6. verify fresh main contains merged Phase 8 re-scope
+```
 
-If the owner map materially differs, STOP and update Authority before mutation.
+No further product-source mutation is authorized before merge unless a new blocking gate failure is discovered.
 
-### Gate R1 — pressure ladder focused verification
+## Human acceptance
 
-Must prove deterministic warning/critical injection, progressive one-at-a-time reclaim, Keep Loaded warning protection, critical ordering, hard protection, current-state revalidation and normal-state cancellation.
+`HUMAN_UI_ACCEPTANCE=PENDING_PROGRAM_FINAL`.
 
-### Gate R2 — background-efficiency focused verification
-
-For each changed cost center, prove task/observer lifetime is bounded, stale work is cancelled/harmless, generation/completion routing remains correct, and intended probe/scheduling work is deterministically lower or bounded.
-
-### Gate R3 — broad machine verification
-
-Required:
-
-- full XCTest PASS;
-- Debug arm64 build PASS;
-- Release arm64 build PASS;
-- native arm64 architecture PASS;
-- package lock unchanged unless separately authorized.
-
-### Gate R4 — repository-host gate
-
-Literal successor PR head must pass required `Build & Test (Apple Silicon arm64)` on `[self-hosted, macOS, ARM64, mac-mini-ci]`.
-
-### Gate R5 — fresh exact-diff / ownership audit
-
-Before merge readiness verify:
-
-- no aggregate/best-effort attribution;
-- no private WebKit SPI;
-- no second lifecycle writer;
-- healthy-state target=2 / 30s unchanged;
-- no destructive website/session coupling;
-- Phase 6 restore and generation protection preserved;
-- performance claims match actual measured/tested host-side behavior.
-
-Human final runtime/UI acceptance remains program-final unless Authority later changes that gate.
-
-## STOP conditions
-
-STOP and reconcile if:
-
-- #190 is not merged cleanly with fresh required CI;
-- fresh main does not contain this exact task/re-scope Authority;
-- the current lifecycle owner map materially differs from WP0 evidence;
-- implementation requires private SPI, root, restricted entitlement or guessed/correlated attribution;
-- pressure progression cannot remain one-at-a-time with current-state revalidation;
-- normal target=2 / 30s must change;
-- generation correctness requires provider-semantic redesign;
-- Browser Profile/session/site data would be reset/migrated/destructively cleaned;
-- a required verification or repository-host gate fails.
+The accepted re-scope contract keeps human runtime/UI acceptance at the broader lifecycle program-final boundary; it is not an earlier blocker for PR #191 merge.
 
 ## Current execution state
 
@@ -200,16 +159,24 @@ STOP and reconcile if:
 USER_DECISION=D_COMBINE
 BUDGET_TRACK=DEFERRED_PLATFORM_BLOCKED
 CURRENT_SCOPE=PRESSURE_LADDER_PLUS_BACKGROUND_EFFICIENCY
-AUTHORIZATION=GRANTED_AFTER_PR190_CLOSEOUT_MERGE
 PR_190=MERGED_AT_MAIN_065D2923
+SUCCESSOR_PR=#191
 SUCCESSOR_BRANCH=codex/ft-pressure-efficiency-phase8-rescope-001
-GATE_R0=PASS
-R1_PRESSURE_LADDER=IMPLEMENTED
-R2_BACKGROUND_EFFICIENCY=IMPLEMENTED
-LOCAL_MACHINE_GATES=PASS_FULL_XCTEST_DEBUG_RELEASE_ARM64_LOCK
+R0=PASS
+R1=PASS
+R1_CORRECTIVE=PASS
+R2=PASS
+R3=PASS
+R4_IMPLEMENTATION_HEAD=PASS
+R5_INDEPENDENT_AUDIT=PASS
 NORMAL_POLICY_TARGET2_30S=PRESERVED
+WARNING_KEEP_LOADED=PRESERVED
+CRITICAL_ORDER=AUTOMATIC_THEN_KEEP_LOADED
 BEST_EFFORT_ATTRIBUTION=FORBIDDEN
+PRIVATE_SPI_ADDED=NO
+PRODUCT_DATA_MUTATION=NO
 HUMAN_UI_ACCEPTANCE=PENDING_PROGRAM_FINAL
-NEXT_ACTION=SELF_HOSTED_CI_ON_LITERAL_PR_HEAD_THEN_INDEPENDENT_EXACT_DIFF_AUDIT
-SUCCESSOR_PR_MERGE=NOT_AUTOMATIC
+PR_191_MERGE_READY=YES
+MERGE_AUTHORIZATION=USER_GRANTED
+NEXT_ACTION=LITERAL_CONTROL_CLOSEOUT_HEAD_CI_THEN_SQUASH_MERGE
 ```
