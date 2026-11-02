@@ -283,12 +283,22 @@ final class PanelController: NSObject, NSWindowDelegate {
         let slotID: UUID
         var didRecordRestoringSurfaceWindowVisibility = false
     }
+    private struct PendingColdUnreadAcknowledgement {
+        let slotID: UUID
+        let materializationGeneration: UInt64
+        let trace: RuntimeDiagnosticTrace
+    }
     private var runtimeMaterializationGeneration: UInt64 = 0
     private var pendingRuntimeMaterialization: PendingRuntimeMaterialization?
     /// Immutable runtime identity of the Runtime attached under the current
     /// pending materialization. Correlates the Outcome-A navigation finish to
     /// this exact Runtime before restoring UI may disappear.
     private var pendingRuntimeMaterializationIdentity: WebRuntimeDiagnosticIdentity?
+    private var pendingColdUnreadAcknowledgement: PendingColdUnreadAcknowledgement?
+    /// A terminal cold-navigation failure remains a native empty presentation
+    /// for this exact Runtime. If that Runtime is later replaced or hibernated,
+    /// the next selection can enter the normal cold gate again.
+    private var failedColdRuntimeIdentities: [UUID: WebRuntimeDiagnosticIdentity] = [:]
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
     private var debugInteractionSurfaceFactOverrides: [UUID: Bool] = [:]
@@ -2572,6 +2582,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.webPanelContainerView.currentWebView
     }
 
+    var debugCurrentWebFocusWebView: WKWebView? {
+        webFocusRouter.currentWebView
+    }
+
     var debugPendingWarmReleaseCount: Int {
         slotLifecycleCoordinator.pendingWarmReleaseCount
     }
@@ -2998,9 +3012,13 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         synchronizeBrowserProfileMenuPresentation()
         let orderedProfiles = tabStore.orderedProfiles
+        let validSlotIDs = Set(orderedProfiles.map(\.id))
+        failedColdRuntimeIdentities = failedColdRuntimeIdentities.filter {
+            validSlotIDs.contains($0.key)
+        }
         let unreadBeforePrune = unreadResponseCoordinator.unreadSlotIDs
         unreadResponseCoordinator.prune(
-            validSlotIDs: Set(orderedProfiles.map(\.id))
+            validSlotIDs: validSlotIDs
         )
         let suppressedIDs = unreadPruneDiagnosticSuppressionIDs
         for slotID in unreadBeforePrune.subtracting(
@@ -3028,6 +3046,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotLifecycleCoordinator.reconcile(profiles: orderedProfiles)
 
         guard let activeProfile = tabStore.activeProfile else {
+            pendingColdUnreadAcknowledgement = nil
             if let previous = lastSynchronizedActiveProfile {
                 slotLifecycleCoordinator.deactivate(profile: previous)
             }
@@ -3059,6 +3078,29 @@ final class PanelController: NSObject, NSWindowDelegate {
                 _ = makeRestoringSurfaceActuallyVisible(for: pending)
             }
             return
+        }
+
+        if let failedIdentity = failedColdRuntimeIdentities[activeProfile.id] {
+            let currentIdentity = webViewPool.runtimeDiagnosticIdentity(
+                for: activeProfile.id
+            )
+            if currentIdentity == failedIdentity {
+                slotLifecycleCoordinator.activate(profile: activeProfile)
+                webFocusRouter.setCurrentWebView(nil)
+                rootView.webPanelContainerView.showEmptyState()
+                lastSynchronizedActiveID = activeProfile.id
+                lastSynchronizedActiveProfile = activeProfile
+                synchronizeResidentIndicators()
+                return
+            }
+
+            failedColdRuntimeIdentities.removeValue(forKey: activeProfile.id)
+            if webViewPool.existingWebView(for: activeProfile.id) != nil {
+                // A replacement Runtime has no accepted readiness from the
+                // failed generation, so it must enter the cold gate as well.
+                beginDeferredRuntimeMaterialization(for: activeProfile)
+                return
+            }
         }
 
         if webViewPool.existingWebView(for: activeProfile.id) == nil,
@@ -3322,6 +3364,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func cancelPendingRuntimeMaterialization(reason: String) {
         guard let pending = pendingRuntimeMaterialization else { return }
+        clearPendingColdUnreadAcknowledgement(for: pending)
         pendingRuntimeMaterialization = nil
         pendingRuntimeMaterializationIdentity = nil
         rootView.webPanelContainerView.hideRestoringState()
@@ -3343,6 +3386,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     ) {
         let currentGeneration = pendingRuntimeMaterialization?.generation
         if currentGeneration == request.generation {
+            clearPendingColdUnreadAcknowledgement(for: request)
             pendingRuntimeMaterialization = nil
             pendingRuntimeMaterializationIdentity = nil
             rootView.webPanelContainerView.hideRestoringState()
@@ -3362,10 +3406,25 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
+    private func clearPendingColdUnreadAcknowledgement(
+        for materialization: PendingRuntimeMaterialization
+    ) {
+        guard let intent = pendingColdUnreadAcknowledgement,
+              intent.slotID == materialization.slotID,
+              intent.materializationGeneration == materialization.generation else {
+            return
+        }
+        pendingColdUnreadAcknowledgement = nil
+    }
+
     private func finishPendingRuntimeMaterializationAsFailed(
         profile: WebAppProfile,
         error: Error
     ) {
+        if let pending = pendingRuntimeMaterialization,
+           pending.slotID == profile.id {
+            clearPendingColdUnreadAcknowledgement(for: pending)
+        }
         pendingRuntimeMaterialization = nil
         pendingRuntimeMaterializationIdentity = nil
         webFocusRouter.setCurrentWebView(nil)
@@ -3408,6 +3467,14 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
+        let coldUnreadIntent = pendingColdUnreadAcknowledgement.flatMap { intent in
+            intent.slotID == slotID
+                && intent.materializationGeneration == pending.generation
+                ? intent
+                : nil
+        }
+        pendingColdUnreadAcknowledgement = nil
+
         let focusTrace = presentationTrace
         let focusOwner = presentationWebFocusOwner
         pendingRuntimeMaterialization = nil
@@ -3433,6 +3500,13 @@ final class PanelController: NSObject, NSWindowDelegate {
             trace: focusTrace,
             webFocusOwner: focusOwner
         )
+        if let coldUnreadIntent {
+            acknowledgePresentedSelectionIfNeeded(
+                slotID: slotID,
+                source: .explicitSelectionDeferred,
+                trace: coldUnreadIntent.trace
+            )
+        }
         var fields: [String: RuntimeDiagnosticValue] = [
             "slot_id": .string(slotID.uuidString),
             "materialization_generation": .integer(Int64(pending.generation)),
@@ -3458,16 +3532,17 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
+        failedColdRuntimeIdentities[slotID] = runtimeIdentity
+        clearPendingColdUnreadAcknowledgement(for: pending)
         pendingRuntimeMaterialization = nil
         pendingRuntimeMaterializationIdentity = nil
-        rootView.webPanelContainerView.hideRestoringState()
-        if let failedWebView = webViewPool.existingWebView(for: slotID) {
-            webFocusRouter.setCurrentWebView(failedWebView)
-        }
+        webFocusRouter.setCurrentWebView(nil)
+        rootView.webPanelContainerView.showEmptyState()
         var fields: [String: RuntimeDiagnosticValue] = [
             "slot_id": .string(slotID.uuidString),
             "materialization_generation": .integer(Int64(pending.generation)),
-            "readiness_source": .string("navigation_failed")
+            "readiness_source": .string("navigation_failed"),
+            "failure_presentation": .string("native_empty_state")
         ]
         fields.merge(runtimeIdentity.fields) { _, new in new }
         diagnostics.record(
@@ -3794,6 +3869,23 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotID: UUID,
         trace: RuntimeDiagnosticTrace? = nil
     ) {
+        if let pending = pendingRuntimeMaterialization,
+           pending.slotID == slotID,
+           isPendingRuntimeMaterializationCurrent(pending) {
+            if unreadResponseCoordinator.unreadSlotIDs.contains(slotID) {
+                pendingColdUnreadAcknowledgement = PendingColdUnreadAcknowledgement(
+                    slotID: slotID,
+                    materializationGeneration: pending.generation,
+                    trace: trace ?? diagnostics.beginTrace(root: "unread.explicit_selection")
+                )
+            } else if pendingColdUnreadAcknowledgement?.slotID == slotID,
+                      pendingColdUnreadAcknowledgement?.materializationGeneration
+                        == pending.generation {
+                pendingColdUnreadAcknowledgement = nil
+            }
+            return
+        }
+
         let facts = unreadPresentationFacts(slotID: slotID)
         guard facts.activeSlotMatches else {
             finishUnreadSelectionAttemptIfNeeded(

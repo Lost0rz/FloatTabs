@@ -2465,7 +2465,7 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(controller.debugIsShowingRestoringState)
     }
 
-    func testNavigationFailureRemovesRestoringStateWithoutManufacturingSuccess() throws {
+    func testNavigationFailureShowsNativeEmptyStateWithoutExposingOrFocusingFailedRuntime() throws {
         let (_, pool, controller, profile) = try makePhase6Harness(slotName: "FailBounded")
         pool.hibernate(slotID: profile.id)
         controller.showFloatTabs()
@@ -2484,11 +2484,78 @@ final class ExternalShellTests: XCTestCase {
             withError: NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)
         )
 
-        // Bounded terminal handling: the restoring surface cannot persist
-        // forever after a failed navigation, and the failed Runtime stays
-        // attached underneath for WebKit's own error presentation.
+        // A failed cold Runtime resolves to the existing native empty surface;
+        // its WebView remains pooled but never becomes current or focusable.
         XCTAssertFalse(controller.debugIsShowingRestoringState)
-        XCTAssertTrue(controller.debugPresentedWebView === webView)
+        XCTAssertNil(controller.debugPresentedWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+        XCTAssertTrue(pool.existingWebView(for: profile.id) === webView)
+
+        // A later synchronization of the same selected Slot must preserve the
+        // bounded native failure presentation instead of taking the resident
+        // fast path for the failed Runtime.
+        XCTAssertTrue(controller.debugInvokeRailSelection(slotID: profile.id))
+        XCTAssertNil(controller.debugPresentedWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+    }
+
+    func testStaleOrForeignNavigationFailureCannotReplaceCurrentRestoringTarget() throws {
+        let (store, pool, controller, firstProfile) = try makePhase6Harness(
+            slotName: "FailureStaleA"
+        )
+        pool.hibernate(slotID: firstProfile.id)
+        controller.showFloatTabs()
+        drainMainThreadTurns()
+
+        let firstWebView = try XCTUnwrap(pool.existingWebView(for: firstProfile.id))
+        let firstIdentity = try XCTUnwrap(
+            pool.runtimeDiagnosticIdentity(for: firstProfile.id)
+        )
+        let secondProfile = try XCTUnwrap(
+            store.add(
+                name: "FailureStaleB",
+                homeURL: URL(string: "https://failure-stale-b.example.com")!
+            )
+        )
+        drainMainThreadTurns()
+
+        let secondWebView = try XCTUnwrap(pool.existingWebView(for: secondProfile.id))
+        let secondIdentity = try XCTUnwrap(
+            pool.runtimeDiagnosticIdentity(for: secondProfile.id)
+        )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === secondWebView)
+
+        // The prior Slot's exact Runtime failure is stale after replacement.
+        controller.handleSlotNavigationFailure(
+            slotID: firstProfile.id,
+            runtimeIdentity: firstIdentity
+        )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === secondWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+
+        // A foreign identity for the current Slot is also ignored.
+        controller.handleSlotNavigationFailure(
+            slotID: secondProfile.id,
+            runtimeIdentity: WebRuntimeDiagnosticIdentity(
+                runtimeGeneration: secondIdentity.runtimeGeneration &+ 1,
+                webViewInstanceID: UUID()
+            )
+        )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === secondWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+
+        controller.handleSlotNavigationFinish(
+            slotID: secondProfile.id,
+            runtimeIdentity: secondIdentity
+        )
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === secondWebView)
+        XCTAssertTrue(controller.debugCurrentWebFocusWebView === secondWebView)
+        XCTAssertTrue(pool.existingWebView(for: firstProfile.id) === firstWebView)
     }
 
     func testRapidSlotChangeInvalidatesPendingMaterializationBeforeAttach() throws {

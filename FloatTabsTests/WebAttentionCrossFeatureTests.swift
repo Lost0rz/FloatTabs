@@ -6260,15 +6260,23 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     func testNotificationRouteUsesCanonicalColdPresentationGate() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let suite = "FloatTabsColdNotificationUnread-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let unreadCoordinator = ChatGPTUnreadResponseCoordinator(
+            store: UnreadResponseStore(defaults: defaults)
+        )
         let (controller, _, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
                 spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
             ],
+            unreadResponseCoordinator: unreadCoordinator,
             diagnostics: diagnostics
         )
         let slotA = try profile(named: "ChatA", in: store)
         let slotB = try profile(named: "ChatB", in: store)
+        unreadCoordinator.markUnread(slotID: slotB.id)
         _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         XCTAssertEqual(store.activeTabID, slotA.id)
         // ChatA's runtime is reclaimed first: if presentation ran before the
@@ -6283,6 +6291,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertTrue(routed)
         XCTAssertEqual(store.activeTabID, slotB.id)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
         XCTAssertTrue(controller.debugIsShowingRestoringState)
         XCTAssertNil(
             pool.existingWebView(for: slotB.id),
@@ -6313,6 +6322,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         }
         XCTAssertTrue(created)
         XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(
+            controller.unreadResponseSlotIDs.contains(slotB.id),
+            "Cold notification selection must retain unread until exact readiness"
+        )
         let createBegin = try XCTUnwrap(
             writer.events.last {
                 $0.event == "web_runtime.create.begin"
@@ -6336,11 +6349,133 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             1,
             "The existing pending generation must be reused for the same Slot"
         )
+        controller.debugSetPresentationFactOverride(
+            slotID: slotB.id,
+            presentationFact: true
+        )
+        defer { controller.debugClearPresentationFactOverride(slotID: slotB.id) }
         controller.handleSlotNavigationFinish(
             slotID: slotB.id,
             runtimeIdentity: try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotB.id))
         )
         XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertFalse(
+            controller.unreadResponseSlotIDs.contains(slotB.id),
+            "Exact-current readiness must complete the eligible pending notification acknowledgement"
+        )
+    }
+
+    func testColdExplicitUnreadSelectionAcknowledgesOnlyAfterExactReadiness() async throws {
+        let suite = "FloatTabsColdExplicitUnread-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let unreadCoordinator = ChatGPTUnreadResponseCoordinator(
+            store: UnreadResponseStore(defaults: defaults)
+        )
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
+            ],
+            unreadResponseCoordinator: unreadCoordinator
+        )
+        let slotA = try profile(named: "ChatA", in: store)
+        let slotB = try profile(named: "ChatB", in: store)
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        XCTAssertEqual(store.activeTabID, slotA.id)
+        pool.hibernate(slotID: slotB.id)
+        XCTAssertNil(pool.existingWebView(for: slotB.id))
+        unreadCoordinator.markUnread(slotID: slotB.id)
+        controller.showFloatTabs()
+
+        XCTAssertTrue(controller.debugInvokeRailSelection(slotID: slotB.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
+        let restored = try await waitUntil(timeoutMilliseconds: 1000) {
+            pool.existingWebView(for: slotB.id) != nil
+        }
+        XCTAssertTrue(restored)
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
+
+        controller.debugSetPresentationFactOverride(
+            slotID: slotB.id,
+            presentationFact: true
+        )
+        defer { controller.debugClearPresentationFactOverride(slotID: slotB.id) }
+        controller.handleSlotNavigationFinish(
+            slotID: slotB.id,
+            runtimeIdentity: try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotB.id))
+        )
+
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slotB.id))
+    }
+
+    func testColdUnreadIntentIsInvalidatedByTargetReplacement() async throws {
+        let suite = "FloatTabsColdUnreadReplacement-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let unreadCoordinator = ChatGPTUnreadResponseCoordinator(
+            store: UnreadResponseStore(defaults: defaults)
+        )
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b"),
+                spec(name: "ChatC", url: "https://chatgpt.com/chat-c")
+            ],
+            unreadResponseCoordinator: unreadCoordinator
+        )
+        let slotA = try profile(named: "ChatA", in: store)
+        let slotB = try profile(named: "ChatB", in: store)
+        let slotC = try profile(named: "ChatC", in: store)
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        XCTAssertEqual(store.activeTabID, slotA.id)
+        pool.hibernate(slotID: slotB.id)
+        pool.hibernate(slotID: slotC.id)
+        XCTAssertNil(pool.existingWebView(for: slotB.id))
+        XCTAssertNil(pool.existingWebView(for: slotC.id))
+        unreadCoordinator.markUnread(slotID: slotB.id)
+        unreadCoordinator.markUnread(slotID: slotC.id)
+        controller.showFloatTabs()
+
+        XCTAssertTrue(controller.debugInvokeRailSelection(slotID: slotB.id))
+        let restoredB = try await waitUntil(timeoutMilliseconds: 1000) {
+            pool.existingWebView(for: slotB.id) != nil
+        }
+        XCTAssertTrue(restoredB)
+        let identityB = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotB.id))
+
+        XCTAssertTrue(controller.debugInvokeRailSelection(slotID: slotC.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        let restoredC = try await waitUntil(timeoutMilliseconds: 1000) {
+            pool.existingWebView(for: slotC.id) != nil
+        }
+        XCTAssertTrue(restoredC)
+        let identityC = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slotC.id))
+
+        // A's successor B can finish late, but its replaced intent cannot
+        // acknowledge either the now-inactive B Slot or current C Slot.
+        controller.handleSlotNavigationFinish(
+            slotID: slotB.id,
+            runtimeIdentity: identityB
+        )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotC.id))
+
+        controller.debugSetPresentationFactOverride(
+            slotID: slotC.id,
+            presentationFact: true
+        )
+        defer { controller.debugClearPresentationFactOverride(slotID: slotC.id) }
+        controller.handleSlotNavigationFinish(
+            slotID: slotC.id,
+            runtimeIdentity: identityC
+        )
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slotC.id))
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slotB.id))
     }
 
     /// Gate C2: a stale/deleted target routes unavailable with no fallback
