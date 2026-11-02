@@ -1,117 +1,191 @@
 # FloatTabs Current Task
 
-**Task ID:** FT-ADAPTIVE-LIFECYCLE-RESTORE-001
-**Card ID:** FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001
-**Title:** Replace fixed-count normal Runtime reclaim with staged Automatic lifecycle
-**Status:** ACTIVE / WP2 IMPLEMENTATION AUTHORIZED
-**Mode:** SOURCE IMPLEMENTATION / ONE DRAFT PR / NO MERGE OR RELEASE
-**Task class:** WEB RUNTIME / LIFECYCLE POLICY
-**Baseline:** origin/main@2a52800f770266f7c901eb612a0b319ddca142df
-**Branch:** codex/adaptive-lifecycle-wp2-policy
-**PR:** #195 OPEN / DRAFT; do not reuse PR #194
+**Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
+**Card ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001`  
+**Title:** Replace fixed-count normal Runtime reclaim with staged Automatic lifecycle  
+**Status:** **ACTIVE / WP2 CORRECTIVE AUTHORIZED**  
+**Mode:** `SOURCE CORRECTIVE / EXISTING DRAFT PR / NO MERGE OR RELEASE`  
+**Task class:** `WEB RUNTIME / LIFECYCLE POLICY`  
+**Baseline:** `origin/main@2a52800f770266f7c901eb612a0b319ddca142df`  
+**Branch:** `codex/adaptive-lifecycle-wp2-policy`  
+**PR:** `#195 OPEN / DRAFT / UNMERGED`
 
-## Authorization
+## Authority
 
-Implement WP2 staged Automatic lifecycle policy after completing and remotely verifying the control/design-only bootstrap in this branch. PR #194 is merged; WP1 is complete and accepted. This task does not reopen WP1 and does not authorize WP3 scheduling or WP4 integration work.
+Durable WP2 policy: `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`  
+WP1 regression authority: `docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`
 
-Durable policy authority: [Runtime Lifecycle Policy V7](docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md).
-WP1 regression authority: [Adaptive Lifecycle Restore Contract V2](docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md).
+The frozen WP2 product policy remains unchanged. This corrective closes machine/audit evidence gaps only; it does not authorize a policy redesign, WP3 scheduling work, WP4 work, merge, or release.
 
-## Frozen product policy
+## Verified implementation state
 
-- Remove the fixed normal resident-count reclaim policy. Runtime count is never a normal reclaim reason or RAM estimate.
-- Keep Loaded / Pinned is never automatically reclaimed by normal, warning, or critical FloatTabs policy. Explicit user/config lifecycle actions retain their existing semantics; macOS external process termination is outside this policy.
-- Automatic inactivity stages: RECENT <30s; IDLE >=30s and <600s; LONG_IDLE >=600s. Thirty seconds is anti-thrash protection, not destructive lifetime. Six hundred seconds is an initial tunable implementation default.
-- Under normal pressure, RECENT and IDLE remain resident. An inactive, unprotected LONG_IDLE Automatic Runtime may hibernate exactly once for automatic_long_idle_expired.
-- Warning progressively reclaims eligible inactive/unprotected IDLE or LONG_IDLE Automatic Runtime only. RECENT and Keep Loaded remain protected.
-- Critical may bypass RECENT, but only inactive/unprotected Automatic Runtime are eligible. Keep Loaded/Pinned and all hard-protected Runtime are never candidates.
-- Pressure reclaim is oldest-first and progressive, with current pressure/identity/protection revalidation after each step. Pressure normalization cancels pending continuation and does not restore already-reclaimed Runtime.
-- SlotLifecycleCoordinator remains the sole lifecycle policy writer. Inactivity timers/plans are exact-token and generation bounded. Reactivation, visibility/current ownership, removal, or identity-invalidating change makes old callbacks no-ops. Protection end re-evaluates current facts with a fresh valid plan/token.
-- Preserve generation/Attention, active media, fullscreen, supplemental visibility, WP1 presentation/readiness, notification privacy/routing, and all Browser Profile/session/login/cookie data.
+Implementation evidence head: `647178030b5a448916537745e7a993e4eca0a238`.
 
-The full policy, boundaries, diagnostic requirements, and 15 required regression cases are frozen in Policy V7.
+Verified results on that head:
+
+```text
+fixed normal resident-count reclaim removed = YES
+Automatic RECENT / IDLE / LONG_IDLE model = IMPLEMENTED
+Keep Loaded excluded from normal/warning/critical reclaim = YES
+focused local tests = PASS (589 run / 4 skipped / 0 failed)
+full local XCTest = PASS (1160 run / 4 skipped / 0 failed)
+local Debug/Release arm64 = PASS
+Package.resolved = unchanged
+self-hosted exact-head macOS CI = PASS / run 41481345174
+hosted exact-head QA DMG = FAIL / run 41481345149
+fresh independent audit = STOP / IMPORTANT
+human UI acceptance = BLOCKED / USER OWNED
+```
+
+## Corrective authorization
+
+### A — Hosted Release compiler compatibility
+
+Fix the exact semantic expression at `SlotLifecycleCoordinator.swift` that currently uses a locally inferred `plan.map { stage(...) }` form and fails in the hosted Xcode 26.6 Release/WMO build.
+
+Required result:
+
+- make the lifecycle-stage optional computation explicit and compiler-unambiguous;
+- preserve the exact diagnostic semantics;
+- do not suppress the QA build, change workflow/toolchain to hide the error, or weaken Release verification.
+
+A straightforward explicit `if let` / explicitly typed optional computation is preferred over clever overload disambiguation.
+
+### B — Progressive pressure async stale-plan recovery
+
+The progressive pressure ladder must not stall merely because an asynchronous media-validation result returns for a captured inactive plan that became stale while pressure is still warning/critical.
+
+Required semantics:
+
+```text
+pressure candidate selected
+→ async media validation owns evaluation token
+→ callback clears exact evaluation ownership
+→ pressure normalized? stop
+→ captured plan still current? evaluate/reclaim/protect normally
+→ captured plan stale/invalid? re-enter progressive selection from fresh facts
+```
+
+Every owned async evaluation exit must leave the pressure ladder in one of two valid states:
+
+1. pressure is normal / no continuation required; or
+2. sustained pressure can continue from fresh current candidates.
+
+Do not reclaim using stale captured facts. Do not precompute a batch. Do not introduce a second pressure/lifecycle writer.
+
+The exact-head `isPlaying == true` path already marks media protection and schedules a pressure continuation; preserve that behavior. Add regression specifically proving that a stale async plan callback cannot strand another eligible Automatic Runtime.
+
+### C — Deterministic lifecycle-time tests
+
+Policy V7 requires lifecycle-stage tests to inject time instead of sleeping in wall/real time.
+
+Add the smallest bounded monotonic-time/test-scheduling seam owned by `SlotLifecycleCoordinator` that allows deterministic testing of:
+
+```text
+RECENT (<30s)
+→ IDLE (>=30s)
+→ LONG_IDLE (>=600s)
+```
+
+Production defaults must still use monotonic system uptime and normal main-queue scheduling. Test-only/fake time must not become persisted product state or a second policy source.
+
+Required result:
+
+- no real-time sleep is required to prove RECENT → IDLE → LONG_IDLE stage boundaries;
+- stale timer/token behavior remains deterministic;
+- production timing values and policy are unchanged.
+
+The concrete seam is an implementation choice. Prefer dependency injection over new public API or test-only mutation of private state.
+
+## Frozen product policy / regression boundary
+
+Preserve all Policy V7 decisions:
+
+- no fixed normal resident count;
+- Keep Loaded / Pinned = no FloatTabs automatic exit under normal/warning/critical;
+- Automatic RECENT `<30s`, IDLE `30s..<600s`, LONG_IDLE `>=600s`;
+- warning excludes RECENT;
+- critical may bypass RECENT for inactive unprotected Automatic only;
+- progressive oldest-first fresh-fact reclaim;
+- pressure normalization cancels pending continuation;
+- SlotLifecycleCoordinator remains sole lifecycle writer;
+- exact plan token + Runtime identity safety;
+- WP1 cold presentation/readiness and A→B→A correctness;
+- generation/Attention/media/fullscreen/supplemental visibility protection;
+- notification exact-Slot/privacy behavior;
+- Browser Profile/login/cookie/session/conversation data safety.
 
 ## Explicitly forbidden
 
-- Replacing target=2 with another fixed count;
-- automatic reclaim of Keep Loaded/Pinned;
-- inferring RAM from Runtime count;
-- private WebKit SPI or helper-process killing;
-- reload/reset/restart workarounds;
-- clearing Browser Profile, login, cookies, session, cache, or conversation data;
-- a second lifecycle policy writer or diagnostics as policy authority;
-- changes to WP1 restore/session mechanics beyond call adaptation strictly required by the new lifecycle trigger;
-- changes to generation detection, notification semantics, inactiveSchedulingPolicy, snapshots/screenshots, GiB budgets, or unrelated UI.
+- replacing removed target=2 with any other fixed Runtime count;
+- changing 30s/600s product values as part of this corrective;
+- automatic reclaim of Keep Loaded;
+- using stale async media facts to reclaim;
+- batch/purge pressure logic;
+- second lifecycle/presentation writer;
+- private WebKit SPI/helper killing;
+- reload/reset/restart workaround;
+- clearing Browser Profile/session/login/cookies/cache/conversation data;
+- weakening QA workflow/toolchain to make the hosted build green;
+- WP3/WP4 mutation.
 
-## Control-only bootstrap gate
+## Required focused regressions
 
-Before product source mutation:
+At minimum add/retain proofs for:
 
-1. Fetch origin and verify PR #194 merged, fresh origin/main contains the merge, and the new branch starts from that exact fresh main.
-2. Preserve the old WP1 branch/worktree and all unique local work.
-3. Reconcile CURRENT_STATUS.md and this file to WP2.
-4. Create Policy V7; update documentation routing and supersession notices only where needed.
-5. Commit and push only the control/design bootstrap; verify the remote branch contains that commit.
-6. Create one Draft PR separate from PR #194.
+1. hosted-Release-compatible stage diagnostic computation;
+2. media-playing candidate under pressure remains protected while another eligible Automatic candidate can progress;
+3. stale async media callback re-enters fresh pressure selection under sustained pressure;
+4. pressure normalization during async evaluation does not restart reclaim;
+5. exact evaluation token prevents foreign/old callback mutation;
+6. RECENT → IDLE → LONG_IDLE boundaries use injected monotonic time, not real sleeping;
+7. reactivation/stale plan timer cannot reclaim current Runtime;
+8. five resident Automatic Runtime are not count-evicted under normal pressure;
+9. Keep Loaded remains unreclaimed under warning and critical;
+10. WP1 presentation/A→B→A/focus/unread/notification regressions remain green;
+11. generation/media/fullscreen protections remain green.
 
-Product source mutation is authorized only after step 5 is remotely verified. The control bootstrap must not include source or test changes.
+## Verification gate
 
-## Bootstrap completion
+After corrective implementation:
 
-The control/design-only bootstrap is remotely verified:
+- focused lifecycle/cross-feature/pool/WP1/notification/diagnostic/privacy suites;
+- full XCTest;
+- Debug arm64;
+- Release arm64;
+- native arm64 verification;
+- package-lock check;
+- push exact branch head and verify remote delivery;
+- exact-head self-hosted macOS CI;
+- exact-head hosted QA DMG;
+- fresh independent exact-diff / ownership / data-safety audit.
 
-~~~text
-CONTROL_BOOTSTRAP_HEAD=e289171eff3d5045c48a86c229b7967e126ec087
-REMOTE_REF=origin/codex/adaptive-lifecycle-wp2-policy
-REMOTE_DELIVERY=PUSHED_VERIFIED
-WP2_DRAFT_PR=195 / OPEN / DRAFT
-~~~
-
-The required source-mutation gate is satisfied. Continue implementation on this branch and PR only.
-
-## Implementation boundary
-
-Primary policy owner: FloatTabs/Web/SlotLifecycleCoordinator.swift. Inspect and adapt only the existing lifecycle policy/timer/pressure/diagnostic call paths needed for V7. Add or update focused lifecycle and integration regressions in current owning test files. WebViewPool remains mechanism-only and may change only for a call adaptation strictly required by the new trigger. Do not move policy into Panel, Tabs, notifications, or diagnostics.
-
-## Required verification
-
-Focused suites: lifecycle; WebAttentionLifecycleTests; WebAttentionCrossFeatureTests; WebViewPool reclaim regressions; ExternalShell/WP1 presentation regressions; affected runtime diagnostic/privacy tests.
-
-Current verification: the focused lifecycle, cross-feature, pool, ExternalShell/WP1 presentation, notification, diagnostic/privacy, preference, and cache suites pass (589 tests run, 4 skipped, 0 failed). Full XCTest passes (1,160 tests run, 4 skipped, 0 failed). Debug and Release arm64 builds pass; the Release executable is arm64-only; locked package resolution passes with Package.resolved unchanged. Exact-head CI/QA and independent audit remain pending.
-
-Then full XCTest, Debug arm64, Release arm64, native arm64 verification, package-lock check, exact-head self-hosted macOS CI on [self-hosted, macOS, ARM64, mac-mini-ci], exact-head QA DMG, and a fresh independent exact-diff / ownership / data-safety audit. Do not infer exact-head evidence from earlier commits. Do not silently use hosted macOS CI.
-
-The 15 acceptance cases are enumerated in Policy V7. Stop after machine evidence and independent audit. Do not merge or release. HUMAN_UI_ACCEPTANCE=PENDING / USER_OWNED until the user validates integrated real-Mac multi-Slot use, long-idle restore through the WP1 gate, pinned retention, background generation protection, and intact login/session/conversation.
+Only if all required machine gates and the independent audit PASS may the task move to `HUMAN_UI_ACCEPTANCE=PENDING / USER_OWNED`.
 
 ## STOP conditions
 
-Stop if PR #194 is not merged or fresh main lacks it; an overlapping predecessor has unknown unique work; source requires another lifecycle writer; normal reclaim still depends on Runtime count; Keep Loaded can be pressure-reclaimed; a stale token can reclaim a reactivated/current Runtime; WP1 restore/readiness or generation/media/fullscreen protection regresses; user/session data is mutated; private SPI/helper kill/reload/reset workaround is required; or a WP2-attributable required machine gate fails.
+Stop if the corrective requires a policy redesign, another lifecycle writer, Keep Loaded reclaim, stale-fact reclaim, real-time-only stage verification, WP1 regression, generation/media/fullscreen regression, Browser Profile/session mutation, private SPI/helper kill/reload-reset workaround, or any required exact-head machine gate failure attributable to the corrective.
 
 ## Return contract
 
-Return the verified values for:
+Return verified values for:
 
-~~~text
-BASELINE_MAIN
-CONTROL_BOOTSTRAP_HEAD
-WP2_BRANCH
-WP2_DRAFT_PR
+```text
+BASELINE_IDENTITY
+CORRECTIVE_BASE_HEAD
 FINAL_BRANCH_HEAD
 CHANGED_FILES
 REMOTE_DELIVERY
-FIXED_RESIDENT_COUNT_REMOVED
-AUTOMATIC_STAGE_MODEL
-RECENT_30S_RESULT
-IDLE_NORMAL_RESULT
-LONG_IDLE_RESULT
-PINNED_NORMAL_RESULT
-PINNED_WARNING_RESULT
-PINNED_CRITICAL_RESULT
-WARNING_PRESSURE_RESULT
-CRITICAL_PRESSURE_RESULT
-PROTECTION_RESULT
-STALE_PLAN_RESULT
-PRESSURE_NORMALIZATION_RESULT
+HOSTED_RELEASE_COMPATIBILITY_RESULT
+ASYNC_PRESSURE_STALE_PLAN_RESULT
+MEDIA_PROTECTED_PRESSURE_PROGRESSION_RESULT
+PRESSURE_NORMALIZATION_DURING_ASYNC_RESULT
+EVALUATION_TOKEN_ISOLATION_RESULT
+INJECTED_TIME_MODEL
+RECENT_IDLE_LONG_IDLE_DETERMINISTIC_RESULT
+STALE_TIMER_RESULT
+FIXED_RESIDENT_COUNT_REGRESSION
+PINNED_WARNING_CRITICAL_REGRESSION
 WP1_PRESENTATION_REGRESSION
 WP1_A_B_A_REGRESSION
 NOTIFICATION_REGRESSION
@@ -130,4 +204,6 @@ HUMAN_UI_ACCEPTANCE=PENDING
 WP3_SCHEDULING_MUTATION=NOT_STARTED
 WP4_OTHER_MUTATION=NOT_STARTED
 PR_STATE
-~~~
+```
+
+Do not merge PR #195. Do not release.
