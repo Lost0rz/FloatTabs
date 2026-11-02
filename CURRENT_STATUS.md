@@ -180,8 +180,8 @@ RELEASE_ARM64_BUILD=PASS
 NATIVE_ARM64=PASS
 PACKAGE_LOCK=UNCHANGED
 PRIVACY_OWNERSHIP_SELF_AUDIT=PASS
-FRESH_LITERAL_HEAD_CI=AWAITING_CORRECTIVE_PUSH
-FRESH_QA_DMG=PENDING_IF_TRIGGERED
+HOST_GATE_EVIDENCE=PR_193_CURRENT_LITERAL_HEAD_CHECKS
+QA_DMG_EVIDENCE=PR_193_CURRENT_LITERAL_HEAD_IF_TRIGGERED
 FRESH_INDEPENDENT_AUDIT=WAITING
 HUMAN_UI_ACCEPTANCE=PENDING_NOT_STARTED
 MERGE=NOT_AUTHORIZED
@@ -212,8 +212,7 @@ CORRECTIVE_001
 → DOM descendant sanitization/nested-text deduplication
 → focused corrective + existing regression suites
 → full XCTest / Debug arm64 / Release arm64 / native arm64
-→ push same task branch / PR #193
-→ fresh literal-head self-hosted CI + QA DMG when triggered
+→ verify current literal-head self-hosted CI + QA DMG when triggered
 → fresh independent exact-diff / ownership / privacy audit
 → stop at WAITING_FOR_FRESH_INDEPENDENT_WEB_AUDIT
 → human notification acceptance remains PENDING / NOT_STARTED
