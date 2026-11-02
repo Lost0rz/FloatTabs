@@ -6,153 +6,104 @@ Read [`../README.md`](../README.md) first. It is the repository-wide documentati
 
 For the current lifecycle/performance program:
 
-- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md) — **CURRENT / ACCEPTED / FROZEN DESIGN AUTHORITY**;
-- [`FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md) — **CURRENT PHASE 8 / ACCEPTED / FROZEN / IMPLEMENTATION STOPPED AT GATE 0**;
-- [`FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md) — **CURRENT PHASE 8 / WP0 EXECUTED 2026-11-02 / GATE 0 VERDICT: FAIL — aggregate WebContent attribution not provable with supported public APIs; budget construction stopped before WP2; awaiting user reconciliation decision**;
-- `CURRENT_STATUS.md` — verified current shipped state + frozen target state;
+- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md) — **CURRENT / ACCEPTED / FROZEN LONG-TERM DESIGN AUTHORITY**;
+- [`FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md) — **ORIGINAL PHASE 8 BUDGET CONTRACT / STOPPED AT GATE 0; budget construction deferred**;
+- [`FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md) — **WP0 COMPLETE / GATE 0 FAIL: aggregate WebContent/GPU attribution not provable with supported public production APIs**;
+- [`FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md) — **CURRENT IMPLEMENTATION CONTRACT / ACCEPTED / FROZEN / D_COMBINE**;
+- `CURRENT_STATUS.md` — verified current state;
 - `CURRENT_TASK.md` — only active mutation authorization;
-- [`DOMAIN_MAP.md`](DOMAIN_MAP.md) — derived navigation/current-source routing;
-- [`archive/FloatTabs_Runtime_Lifecycle_Phase7_Closeout_Snapshot_2026-11-02.md`](archive/FloatTabs_Runtime_Lifecycle_Phase7_Closeout_Snapshot_2026-11-02.md) — historical Phase 7/V5 closeout snapshot.
+- [`DOMAIN_MAP.md`](DOMAIN_MAP.md) — derived navigation/current-source routing.
 
-V5 and the Phase 7 implementation contract are delivered historical evidence for future construction. They remain valid descriptions of the Phase 7 work that produced `main@2b414982...`, but their fixed-count normal policy is superseded as the Phase 8 target.
+## Phase 1-7 delivered foundations
 
-## Delivered lifecycle foundations
+Phase 1-7 remain delivered and reusable:
 
-### Phase 1 — Safe Hibernate + Restore
+- persistent Slot/Profile/session lifetime is separate from disposable `WKWebView` Runtime lifetime;
+- Ready/unread is decoupled from Runtime residency;
+- native completion routing survives Runtime reclaim;
+- `SlotLifecycleCoordinator` is the lifecycle writer;
+- `WebViewPool` owns Runtime create/hibernate/restore/release mechanics;
+- hidden generation remains protected while bounded host-side work may be reduced;
+- Phase 6 perceived-fast restore remains the restore path;
+- Phase 7 `Automatic | Keep Loaded` is current shipped retention configuration.
 
-Delivered / merged. Persistent Slot/Profile/session lifetime is separated from disposable `WKWebView` Runtime lifetime.
-
-### Phase 2 — Ready / Unread Decoupling
-
-Delivered / merged. Generating protects Runtime; Ready/unread does not require Runtime residency.
-
-### Phase 3 — Native Completion Notification
-
-Delivered / merged. Hidden valid completion can route back to the exact persistent Slot independently of Runtime residency.
-
-### Phase 4 — Managed Runtime budget foundation
-
-Delivered / merged. Deterministic lifecycle decision support, `lastUsedAt`, memory-pressure input and `SlotLifecycleCoordinator` as sole lifecycle executor remain reusable. Old count/residency policy is historical.
-
-### Phase 5 — Background Generation Thrift
-
-Delivered / merged. Generating remains Runtime-protected while hidden fallback work is reduced.
-
-### Phase 6 — Perceived-fast Restore
-
-Delivered / merged in PR #187.
-
-Architecture:
-
-```text
-reclaimed Slot selected/summoned
-→ native shell/restoring state
-→ deferred current request
-→ WebViewPool restore/create
-→ exact-current Runtime readiness
-→ restoring surface removed
-→ canonical focus/input resumes
-```
-
-### Phase 7 — Automatic / Keep Loaded + legacy residency retirement
-
-Delivered / merged in PR #188 at:
-
-`main@2b414982710b3f042fc7d6e9c88eb2d7117b4e38`
-
-Delivered structural result:
-
-```text
-Automatic / Keep Loaded
-no hidden Hot host
-no current Hot/Warm/Cold product controls
-Runtime reclaim independent from website/session cleanup
-Phase 6 restore preserved
-Generating hard-protected
-Keep Loaded does not preload at launch
-```
-
-The merged Phase 7 tuning remains current production truth until Phase 8 lands:
+Current shipped healthy/normal tuning remains:
 
 ```text
 normal Automatic target = 2
-inactive release path = 30s
-warning target = 1
-critical target = 0
+inactive Automatic release path = 30s
 ```
 
-These values are not the frozen Phase 8 target.
+The current re-scope deliberately preserves those two healthy-state semantics.
 
-## Phase 8 — Adaptive Memory Budget + Background Efficiency
+## Gate 0 platform boundary
 
-Phase 8 design is frozen; implementation has not started.
+Phase 8 WP0 proved that production can read per-process footprint and deterministically attribute the Networking helper, but cannot use supported public APIs to determine which dominant WebContent/GPU XPC instances belong to the FloatTabs host.
 
-Target product model:
+Therefore:
 
 ```text
-Memory Budget
-├─ Auto — Recommended
-├─ Custom GiB
-└─ Unlimited
+aggregate FloatTabs/WebKit working-set budget input = NOT PROVABLE
+memory-budget enforcement = DEFERRED / PLATFORM-BLOCKED
+best-effort/correlation attribution = FORBIDDEN
+Runtime-count substitution = FORBIDDEN
 ```
 
-Initial reference Auto formula:
+The V6 adaptive budget remains a future architecture direction only. Reopening it requires new supported deterministic attribution evidence.
+
+## User reconciliation — D_COMBINE
+
+The user selected on 2026-11-02:
 
 ```text
-clamp(physical RAM × 20%, 1.5 GiB, 6 GiB)
+B now
+→ execute measurement-independent pressure + efficiency work
+
+A later
+→ revisit aggregate memory budget only when the platform exposes a safe deterministic capability
 ```
 
-Target reclaim semantics:
+No best-effort `C` path is accepted.
 
-```text
-under budget
-→ keep useful inactive Runtime resident
-→ no fixed resident-count ceiling
+## Current implementation architecture
 
-above high watermark (105%)
-→ choose one eligible inactive Automatic Runtime
-→ hibernate through WebViewPool
-→ remeasure aggregate footprint
-→ stop <= low watermark (90%)
-→ otherwise repeat one at a time
-```
+### R1 — progressive system-memory-pressure ladder
 
-System memory pressure remains independent:
+Primary owner: `SlotLifecycleCoordinator`.
 
 ```text
 warning
-→ progressively reclaim eligible Automatic
+→ eligible inactive Automatic only
+→ one Runtime at a time
+→ Keep Loaded preserved
+→ revalidate latest pressure + current ownership/protection between steps
 
 critical
 → Automatic first
-→ inactive/unprotected Keep Loaded only if still required
+→ then inactive/unprotected Keep Loaded if still required
+→ active/hard-protected untouched
+→ one Runtime at a time
+
+normal pressure
+→ stop/cancel pending progression
+→ no mass restore
+→ restore remains demand-driven
 ```
 
-The existing 30-second value becomes a normal-budget anti-thrash eligibility grace, not an unconditional Runtime lifetime.
+The pressure path must use the existing supported system memory-pressure signal. It does not use an aggregate FloatTabs memory estimate.
 
-Proactive long-idle cleanup is OFF by default in the V6 baseline.
+### R2 — background lifecycle efficiency
 
-## Resource measurement boundary
+Current allowed architecture is host-side only:
 
-A GiB budget requires a production-safe aggregate FloatTabs/WebKit footprint estimate.
+- event-first completion sensing where current ownership permits;
+- bounded/adaptive hidden fallback probing;
+- suppression/coalescing of redundant hidden host work;
+- prompt cancellation of stale observer/tasks across document/runtime generation changes;
+- prevention of duplicate observer/task registration across hibernate/restore/rebuild;
+- exact-current ownership validation before stale callbacks mutate state.
 
-Desired observation:
-
-```text
-FloatTabs host
-+ attributable WebContent
-+ attributable WebKit Networking/GPU/other helper processes
-```
-
-This is application aggregate evidence only. Exact per-Slot WebContent memory attribution remains unsupported as a trustworthy public policy input.
-
-Phase 8 Gate 0 must prove a supported production mechanism before budget enforcement. Benchmark-only responsible-PID evidence does not automatically authorize an in-app implementation. **Gate 0 was executed 2026-11-02 (WP0) and FAILED**: the WP0 measurement feasibility report records that public per-pid footprint reading and Networking attribution exist, but WebContent/GPU attribution to the host app does not; budget construction is stopped before WP2 pending user reconciliation.
-
-A read-only `RuntimeResourceMonitor`-like component may supply resource facts; it must never become a lifecycle writer or kill/reload Runtime itself.
-
-## Background-generation architecture under V6
-
-Current accepted semantic chain remains:
+Required semantic chain remains:
 
 ```text
 Generating
@@ -160,62 +111,67 @@ Generating
 → completion sensing
 → Ready/unread + native notification
 → generating protection ends
-→ normal lifecycle resumes
+→ existing normal lifecycle resumes
 ```
 
-Phase 8 may reduce host-side observer/probe/diagnostic work while hidden generation remains live, but it does not claim that arbitrary WKWebView JS/network work can be deeply frozen while continuing to generate.
-
-Private WebKit inactive-scheduling/freeze SPI is not authorized.
+No provider-semantic redesign, invasive page mutation, private freeze SPI, or renderer-memory claim is authorized.
 
 ## Current ownership
 
 - `WebViewPool` — live Runtime creation/hibernate/restore/rebuild/release mechanism;
-- `SlotLifecycleCoordinator` — sole Runtime lifecycle/budget executor;
-- future aggregate resource monitor — read-only resource fact provider only;
-- `AppPreferencesStore` — durable global memory-budget configuration;
+- `SlotLifecycleCoordinator` — sole Runtime lifecycle executor and pressure-policy writer;
 - `TabStore` / `WebAppProfile` — persistent Slot configuration and per-Slot Automatic/Keep Loaded preference;
 - `WebAttentionCoordinator` — native Attention authority;
 - `ChatGPTAttentionBridge` — provider sensing / bounded liveness fallback;
-- `PanelController` — presentation truth + restore orchestration;
+- `PanelController` — presentation truth + restore orchestration, not a second lifecycle writer;
 - Website Cache domain — cache cleanup only, not Runtime lifecycle;
 - `RuntimeDiagnostics` — evidence only.
 
-## Frozen Phase 8 construction sequence
+No current owner exists for a production aggregate-memory budget input because Gate 0 failed.
+
+## Current construction sequence
 
 ```text
-WP0 exact source audit + production measurement feasibility
-→ WP1 passive budget config/resource monitor
-→ WP2 memory-budget scheduler/progressive normal reclaim
-→ WP3 system-pressure ladder
-→ WP4 Advanced Runtime & Memory UI + persistence/backup
-→ WP5 background-generation/observer efficiency corrective
-→ WP6 Real-Mac + Phase7-vs-Phase8 A/B acceptance
+PR #190 WP0/reconciliation closeout
+→ literal new head required self-hosted macOS CI
+→ exact-diff/base-head/mergeability check
+→ merge #190
+→ fresh main
+→ one successor implementation branch/PR
+→ Gate R0 focused source reconciliation
+→ R1 pressure ladder + focused tests
+→ R2 background efficiency + focused tests
+→ full XCTest + Debug/Release arm64 + native architecture
+→ literal-head self-hosted macOS CI
 → fresh exact-diff/ownership audit
-→ merge-readiness
+→ merge-readiness decision
 ```
 
-The current design task authorizes documentation/control only. No `FloatTabs/**` product mutation begins until a later explicit implementation task is opened.
+No `FloatTabs/**` mutation belongs on the #190 closeout branch.
 
-## Reference-derived direction
+## Deferred architecture
 
-Design references support:
+The following V6 target concepts remain documented but are not executable under the current task:
 
-- separating proactive inactivity from urgent pressure reclaim;
-- using user resource policy rather than a fixed tab count;
-- protecting active/media/generating work;
-- progressive reclaim/re-evaluation;
-- lazy materialization and real Runtime sleep/restore.
+```text
+Memory Budget: Auto / Custom / Unlimited
+aggregate working-set observation
+high/low watermarks
+budget-driven normal reclaim
+memory-budget Settings/persistence
+aggregate-memory A/B acceptance
+```
 
-Reference projects do not override FloatTabs ownership or WebKit public-API constraints.
+If the platform boundary changes in the future, those concepts require a fresh task reconciliation before implementation.
 
 ## Historical routing
 
-Treat these as historical for new construction:
+Treat as historical/deferred for current construction:
 
 - `FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`;
 - `FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`;
+- `FloatTabs_Runtime_Lifecycle_Phase8_Adaptive_Memory_Budget_Implementation_Contract_V1.md` beyond its recorded Gate 0 evidence/STOP boundary;
 - V1-V4 lifecycle contracts;
-- old Phase 4 fixed-count/residency plans;
-- Stage Hot/Warm/Cold lifecycle/benchmark material.
+- old fixed-count/residency plans and Hot/Warm/Cold benchmark material.
 
-Preserve them as evidence; do not rewrite them into V6 wording.
+Preserve them as evidence. Current mutation follows `CURRENT_TASK.md` plus the pressure/efficiency re-scope contract.
