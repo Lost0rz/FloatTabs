@@ -6,11 +6,12 @@ This file is a **derived navigation map**. It does not replace `AGENTS.md`, `CUR
 
 1. `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`;
 2. `docs/README.md`;
-3. current lifecycle authority: `FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md` + active Phase 8 implementation contract;
-4. `docs/architecture/README.md`;
-5. this map for navigation;
-6. production source/tests/fresh evidence;
-7. historical V5/Phase 7/Stage/archive material as evidence only.
+3. current task contract: `FloatTabs_Native_Completion_Notification_Reliability_Rich_Preview_Contract_V1.md`;
+4. durable lifecycle contracts where they define preserved runtime boundaries;
+5. `docs/architecture/README.md`;
+6. this map for navigation;
+7. production source/tests/fresh evidence;
+8. historical Stage/archive material as evidence only.
 
 ## Domain routes
 
@@ -19,28 +20,95 @@ This file is a **derived navigation map**. It does not replace `AGENTS.md`, `CUR
 | App Composition | dependency wiring, launch/termination, top-level services | `FloatTabs/App/AppCoordinator.swift`, `AppDelegate.swift`, `FloatTabsApp.swift` | coordinates domains; does not own Tab/Web/Attention truth |
 | Tabs & Profiles | Slot identity, selection, ordering, Web App / Browser Profile config, persisted `lastUsedAt`, Runtime retention preference | `FloatTabs/Tabs/TabStore.swift`, `WebAppProfile.swift`, `BrowserProfile.swift`, `WebRenderingProfile.swift` | durable Slot/config state; Runtime lifecycle remains Web-owned |
 | Web Runtime | `WKWebView` creation/reuse, Runtime identity, hibernate/restore/release, renderer recovery, bridge lifetime | `FloatTabs/Web/WebViewPool.swift`, `SlotNavigationObserver.swift`, `BrowserProfileDataStoreProvider.swift` | mechanism owner; does not own lifecycle policy or durable product state |
-| Runtime Lifecycle | lifecycle execution, inactivity/protection boundaries, memory-budget/pressure reclaim | `FloatTabs/Web/SlotLifecycleCoordinator.swift` | sole canonical Runtime lifecycle writer |
-| Runtime Budget Policy | deterministic read-only decision from resource/protection/recency facts | current private policy in `SlotLifecycleCoordinator.swift`; Phase 8 may refactor into a pure helper | no WebKit/persistence side effects |
-| Runtime Resource Observation | **Phase 8 target:** aggregate FloatTabs/WebKit working-set observation | expected new Web/performance read-only component after Gate 0 | input only; cannot kill/reload/reclaim or claim per-Slot RSS |
-| Attention / Generation Sensing | ChatGPT generation sensing, native Attention state, liveness fallback | `ChatGPTAttentionBridge.swift`, `WebAttentionCoordinator.swift` | Generating protects Runtime; Ready/unread does not own Runtime |
-| Response / Unread | response identity/extraction and durable unread handoff | `ChatGPTResponseBridge.swift`, `ChatGPTResponseExtraction.swift`, `ChatGPTUnreadResponseCoordinator.swift`, `UnreadResponseStore.swift` | durable unread survives Runtime reclamation |
-| Native Notification Projection | completion alert delivery and exact-Slot response routing | `FloatTabs/App/ChatGPTCompletionNotificationCoordinator.swift` | projection only; never owns Runtime/Profile state |
-| Window / Panel / Fullscreen | shell visibility, synchronization, fullscreen hosting, exact-Slot presentation | `FloatTabs/Panel/PanelController.swift`, `FloatingPanel.swift`, `FullscreenSourceHost.swift`, `ScreenPositioning.swift` | presentation truth only; no Runtime policy ownership |
+| Runtime Lifecycle | lifecycle execution, inactivity/protection boundaries, system-pressure reclaim | `FloatTabs/Web/SlotLifecycleCoordinator.swift` | sole canonical Runtime lifecycle writer |
+| Attention / Generation Sensing | ChatGPT generation sensing, native Attention state, liveness fallback | `ChatGPTAttentionBridge.swift`, `WebAttentionCoordinator.swift` | Generating protects Runtime; notification task must not change detector semantics |
+| Response Semantics / Unread | assistant-response DOM semantics, response identity/status, trusted interaction and durable unread handoff | `ChatGPTResponseExtraction.swift`, `ChatGPTResponseBridge.swift`, `ChatGPTUnreadResponseCoordinator.swift`, `UnreadResponseStore.swift` | current task may add one-shot non-persistent preview snapshot; durable unread remains separate truth |
+| Native Notification Projection | completion alert settings/auth/submission/replacement and default-action payload parsing | `FloatTabs/App/ChatGPTCompletionNotificationCoordinator.swift` | projection only; may receive Slot name + ephemeral preview; routing payload remains version/kind/slot_id only |
+| Window / Panel / Fullscreen | shell visibility, completion handoff, exact-Slot presentation, fullscreen hosting | `FloatTabs/Panel/PanelController.swift`, `FloatingPanel.swift`, `FullscreenSourceHost.swift`, `ScreenPositioning.swift` | presentation truth only; may resolve Slot name/request one-shot preview, but owns no notification-center or Runtime policy |
 | Focus / Input / Commands | native/Web focus, shortcuts, commands, click/drag routing | `FloatTabs/Web/WebFocusRouter.swift`, `FloatTabs/Hotkeys/AppCommandController.swift`, `GlobalHotkeyController.swift` | native focus and DOM focus remain distinct; no Runtime ownership |
-| Persistence & Recovery | durable Slot/Profile state, app preferences, backups, recovery data | `ProfileRepository.swift`, `AppPreferencesStore.swift`, `FloatTabsBackupService.swift` | memory-budget config is global app config; migration must not destroy user data |
-| Diagnostics | diagnostic events, incidents, privacy filtering, snapshots, long-term observation | `RuntimeDiagnostics.swift`, `RuntimeDiagnosticWriter.swift`, `RuntimeDiagnosticEvent.swift`, `LongTermPerformanceObservationCoordinator.swift` | evidence only; never memory/lifecycle policy truth |
+| Persistence & Recovery | durable Slot/Profile state, app preferences, backups, recovery data | `ProfileRepository.swift`, `AppPreferencesStore.swift`, `FloatTabsBackupService.swift` | current notification task adds no persisted preview/name/history |
+| Diagnostics | diagnostic events, incidents, privacy filtering, snapshots, long-term observation | `RuntimeDiagnostics.swift`, `RuntimeDiagnosticWriter.swift`, `RuntimeDiagnosticEvent.swift`, `LongTermPerformanceObservationCoordinator.swift` | evidence only; notification diagnostics may record bounded system-setting enums, never Slot name/preview text |
 | Website Cache / Storage | re-downloadable website-cache measurement/cleanup | `FloatTabs/Storage/WebsiteCacheCleanupCoordinator.swift`, `WebsiteCacheCleanupService.swift`, `WebsiteCachePolicy.swift` | cache cleanup is not Runtime cleanup |
 | Menu / Status Projection | menu-bar/status projection and entry actions | `FloatTabs/MenuBar/StatusItemController.swift` | projection only |
-| Tab Rail / Runtime Retention Controls | Automatic/Keep Loaded projection, Browser Profile/media controls | `FloatTabs/UI/ExternalTabRail.swift` | per-Slot preference only; does not decide global memory budget |
-| Global Settings | app settings, Browser/Performance/Advanced presentation | `FloatTabs/UI/GlobalSettingsController.swift`, `SettingsInformationArchitecture.swift` | Phase 8 target adds Advanced → Runtime & Memory; UI does not execute reclaim |
+| Tab Rail / Runtime Retention Controls | Automatic/Keep Loaded projection, Browser Profile/media controls | `FloatTabs/UI/ExternalTabRail.swift` | per-Slot preference only |
+| Global Settings | app settings, Browser/Performance/Advanced presentation | `FloatTabs/UI/GlobalSettingsController.swift`, `SettingsInformationArchitecture.swift` | notification task adds no settings UI |
 
-## Current shipped lifecycle truth
+## Current active notification route
 
-The merged production baseline is:
+```text
+ChatGPTAttentionBridge
+→ generationStarted / generationFinished
+→ WebAttentionCoordinator
+→ PanelController completion handoff
+→ ChatGPTUnreadResponseCoordinator
+→ hidden valid completion becomes durable unread .marked
+→ one-shot notification preview snapshot
+   ChatGPTResponseExtraction = assistant-root semantics
+   ChatGPTResponseBridge     = current WebView/document validity
+→ AppCoordinator composition
+→ ChatGPTCompletionNotificationCoordinator
+   settings/auth preflight
+   same-Slot withdrawal/replacement
+   system submission
+→ macOS notification center
+```
 
-`main@2b414982710b3f042fc7d6e9c88eb2d7117b4e38`
+Click route:
 
-Current shipped lifecycle:
+```text
+UNNotificationDefaultActionIdentifier
+→ bounded payload parse
+→ persistent Slot UUID
+→ PanelController.presentSlotFromCompletionNotification(slotID)
+→ TabStore exact Slot selection
+→ existing presentation/materialization
+→ WebViewPool restores Runtime if non-resident
+```
+
+A stale/deleted Slot fails closed. Never fall back to the current Slot.
+
+## Notification content/privacy route
+
+Current task target:
+
+```text
+notification title
+= normalized Slot/Web App display name
+
+notification body
+= bounded plain-text latest assistant preview
+  OR generic fallback when preview unavailable
+```
+
+App-owned routing payload remains:
+
+```text
+version
+kind
+slot_id
+```
+
+Do not place Slot name, preview text, prompt, URL, Browser Profile identity, document token, response identity or Runtime identity in `userInfo`.
+
+Do not persist or log Slot name/preview text.
+
+## Notification settings / diagnostics route
+
+`ChatGPTCompletionNotificationCoordinator` remains the only native notification system owner.
+
+It may read public `UNNotificationSettings` through its injected backend and record bounded enum facts for:
+
+- authorization status;
+- alert setting;
+- alert style;
+- Notification Center setting;
+- show-previews setting.
+
+System submission success does not prove a visible banner. Focus/DND suppression is not a supported directly-proven app fact and must not be diagnosed as root cause without evidence.
+
+## Current lifecycle truth preserved by the notification task
+
+Merged lifecycle state after Phase 8 re-scope:
 
 ```text
 Slot persistent configuration
@@ -50,187 +118,104 @@ Slot persistent configuration
 → Phase 6 restores reclaimed Runtime on demand
 ```
 
-Current shipped Phase 7 tuning remains:
+Healthy normal behavior:
 
 ```text
-normal Automatic target = 2
-inactive release path = 30s
-warning target = 1
-critical target = 0
+Automatic resident target = 2
+Automatic inactive release = 30s
 ```
 
-This is **current source truth**, not the future design target.
-
-## Frozen Phase 8 target lifecycle
-
-V6/Phase 8 target:
+System pressure:
 
 ```text
-persistent Slot/Profile/session
-→ Runtime materializes on demand
-→ resource monitor supplies aggregate FloatTabs/WebKit footprint fact
-→ memory-budget policy + protection facts choose at most one reclaim candidate
-→ SlotLifecycleCoordinator revalidates and executes
-→ WebViewPool hibernates
-→ fresh resource observation
-→ continue only if still required
-→ Phase 6 restores on next use
+warning
+→ progressively reclaim eligible inactive/unprotected Automatic
+→ Keep Loaded preserved
+
+critical
+→ Automatic first
+→ then inactive/unprotected Keep Loaded
+
+normal
+→ cancel pending pressure progression
+→ no mass restore
 ```
 
-Normal target:
-
-```text
-Memory Budget = Auto | Custom | Unlimited
-no fixed resident-count ceiling
-high watermark = 105%
-low watermark = 90%
-proactive long-idle cleanup = OFF by default
-```
-
-Initial Auto reference:
-
-```text
-clamp(physical RAM × 20%, 1.5 GiB, 6 GiB)
-```
-
-The existing 30-second value becomes a **normal budget candidate anti-thrash grace**, not an unconditional Runtime lifetime.
-
-## Protection route
-
-Hard protections:
-
-```text
-active / actually presented
-fullscreen source
-supplemental visible Web surface
-Attention Generating
-active/pending allowed-background-media protection
-current materialization/restoring ownership
-```
-
-These do not by themselves require Runtime residency after generation finishes:
-
-```text
-Attention Ready
-durable unread
-native completion notification
-mere restore snapshot
-```
-
-Keep Loaded:
-
-- excluded from normal budget reclaim;
-- may cause normal budget oversubscription;
-- warning still prefers Automatic reclaim;
-- critical may reclaim inactive/unprotected Keep Loaded after Automatic candidates.
-
-## Resource measurement route
-
-Phase 8 Gate 0 must prove a supported production-safe aggregate measurement mechanism before budget-based reclaim is enabled.
-
-Desired fact:
-
-```text
-FloatTabs host
-+ FloatTabs-attributable WebKit helper processes
-= aggregate observed footprint
-```
-
-Constraints:
-
-- no exact per-Slot WebContent memory attribution;
-- no direct process killing;
-- no lifecycle side effect from the monitor;
-- unavailable measurement must be explicit;
-- do not substitute Runtime count for GiB.
-
-The existing Python benchmark's launchd responsible-PID attribution is evidence/reference only until a production-safe in-app mechanism is proven.
+Generating remains hard-protected.
 
 ## Background-generation route
 
-Current semantic ownership remains:
-
 ```text
 ChatGPTAttentionBridge
-→ normalized generation observation
-→ WebAttentionCoordinator
-→ Generating hard protection query
+→ event-first generation observation
+→ hidden fallback watchdog only while needed
+   <30s       = 2s
+   30–120s    = 5s
+   >=120s     = 10s
+→ WebAttentionCoordinator protection
 → SlotLifecycleCoordinator
 ```
 
-Phase 8 WP5 may reduce hidden observer/probe/diagnostic cost but may not deep-freeze/destroy a Runtime while arbitrary generation must continue.
+The current notification task may perform one post-completion preview snapshot. It must not add polling or keep a completed Runtime resident solely for preview.
 
-On completion:
+## Deferred aggregate-memory route
 
-```text
-Generating ends
-→ Ready/unread + native notification
-→ hard generating protection ends
-→ normal budget lifecycle resumes
-```
+The aggregate-memory budget track remains platform-blocked. Do not implement:
 
-## Persistence route
+- guessed/correlation per-tab memory;
+- Runtime-count-as-GiB proxy;
+- private WebKit SPI;
+- root-only/restricted-entitlement attribution;
+- destructive Browser Profile/session reset.
 
-### Per-Slot
+The accepted Phase 8 feasibility report remains the evidence boundary.
 
-- `WebAppProfile.runtimeRetentionPreference` remains `Automatic | Keep Loaded`;
-- legacy Hot/Warm/Cold stays compatibility-only.
+## Current verification routes
 
-### Global Phase 8 target
+Notification task focused tests:
 
-- `AppPreferencesStore` owns `Auto / Custom / Unlimited` memory-budget configuration;
-- missing value defaults to Auto;
-- Custom is validated/clamped;
-- backup includes the new global preference when global performance settings are within backup scope;
-- old Warm/Cold stored keys remain non-destructively retained but unused.
+- `ChatGPTCompletionNotificationTests.swift` — content, settings/auth, payload, replacement, foreground presentation;
+- `ChatGPTResponseExtractionTests.swift` — assistant-only preview semantics/normalization/cap;
+- `ChatGPTResponseBridgeTests.swift` — one-shot snapshot identity/invalidation/stale-result rejection;
+- `WebAttentionCrossFeatureTests.swift` — hidden `.marked` composition, exact Slot route, non-resident restore, sound/unread regressions;
+- diagnostics/privacy regression only if new fields require it.
 
-Browser Profile/session data is outside this configuration migration.
+Broad gate:
 
-## Verification routes
-
-Phase 8 expected coverage includes:
-
-- `AppPreferencesStoreTests.swift` — budget defaults/normalization/change projection;
-- new resource-monitor/policy tests — deterministic observations and one-at-a-time decisions;
-- `WebAttentionLifecycleTests.swift` — hard protection + pressure ordering;
-- `WebViewPoolTests.swift` — hibernate/restore/runtime identity;
-- `SettingsInformationArchitectureTests.swift` — Advanced Runtime & Memory surface;
-- `FloatTabsBackupServiceTests.swift` — only if backup scope changes;
-- `ChatGPTAttentionBridgeTests.swift` — hidden generation efficiency/completion correctness;
-- `ExternalShellTests.swift` — restore/presentation regression where relevant.
-
-Required repository host gate remains `Build & Test (Apple Silicon arm64)` on `macmini-floattabs-01`.
-
-Phase 8 must use a new acceptance path/criteria; the Phase 7 benchmark remains historical evidence and must not assert `resident target = 2` as Phase 8 success.
+- full XCTest;
+- Debug arm64;
+- Release arm64;
+- native arm64 architecture;
+- exact scope/ownership/privacy audit;
+- literal-head `Build & Test (Apple Silicon arm64)` on `[self-hosted, macOS, ARM64, mac-mini-ci]`;
+- QA DMG when triggered;
+- independent review;
+- final human native-notification acceptance before merge.
 
 ## Incident routing
 
-For runtime/performance failures, classify before mutation:
+For notification failures classify before mutation:
 
 ```text
-Slot/config
-vs memory-budget configuration
-vs aggregate resource observation
-vs budget decision
-vs lifecycle execution
-vs WebView runtime/navigation
-vs Phase 6 materialization/readiness
-vs Attention sensing
-vs Response/Unread
-vs Window/Fullscreen
-vs Focus/Input
-vs Persistence/migration
-vs Website Cache
-vs Native Notification
+generation completion detected?
+→ hidden/visible presentation classification?
+→ durable unread .marked?
+→ preview snapshot trusted/fallback?
+→ notification settings/auth state?
+→ system request submitted?
+→ macOS may present banner/list according to system policy
+→ default action received?
+→ exact Slot route succeeded?
+→ Runtime restore/presentation succeeded?
 ```
 
-Reload/reset/restart prove only a recovery boundary. Preserve root cause `UNKNOWN` when evidence cannot prove causation.
+Do not equate “no visible banner” with “FloatTabs did not submit”.
 
 ## Structural notes
 
-- `SlotLifecycleCoordinator` remains the only Runtime reclaim executor.
-- `WebViewPool.onResidentSetChange` remains an event trigger, not policy authority.
-- resource observation is read-only policy input.
-- diagnostics may record budget/measurement/reclaim events but cannot drive product truth.
-- Phase 6 restore and Phase 8 reclaim policy remain separate ownership concerns.
-- V5/Phase 7 fixed-count behavior is historical once Phase 8 lands; preserve it in Git/history/archive rather than compatibility product branches.
+- `SlotLifecycleCoordinator` remains the only Runtime reclaim writer.
+- `WebViewPool` remains Runtime mechanism owner.
+- `ChatGPTCompletionNotificationCoordinator` remains native notification system owner.
+- `ChatGPTResponseBridge` may expose one-shot preview data but does not become notification policy or unread truth.
+- `PanelController` may compose current Slot facts but does not own system notification settings/submission.
+- diagnostics remain evidence only.
