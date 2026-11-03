@@ -6,14 +6,14 @@
 
 ## Mode
 
-**MODE: ADAPTIVE LIFECYCLE — WP2 XCTEST PROCESS-ISOLATION CORRECTIVE**
+**MODE: ADAPTIVE LIFECYCLE — WP2 MACHINE GATE GREEN / WAITING FOR HUMAN UI ACCEPTANCE**
 
-Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / WP2-001` — **ACTIVE / TEST-RUNNER PROCESS-ISOLATION CORRECTIVE AUTHORIZED**.
+Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / WP2-001` — **ACTIVE / HUMAN UI ACCEPTANCE PENDING**.
 
 Branch: `codex/adaptive-lifecycle-wp2-policy`  
 Draft PR: `#195`  
 Baseline: `main@2a52800f770266f7c901eb612a0b319ddca142df`  
-WP2 corrective semantic head: `cc44537635ef451a78dc8894484c9ce9328de936`  
+Machine-verified implementation head: `1f33637b215cf742e20f5a8012818ac14ad459c9`  
 Durable policy: `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`
 
 ## Verified WP2 state
@@ -30,18 +30,25 @@ DEBUG_RELEASE_ARM64=PASS
 NATIVE_ARM64=PASS
 QA_DMG=PASS
 CORRECTIVE_ATTRIBUTION=DISPROVEN
-FULL_XCTEST_SINGLE_PROCESS=FAIL
 XCTEST_PROCESS_ISOLATION_EFFECT=SUPPORTED
-SELF_HOSTED_CI=AWAITING_DURABLE_ISOLATION_CORRECTIVE
-HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
+TEST_RUNNER_ISOLATION_IMPLEMENTED=YES
+CANONICAL_INVENTORY_COVERAGE=PASS
+LOCAL_REPEAT_SPLIT_RUN=PASS
+SELF_HOSTED_PR_CI=PASS
+PARTITION_A_CI=PASS
+PARTITION_B_CI=PASS
+EXACT_DIFF_AUDIT=PASS
+NO_PRODUCTION_SOURCE_MUTATION=YES
+MACHINE_GATE=GREEN
+HUMAN_UI_ACCEPTANCE=PENDING
 PR_195=OPEN_DRAFT_UNMERGED
 WP3=NOT_STARTED
 WP4=NOT_STARTED
 ```
 
-## Incident boundary
+## XCTest incident disposition
 
-Verified findings:
+The blocked full-suite incident is closed at the evidence-supported corrective boundary:
 
 ```text
 WEBFOCUS_FIXTURE_TEARDOWN_OMISSION=CONFIRMED_DEFECT
@@ -51,88 +58,66 @@ AFFECTED_WEBVIEW_JS_NOT_READY=DISPROVEN
 NAVIGATION_COMPLETION_MISMATCH=SUPPORTED
 WEBKIT_NAVIGATION_PIPELINE_STALL_AFTER_ACCUMULATED_SAME_XCTEST_HOST_ACTIVITY=SUPPORTED_BOUNDARY
 ROOT_CAUSE_PROVEN=NO
+SAFE_CORRECTIVE_BOUNDARY=TEST_RUNNER_PROCESS_ISOLATION
 ```
 
-At the first failing affected test after the accumulated suite prefix, the WebView remained alive and could execute `1+1`, but its new `loadHTMLString` navigation never emitted provisional-start, commit, finish, or failure callbacks and remained `isLoading=true`. DOM-dependent JavaScript failed because the expected document never loaded.
+The internal WebKit/XPC mechanism remains unknown and is not required to close WP2. Do not reopen private-mechanism diagnosis unless the isolated canonical gate regresses again.
 
-The private WebKit/XPC mechanism remains unknown. Correlated WebKit/XPC log messages are supporting observations only.
+## Durable process-isolation corrective — verified
 
-## Process-isolation validation — complete
+Commit `1f33637b215cf742e20f5a8012818ac14ad459c9` changes only `.github/workflows/macos-ci.yml`.
 
-The canonical inventory contains 1165 unique tests. Validation split the inventory into two fresh XCTest processes without source/assertion changes:
+Canonical unit testing now uses two mandatory fresh XCTest processes:
+
+- **Partition A:** all canonical tests except `WebFocusAdapterTests`, `WebViewFactoryTests`, and `WebsiteLayoutGeometryRegressionTests`;
+- **Partition B:** exactly those three WebKit-heavy classes.
+
+The partition is class-filter driven; the observed `1103 + 62 = 1165` count is validation evidence, not a hard-coded permanent inventory.
+
+Verified local evidence:
 
 ```text
-PARTITION_A=1103 tests
-PARTITION_B=62 tests
-UNION_A_B=1165_CANONICAL_TESTS
+RUN_1_A=PASS_1103_OF_1103
+RUN_1_B=PASS_62_OF_62
+RUN_2_A=PASS_1103_OF_1103
+RUN_2_B=PASS_62_OF_62
+UNION_A_B=CANONICAL_INVENTORY
 INTERSECTION_A_B=EMPTY
 OMITTED_TESTS=NONE
 DUPLICATED_TESTS=NONE
-ASSERTIONS_CHANGED=NO
-SOURCE_CHANGED=NO
+AFFECTED_LIFECYCLE_REGRESSIONS=PASS_304_OF_304
 ```
 
-Partition B contains exactly:
-
-- `WebFocusAdapterTests`
-- `WebViewFactoryTests`
-- `WebsiteLayoutGeometryRegressionTests`
-
-Two complete split runs passed:
+Verified literal implementation-head remote evidence:
 
 ```text
-SPLIT_RUN_1_A=PASS_1103_OF_1103
-SPLIT_RUN_1_B=PASS_62_OF_62
-SPLIT_RUN_2_A=PASS_1103_OF_1103
-SPLIT_RUN_2_B=PASS_62_OF_62
-ORIGINAL_13_METHOD_FAILURE_FAMILY=ABSENT_UNDER_SPLIT
-NAVIGATION_STALL_REPRODUCED_UNDER_SPLIT=NO
-XCTEST_PROCESS_ISOLATION_EFFECT=SUPPORTED
+MACOS_CI_RUN=41579374549_PASS
+PARTITION_A_STEP=PASS
+PARTITION_B_STEP=PASS
+QA_DMG_RUN=41579374564_PASS
 ```
 
-This establishes same-XCTest-host accumulated WebKit state as a necessary environment condition for the observed incident and makes **test-runner process isolation the minimum evidence-supported corrective boundary**. It does not prove the internal WebKit root cause.
+Fresh exact-diff audit confirms the corrective commit is one commit ahead of the prior control head and changes only `.github/workflows/macos-ci.yml` (`+51/-14`); production and test source are untouched.
 
-## Current corrective authorization
+## Fixture-cleanup experiment disposition
 
-Make the validated split durable in the repository/self-hosted CI while preserving the complete canonical test inventory and all existing assertions.
+The preserved fixture-teardown experiment is **SUPERSEDED FOR THIS TASK / NOT FOR MERGE**.
 
-Required behavior:
+Its teardown omission remains a legitimate test-hygiene observation, but the experiment did not affect the incident and must not be mixed into PR #195. No successor hygiene task is active. The local evidence workspaces may remain preserved through WP2 closeout and can be cleaned after the PR disposition is final.
 
-1. run all canonical tests except the three WebKit-heavy classes in one fresh XCTest process;
-2. run those three classes together in a second fresh XCTest process;
-3. preserve exact inventory coverage; current 1103 + 62 = 1165 is validation evidence, not a permanent hard-coded count;
-4. new tests must not silently disappear from the canonical machine gate;
-5. do not change production behavior, WebsiteData semantics, process-pool policy, lifecycle policy, assertions, or timeouts;
-6. validate locally and through literal-head self-hosted CI before any merge decision.
+## Human UI acceptance gate
 
-A small runner/helper or CI workflow change is authorized if required to make the split deterministic. The corrective belongs to test-runner/CI architecture, not production runtime code.
+Machine acceptance is complete. WP2 now waits for explicit human product acceptance using the verified QA build from implementation head `1f33637b` (or a later control-only head with identical product source).
 
-## Preserved experiments
+Human checks should confirm:
 
-Preserve until the durable corrective has passed and evidence is reconciled:
+1. existing Slots, Browser Profiles, logins and sessions remain intact;
+2. `Automatic` slots switch/show/hide normally and recover cleanly after inactivity without blank/stuck UI or requiring manual reload/restart;
+3. `Keep Loaded` slots remain immediately usable across inactivity and switching;
+4. Runtime Retention selection persists after relaunch;
+5. active/generating/media/fullscreen protected behavior shows no visible lifecycle regression.
 
-- `/Volumes/Jack-Dev/Projects/FloatTabs-adaptive-lifecycle-wp2-policy` — uncommitted fixture-cleanup experiment;
-- `/private/tmp/FloatTabs-WP2-DIAG-6a55` — process-state diagnostic checkout;
-- `/private/tmp/FloatTabs-WP2-ISO-VAL` — process-isolation validation checkout.
-
-The fixture-cleanup experiment is not required for the isolation corrective and must not be implicitly committed with it.
-
-## Machine acceptance gate
-
-```text
-TEST_RUNNER_ISOLATION_IMPLEMENTED=YES
-CANONICAL_INVENTORY_COVERAGE_PROVEN=YES
-PARTITION_A=PASS
-PARTITION_B=PASS
-REPEAT_SPLIT_RUN=PASS
-AFFECTED_LIFECYCLE_REGRESSIONS=PASS
-SELF_HOSTED_PR_CI=PASS
-REQUIRED_QA_DMG_JOB=PASS_IF_TRIGGERED
-NO_PRODUCTION_SOURCE_MUTATION=YES
-EXACT_DIFF_AUDIT=PASS
-```
-
-Human UI acceptance remains blocked until this machine gate is green and reconciled. Do not merge PR #195, release, or begin WP3/WP4 before then.
+A human PASS is required before PR #195 may leave Draft/merge consideration. A human FAIL reopens the task with the exact observed product behavior; do not merge around a failed acceptance.
 
 ## Preserved WP2 policy / safety boundary
 
@@ -143,3 +128,5 @@ Human UI acceptance remains blocked until this machine gate is green and reconci
 - critical may include RECENT Automatic but never Keep Loaded or hard-protected Runtime;
 - pressure progression remains fresh-fact, oldest-first, one-step-at-a-time;
 - WP1 presentation/readiness, generation/Attention, media/fullscreen, notification privacy/routing, and Browser Profile/session data safety remain regression boundaries.
+
+Do not merge PR #195, release, or begin WP3/WP4 until human UI acceptance and final Project Governance closeout are complete.
