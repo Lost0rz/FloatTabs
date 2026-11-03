@@ -2,218 +2,152 @@
 
 **Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
 **Card ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001`  
-**Title:** WP2 closeout hardening — reconcile CI/test scope before long-run diagnostics observation  
-**Status:** **ACTIVE / CI-TEST BOUNDARY CORRECTIVE IMPLEMENTED @ `6c6665a7` — DRAFT-FAST GATE MACHINE-VERIFIED; CONTROL-ONLY SYNC VERIFICATION IN FLIGHT**  
-**Mode:** `EXECUTE / TEST+CI ONLY / EXISTING DRAFT PR / NO PRODUCT MUTATION / NO MERGE OR RELEASE`  
-**Task class:** `CI / TEST GOVERNANCE + WP2 CLOSEOUT`  
+**Title:** WP2 closeout — Runtime Diagnostics coverage gap audit before long-run observation  
+**Status:** **ACTIVE / READ-ONLY DIAGNOSTICS GAP AUDIT AUTHORIZED**  
+**Mode:** `AUDIT / EXISTING DRAFT PR / NO SOURCE MUTATION / NO MERGE OR RELEASE`  
+**Task class:** `WEB RUNTIME / DIAGNOSTICS EVIDENCE / WP2 CLOSEOUT`  
 **Baseline:** `origin/main@2a52800f770266f7c901eb612a0b319ddca142df`  
 **Branch:** `codex/adaptive-lifecycle-wp2-policy`  
 **PR:** `#195 OPEN / DRAFT / UNMERGED`
 
-## Decision
+## Authority
 
-Short-run human smoke on the installed WP2 QA build has not exposed a visible product defect. Long-idle and long-duration confidence will be collected through normal-use Runtime Diagnostics rather than requiring one long blocking manual session.
+- `AGENTS.md`
+- `CURRENT_STATUS.md`
+- `docs/architecture/DOMAIN_MAP.md`
+- `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`
+- production source/tests at current PR head
 
-Before any diagnostics augmentation, the repository must first reduce unnecessary CI/test churn and retire only evidence-proven stale test material.
+The CI/test-boundary corrective is closed and verified. No test or CI mutation remains active in this work package.
 
-## Active work package — CI / test boundary reconciliation
+## Objective
 
-### Objective A — stop control-only synchronization from rerunning heavy CI
+Perform a read-only audit of existing Runtime Diagnostics and determine whether normal-use exported JSONL can reconstruct the WP2 lifecycle chain with enough evidence to support long-run closeout.
 
-The current `pull_request` path filter is not sufficient because GitHub evaluates the PR's three-dot changed-file set. Once a PR contains engineering changes, a later control-only commit still matches those paths.
+Do **not** add logging yet. First prove what is already observable and what, if anything, is missing.
 
-Implement a bounded synchronization classifier that distinguishes the **new PR head delta** from the accumulated PR diff.
+## Required evidence matrix
 
-Required behavior:
+For each row below, return `COMPLETE`, `PARTIAL`, or `MISSING`, with exact current event/field/symbol evidence:
 
-- `pull_request` `synchronize` with only control/docs delta must finish the required check without running Debug build, Release build, XCTest partitions, or QA DMG;
-- engineering delta must still enter the appropriate machine gate;
-- opened/reopened/final explicit verification paths must fail safe to real verification rather than silently skip;
-- current required-check semantics must remain merge-safe;
-- do not rely only on deleting `CURRENT_STATUS.md` / `CURRENT_TASK.md` from `paths:`.
+1. **Slot identity** — exact Slot correlation across lifecycle events.
+2. **Physical Runtime identity** — generation / WebView instance / document epoch or equivalent identity sufficient to distinguish old vs rebuilt Runtime.
+3. **Runtime retention preference** — `Automatic` vs `Keep Loaded` at the decision point.
+4. **Automatic stage** — RECENT / IDLE / LONG_IDLE and enough timing/inactive-age evidence to explain stage resolution.
+5. **Protection state** — media / Attention / fullscreen / active-visible or other hard-protection reason used by lifecycle policy.
+6. **Reclaim eligibility** — why a Runtime was or was not eligible at normal long-idle or memory-pressure evaluation.
+7. **Actual reclaim outcome** — requested release vs actual hibernate/teardown completion, with reason.
+8. **Subsequent materialization** — when a reclaimed Runtime is requested again, whether a new Runtime is materialized and which identity owns it.
+9. **Readiness/navigation outcome** — loading / ready / failed / navigation finish or stall evidence after rematerialization.
+10. **Recovery boundary** — reload/reset/restart/manual recovery events when they occur, without treating recovery as root-cause proof.
+11. **Long-run checkpoint usefulness** — whether the existing 60-second checkpoint includes enough per-Slot/runtime lifecycle context to correlate trends over several hours/days.
+12. **Export completeness/privacy** — whether exported JSONL preserves the above evidence within current bounded retention/privacy rules.
 
-GitHub synchronize payload `before` / `after` may be used for incremental classification. Preserve normal merge-context testing for the heavy gate; do not accidentally replace it with head-only product verification unless the difference is explicitly justified and accepted.
+## Source scope to inspect
 
-### Objective B — make routine Draft verification proportional
+At minimum inspect the current implementations and relevant tests around:
 
-Routine Draft iteration must not execute the full expensive closeout gate on every synchronization.
+- `FloatTabs/Diagnostics/**`
+- `LongTermPerformanceObservationCoordinator`
+- `RuntimeDiagnosticWriter`
+- `RuntimeDiagnostics`
+- `PanelController.captureLongTermDiagnosticsCheckpoint`
+- `SlotLifecycleCoordinator`
+- `WebViewPool` runtime identity / hibernate / materialization paths
+- navigation/readiness observer paths
+- existing diagnostics/privacy tests
 
-Target policy:
+Use `docs/architecture/DOMAIN_MAP.md` to locate additional authoritative entry points instead of broad repository wandering.
 
-```text
-CONTROL/DOCS-ONLY SYNCHRONIZE
-  -> lightweight successful scope check only
+## Audit rules
 
-DRAFT ENGINEERING SYNCHRONIZE
-  -> fast machine gate sufficient to catch compile/configuration breakage
-  -> no automatic full canonical XCTest + QA DMG on every small iteration
+- Existing evidence wins over proposed new instrumentation.
+- Do not create duplicate event families if existing events can be correlated.
+- A field present only during memory pressure does not automatically satisfy normal long-idle observability.
+- A Slot ID alone is insufficient for rebuilt-runtime attribution when the question requires physical Runtime identity.
+- A count or aggregate host metric must not be used as a substitute for unsupported WebContent process attribution.
+- Diagnostics may record facts but must not become a lifecycle decision owner.
+- Do not infer root cause from reload/restart/hibernate success.
 
-FINAL / EXPLICIT CLOSEOUT GATE
-  -> full canonical XCTest coverage using mandatory Partition A + Partition B fresh processes
-  -> Debug + Release build
-  -> native arm64 verification
-  -> QA DMG when required
+## Output required
 
-MAIN
-  -> retain strong post-merge verification appropriate to release safety
-```
-
-The implementation may choose the smallest workflow structure that preserves these semantics. Avoid adding a large CI framework.
-
-### Objective C — test inventory / stale material audit
-
-Audit `FloatTabsTests` against current architecture/product authority and classify each removal candidate as one of:
-
-- CURRENT_REQUIRED
-- DUPLICATE_CURRENT_COVERAGE
-- RETIRED_CONTRACT
-- TEMPORARY_INCIDENT_HARNESS
-- UNKNOWN_KEEP
-
-Only `DUPLICATE_CURRENT_COVERAGE`, `RETIRED_CONTRACT`, or `TEMPORARY_INCIDENT_HARNESS` with concrete evidence may be removed.
-
-Do not delete tests merely because they are old, slow, flaky, numerous, or inconvenient.
-
-In particular preserve current coverage for:
-
-- Browser Profile / site-data isolation and persistence;
-- Slot/runtime lifecycle policy;
-- data/session safety;
-- focus/input;
-- fullscreen/window synchronization;
-- Attention/notification behavior still in product scope;
-- persistence/recovery;
-- current WebKit integration boundaries.
-
-The preserved fixture-teardown experiment is still `SUPERSEDED_FOR_THIS_INCIDENT / NOT_FOR_MERGE`; do not cherry-pick it into this corrective.
-
-### Objective D — local historical artifact cleanup
-
-After evidence needed for the current task is identified, stale `/private/tmp/FloatTabs-*` and obsolete `.xcresult`/DerivedData diagnostic artifacts may be listed for cleanup.
-
-Do not delete the currently identified preserved evidence checkouts until their disposition is explicitly returned. Never delete Browser Profile, website session/data, preferences, backup, Application Support user data, or installed user configuration.
-
-## Allowed mutation
-
-- `.github/workflows/**` relevant to FloatTabs CI / QA DMG;
-- small `tools/ci/**` helper if it materially reduces duplicated workflow logic;
-- test project/source only for evidence-proven stale/retired test cleanup;
-- CURRENT_STATUS / CURRENT_TASK final reconciliation after verification.
-
-## Not authorized in this work package
-
-- FloatTabs production behavior/source changes;
-- Runtime lifecycle policy changes;
-- WebsiteDataStore / WKProcessPool changes;
-- Browser Profile/session/cookie/site-data clearing;
-- assertion weakening to make tests pass;
-- timeout/retry inflation;
-- permanent skipping of current required coverage;
-- diagnostics production mutation yet;
-- WP3/WP4;
-- merge or release.
-
-If removing a candidate test requires changing current production semantics or current contract, STOP and return it as `UNKNOWN_KEEP`.
-
-## Corrective execution record (2026-11-03)
-
-Implementation `6c6665a7` (`.github/workflows/macos-ci.yml`, `.github/workflows/qa-dmg.yml` only; no production files, no test deletions):
-
-- Objective A/B: always-reporting `pull_request` trigger + `classify` job using the synchronize event's incremental `before -> after` delta. Gates: `control-only` (scope-check success, no builds) / `draft-fast` (package lock + Debug compile) / `full` (Release + arm64 + Partition A + Partition B). `ready_for_review`, opened/reopened, dispatch, push, and unresolvable deltas fail safe to `full`. Concurrency group cancels superseded queued runs per ref.
-- Objective C: all 38 tracked test files audited; zero removals met the evidence bar; canonical coverage unchanged (details in CURRENT_STATUS.md).
-- Objective D: closed-phase `/private/tmp` diagnostics and stale DerivedData deleted; preserved evidence set intact (details in CURRENT_STATUS.md).
-
-Machine evidence (PR #195):
+Return a compact coverage matrix:
 
 ```text
-DRAFT_ENGINEERING_FAST_GATE=PASS (run 41584306688, head 6c6665a7:
-  required check success 53s, Debug build pass,
-  Release/arch-verify/Partition A/Partition B skipped)
-QA_DMG_ON_ENGINEERING_DRAFT_SYNC=NOT_RUN (no QA DMG run for 6c6665a7)
-CLASSIFIER_LOCAL_SIMULATION=13/13 CASES EXPECTED (incl. zero/unreachable before)
+EVIDENCE_ITEM | STATUS | EXISTING_EVENT/FIELD | GAP | DECISION_IMPACT
 ```
 
-The push carrying this control reconciliation is itself the control-only synchronize verification event; its run must show the scope-check-only path with the required check succeeding and no QA DMG run.
+Then return one of:
 
-## Verification gate
+### A. `EXISTING_DIAGNOSTICS_SUFFICIENT`
+No production diagnostics mutation is needed. Recommend exact user settings/observation window/export procedure and the fields/events to inspect after upload.
 
-The corrective is accepted only if evidence proves all of the following:
+### B. `BOUNDED_AUGMENTATION_REQUIRED`
+List only the minimum missing evidence required for WP2 closeout, including:
 
-```text
-CONTROL_ONLY_SYNC_HEAVY_CI=SKIPPED
-CONTROL_ONLY_SYNC_REQUIRED_CHECK=PASS
-DRAFT_ENGINEERING_FAST_GATE=PASS
-FINAL_FULL_GATE_AVAILABLE=YES
-FINAL_PARTITION_A_REQUIRED=YES
-FINAL_PARTITION_B_REQUIRED=YES
-FINAL_CANONICAL_COVERAGE_NOT_REDUCED=YES
-QA_DMG_NOT_RUN_ON_CONTROL_ONLY_SYNC=YES
-PRODUCTION_FILES_CHANGED=NONE
-CURRENT_REQUIRED_TESTS_REMOVED=NONE
-```
+- exact production owner/file where evidence should be emitted;
+- proposed event/field names;
+- correlation identity used;
+- whether it is periodic or event-driven;
+- privacy/cardinality/performance impact;
+- focused tests required;
+- explicit proof that lifecycle behavior remains unchanged.
 
-For any removed tests, return exact file/method evidence and the current authority that makes them obsolete or duplicate.
+Do not implement the proposal in this audit.
 
-## Next work package — blocked until this one closes
+## Not authorized
 
-`WP2 LONG-RUN DIAGNOSTICS COVERAGE AUDIT / AUGMENTATION`
+- production source mutation;
+- test source mutation;
+- workflow mutation;
+- lifecycle policy changes;
+- persistence/profile/session/cookie/site-data changes;
+- reload/retry/reset behavior changes;
+- private WebKit SPI;
+- merge/release;
+- WP3/WP4.
 
-Existing diagnostics already provide a 60-second long-term checkpoint, JSONL local history/export, bounded retention and several lifecycle events. The next stage must first prove what WP2 evidence is missing, then add only the minimum fields/events required to reconstruct:
+## STOP conditions
 
-```text
-slot/runtime identity
-runtime retention preference
-Automatic stage / inactive age
-protection state + reason
-reclaim eligibility / reason
-actual teardown/hibernate outcome
-subsequent materialization/readiness outcome
-manual reload/restart/recovery boundary when observed
-```
+STOP and return the ambiguity if:
 
-Do not redesign the diagnostics subsystem if existing events can already answer the question.
-
-## Merge / release gate
-
-```text
-PR_195=OPEN_DRAFT_UNMERGED
-MERGE_READY=NO
-RELEASE_READY=NO
-WP3=NOT_STARTED
-WP4=NOT_STARTED
-```
-
-After CI/test-boundary closeout, return to Project Governance before starting diagnostics mutation.
+- an evidence item depends on unsupported WebContent-process attribution;
+- the only way to observe a fact would change runtime ownership/lifecycle behavior;
+- a proposed field could expose URL/content/session/private user data beyond current privacy rules;
+- current source/authority is inconsistent enough that a logging proposal would encode the wrong product truth.
 
 ## Return contract
 
 ```text
-START_HEAD
-FINAL_HEAD
-FILES_CHANGED
-PRODUCTION_FILES_CHANGED
+START_HEAD =
+AUDIT_HEAD =
+FILES_READ =
+FILES_CHANGED = NONE
 
-CI_TRIGGER_CLASSIFICATION_DESIGN
-CONTROL_ONLY_SYNC_RESULT
-DRAFT_ENGINEERING_GATE_RESULT
-FINAL_FULL_GATE_RESULT
-QA_DMG_TRIGGER_RESULT
+COVERAGE_MATRIX =
+SLOT_IDENTITY = COMPLETE|PARTIAL|MISSING
+RUNTIME_IDENTITY = COMPLETE|PARTIAL|MISSING
+RETENTION_PREFERENCE = COMPLETE|PARTIAL|MISSING
+AUTOMATIC_STAGE = COMPLETE|PARTIAL|MISSING
+PROTECTION_STATE = COMPLETE|PARTIAL|MISSING
+RECLAIM_ELIGIBILITY = COMPLETE|PARTIAL|MISSING
+RECLAIM_OUTCOME = COMPLETE|PARTIAL|MISSING
+REMATERIALIZATION = COMPLETE|PARTIAL|MISSING
+READINESS_NAVIGATION = COMPLETE|PARTIAL|MISSING
+RECOVERY_BOUNDARY = COMPLETE|PARTIAL|MISSING
+LONG_RUN_CHECKPOINT = COMPLETE|PARTIAL|MISSING
+EXPORT_PRIVACY = COMPLETE|PARTIAL|MISSING
 
-TEST_INVENTORY_AUDITED
-REMOVED_TESTS
-REMOVAL_EVIDENCE
-CURRENT_REQUIRED_TESTS_REMOVED
+VERDICT = EXISTING_DIAGNOSTICS_SUFFICIENT | BOUNDED_AUGMENTATION_REQUIRED | BLOCKED
+MINIMUM_AUGMENTATION =
+PROPOSED_FILES =
+PROPOSED_EVENTS_FIELDS =
+FOCUSED_TESTS_REQUIRED =
+PRODUCTION_BEHAVIOR_CHANGE_REQUIRED = NO
+ROOT_CAUSE_CLAIM = NONE
 
-STALE_LOCAL_ARTIFACTS_IDENTIFIED
-PRESERVED_EVIDENCE_UNCHANGED
-
-SELF_HOSTED_RUNNER_HEAVY_WORK_FOR_CONTROL_ONLY
-EXACT_DIFF_AUDIT
-COMMIT
-PUSH
-PR_STATE
-MERGE=NOT_MERGED
-RELEASE=NOT_RELEASED
-
-RECOMMENDED_NEXT_BOUNDARY
+PR_STATE = OPEN_DRAFT_UNMERGED
+MERGE = NOT_MERGED
+RELEASE = NOT_RELEASED
+RECOMMENDED_NEXT_BOUNDARY =
 ```
