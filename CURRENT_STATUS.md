@@ -41,7 +41,7 @@ The user has exercised the installed QA build and reports no visible issue in or
 
 WP2 closeout is now intentionally ordered:
 
-1. **CI / test boundary reconciliation — ACTIVE**
+1. **CI / test boundary reconciliation — CORRECTIVE IMPLEMENTED @ `6c6665a7` / CONTROL-ONLY SYNC VERIFICATION IN FLIGHT**
 2. **Runtime diagnostics coverage audit / bounded augmentation — NOT STARTED**
 3. **Normal-use observation window + exported diagnostics audit — NOT STARTED**
 4. **Final exact-diff / literal-head reconciliation → merge decision → release DMG — BLOCKED**
@@ -52,9 +52,21 @@ Do not start diagnostics mutation before the CI/test boundary is reconciled and 
 
 The current PR workflow is too broad for the repository's control-plane workflow. `macos-ci.yml` includes product/test/project/workflow paths plus `AGENTS.md`, `CURRENT_STATUS.md`, and `CURRENT_TASK.md`. More importantly, GitHub `pull_request` path filters evaluate the PR's three-dot changed-file set rather than only the latest synchronization delta. Once an open PR already contains product changes, a later control-only commit can therefore retrigger the heavy job even when the new commit changes only control documents.
 
-Observed consequence on PR #195: control-only reconciliation commits repeatedly occupied the self-hosted FloatTabs runner and reran Debug/Release/XCTest work after the implementation head was already machine-green.
+Observed consequence on PR #195: control-only reconciliation commits repeatedly occupied the self-hosted FloatTabs runner and reran Debug/Release/XCTest work after the implementation head was already machine-green. The same accumulated-diff behavior also triggered QA DMG (`macos-26`, GitHub-hosted) on five consecutive control-only heads on 2026-11-03.
 
 The corrective must distinguish **latest PR synchronize delta** from **full PR merge coverage**. Merely deleting control files from `paths:` is not sufficient.
+
+### Corrective implemented (2026-11-03, `6c6665a7`)
+
+`macos-ci.yml` now always runs on `pull_request` (no `paths` filter, so the required check `Build & Test (Apple Silicon arm64)` always reports and never stays "Expected"). A `classify` job derives the gate from the synchronize event's incremental `before -> after` delta, failing safe to the full gate for opened/reopened/`ready_for_review`/dispatch/push and for unresolvable deltas (e.g. force push):
+
+- control/docs-only delta (`AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`, `docs/**`) -> scope-check-only success, no builds;
+- draft engineering delta -> package lock verification + Debug compile fast gate, no Release/XCTest/QA DMG;
+- non-draft engineering delta, `ready_for_review`, opened/reopened, dispatch, push -> full closeout gate (Debug + Release + arm64 verification + Partition A + Partition B + retained main verification).
+
+A `concurrency` group cancels superseded queued runs for the same ref. `qa-dmg.yml` now triggers only on `ready_for_review` or explicit `workflow_dispatch`, so draft iteration and control-only commits no longer consume GitHub-hosted macOS minutes.
+
+Machine evidence on PR #195 (run `41584306688`, head `6c6665a7`, draft engineering synchronize): required check succeeded in 53s with Debug build pass; Release build, architecture verification, Partition A, Partition B all skipped; no QA DMG run created. Local fail-safe simulation covered 13 event cases including zero/unreachable `before`.
 
 ## Test-hygiene boundary
 
@@ -63,6 +75,16 @@ This phase may audit and retire stale test material, but **age is not evidence o
 A test may be removed or rewritten only when current product/architecture authority proves that it exercises a retired contract, duplicate historical harness, or superseded behavior and the removal does not create a current coverage gap. Current data/session safety, Browser Profile, lifecycle, focus/input, fullscreen, persistence, recovery, Attention, and WebKit integration contracts remain protected.
 
 The previously preserved fixture-teardown experiment remains **SUPERSEDED FOR THIS INCIDENT / NOT FOR MERGE** and must not be mixed into WP2 merely to make the suite smaller.
+
+### Test inventory audit result (2026-11-03)
+
+All 38 tracked files in `FloatTabsTests` were audited against current production/architecture authority. 15 map directly to a current production source; the remaining 23 are behavioral/integration suites covering protected domains (Browser Profile ×7, persistence/backup, Runtime Diagnostics ×4, Attention/notification, WebKit integration, focus, fullscreen, layout). No candidate met the `DUPLICATE_CURRENT_COVERAGE` / `RETIRED_CONTRACT` / `TEMPORARY_INCIDENT_HARNESS` removal bar with concrete evidence. **Removed tests: none. Canonical coverage unchanged.**
+
+### Local artifact cleanup result (2026-11-03)
+
+Deleted (closed-phase diagnostics and regenerable caches, evidence already recorded in control documents): `/private/tmp/FloatTabs-WP1-*`, `FloatTabs-Phase1-V2-*`, `FloatTabs-WP2-Corrective-*`, `FloatTabs-WP2-XCTest-*` xcresult/log bisection material, and the clean diagnostic worktree checkouts `FloatTabs-WP2-ISO-COR`, `FloatTabs-WP2-XCTest-cc445`, `FloatTabs-WP2-XCTest-f070` (all commits remain reachable in branch history); 9 stale Xcode DerivedData directories untouched since 2026-10-24.
+
+Preserved: `FloatTabs-WP2-DIAG-6a55` (contains uncommitted diagnostic material), `FloatTabs-WP2-ISO-VAL`, today's `FloatTabs-WP2-HUMAN-QA-*` evidence, `FloatTabs-CI-41450169492` (today's CI artifact, disposition pending), `FloatTabs-NotificationCorrective001-*` (belongs to the notification task lifecycle, disposition not visible from this task), and both `/Volumes/Jack-Dev/Projects/FloatTabs-*` worktrees.
 
 ## Diagnostics baseline already available
 

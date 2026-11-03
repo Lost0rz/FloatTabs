@@ -3,7 +3,7 @@
 **Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
 **Card ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001`  
 **Title:** WP2 closeout hardening — reconcile CI/test scope before long-run diagnostics observation  
-**Status:** **ACTIVE / CI-TEST BOUNDARY CORRECTIVE AUTHORIZED**  
+**Status:** **ACTIVE / CI-TEST BOUNDARY CORRECTIVE IMPLEMENTED @ `6c6665a7` — DRAFT-FAST GATE MACHINE-VERIFIED; CONTROL-ONLY SYNC VERIFICATION IN FLIGHT**  
 **Mode:** `EXECUTE / TEST+CI ONLY / EXISTING DRAFT PR / NO PRODUCT MUTATION / NO MERGE OR RELEASE`  
 **Task class:** `CI / TEST GOVERNANCE + WP2 CLOSEOUT`  
 **Baseline:** `origin/main@2a52800f770266f7c901eb612a0b319ddca142df`  
@@ -114,6 +114,26 @@ Do not delete the currently identified preserved evidence checkouts until their 
 - merge or release.
 
 If removing a candidate test requires changing current production semantics or current contract, STOP and return it as `UNKNOWN_KEEP`.
+
+## Corrective execution record (2026-11-03)
+
+Implementation `6c6665a7` (`.github/workflows/macos-ci.yml`, `.github/workflows/qa-dmg.yml` only; no production files, no test deletions):
+
+- Objective A/B: always-reporting `pull_request` trigger + `classify` job using the synchronize event's incremental `before -> after` delta. Gates: `control-only` (scope-check success, no builds) / `draft-fast` (package lock + Debug compile) / `full` (Release + arm64 + Partition A + Partition B). `ready_for_review`, opened/reopened, dispatch, push, and unresolvable deltas fail safe to `full`. Concurrency group cancels superseded queued runs per ref.
+- Objective C: all 38 tracked test files audited; zero removals met the evidence bar; canonical coverage unchanged (details in CURRENT_STATUS.md).
+- Objective D: closed-phase `/private/tmp` diagnostics and stale DerivedData deleted; preserved evidence set intact (details in CURRENT_STATUS.md).
+
+Machine evidence (PR #195):
+
+```text
+DRAFT_ENGINEERING_FAST_GATE=PASS (run 41584306688, head 6c6665a7:
+  required check success 53s, Debug build pass,
+  Release/arch-verify/Partition A/Partition B skipped)
+QA_DMG_ON_ENGINEERING_DRAFT_SYNC=NOT_RUN (no QA DMG run for 6c6665a7)
+CLASSIFIER_LOCAL_SIMULATION=13/13 CASES EXPECTED (incl. zero/unreachable before)
+```
+
+The push carrying this control reconciliation is itself the control-only synchronize verification event; its run must show the scope-check-only path with the required check succeeding and no QA DMG run.
 
 ## Verification gate
 
