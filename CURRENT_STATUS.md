@@ -14,7 +14,9 @@ Branch: `codex/adaptive-lifecycle-wp2-policy`
 Draft PR: `#195`  
 Baseline: `main@2a52800f770266f7c901eb612a0b319ddca142df`  
 Control/design bootstrap: `e289171eff3d5045c48a86c229b7967e126ec087`  
-WP2 implementation evidence head: `647178030b5a448916537745e7a993e4eca0a238`  
+Prior WP2 implementation evidence head: `647178030b5a448916537745e7a993e4eca0a238`
+WP2 corrective base head: `f0705747c6a095f24d50c9ffdac21675a1bfc662`
+WP2 corrective implementation / semantic head: `cc44537635ef451a78dc8894484c9ce9328de936`
 Durable policy: `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`
 
 ## Repository / gate state
@@ -23,40 +25,38 @@ Durable policy: `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`
 WP1=COMPLETE / HUMAN_ACCEPTED
 WP2_FIXED_RESIDENT_COUNT=REMOVED
 WP2_STAGED_AUTOMATIC_POLICY=IMPLEMENTED
-LOCAL_FOCUSED_TESTS=PASS (589 run / 4 skipped / 0 failed)
-LOCAL_FULL_XCTEST=PASS (1160 run / 4 skipped / 0 failed)
+WP2_CORRECTIVE_A=IMPLEMENTED / HOSTED_XCODE_26.6_RELEASE_PASS
+WP2_CORRECTIVE_B=IMPLEMENTED / FRESH_SELECTION_REGRESSIONS_PASS
+WP2_CORRECTIVE_C=IMPLEMENTED / INJECTED_TIME_REGRESSIONS_PASS
+LOCAL_FOCUSED_CORRECTIVE_TESTS=PASS (10 run / 0 failed)
+LOCAL_AFFECTED_LIFECYCLE_WP1_REGRESSIONS=PASS (503 run / 0 failed)
+LOCAL_FULL_XCTEST=FAIL (1,152 passed; 13 test methods / 93 assertion failures; reproduced in three full runs)
+ISOLATED_RERUN_OF_FULL_SUITE_FAILURES=PASS (13 run / 0 failed)
 LOCAL_DEBUG_RELEASE_ARM64=PASS
+NATIVE_ARM64=PASS
 PACKAGE_LOCK=UNCHANGED
-EXACT_HEAD_SELF_HOSTED_CI=PASS / 41481345174
-EXACT_HEAD_QA_DMG=FAIL / 41481345149
-INDEPENDENT_AUDIT=STOP / IMPORTANT
+GIT_DIFF_CHECK=PASS
+EXACT_HEAD_SELF_HOSTED_CI=FAIL / 41554110074 (build, package-lock, architecture pass; unit tests fail)
+EXACT_HEAD_QA_DMG=PASS / 41554110135 (Xcode 26.6)
+INDEPENDENT_AUDIT=STOP (exact-head XCTest gate failed; no policy blocker found in corrective diff)
+FULL_SUITE_FAILURE_ROOT_CAUSE=UNKNOWN
 HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
-PR_195=OPEN_DRAFT_UNMERGED
+PR_195=OPEN_DRAFT_UNMERGED / HEAD cc44537635ef451a78dc8894484c9ce9328de936
 WP3_SCHEDULING_MUTATION=NOT_STARTED
 WP4_OTHER_MUTATION=NOT_STARTED
 ```
 
-## Verified corrective blockers
+## Corrective outcome and remaining gate
 
-### A. Hosted QA Release compile compatibility
+Correctives A, B, and C are implemented in the two-file corrective diff from `f0705747c6a095f24d50c9ffdac21675a1bfc662` to `cc44537635ef451a78dc8894484c9ce9328de936`:
 
-The exact-head hosted QA DMG build fails under Xcode 26.6 Release/WMO at `FloatTabs/Web/SlotLifecycleCoordinator.swift:1052`:
+- A uses explicit typed lifecycle-stage computation; the hosted Xcode 26.6 Release/WMO QA DMG build passed.
+- B re-enters canonical pressure candidate selection from fresh facts when an owned async media result finds its captured plan stale; the old plan cannot reclaim a replacement Runtime.
+- C injects monotonic time and delayed scheduling for deterministic stage-boundary and stale timer/token tests while preserving production defaults.
 
-```text
-let stage = plan.map { stage(forInactiveSince: $0.inactiveSinceUptime) }
-```
+The exact-head macOS CI completed package-lock, Debug/Release build, and native arm64 steps, then failed in full XCTest. The same 13 failing test methods passed when run individually, but this does not clear the full-suite gate. Failures appeared in WebFocusAdapter, WebViewFactory, and WebsiteLayoutGeometryRegression tests; their cause and relation to the corrective are unverified.
 
-The compiler resolves `Optional.map` through SwiftUI `Optional: Gesture` overloads and cannot infer the closure. The local and self-hosted builds passing do not transfer to this hosted Release identity. Corrective must make this expression unambiguous without changing lifecycle semantics.
-
-### B. Progressive pressure stale-plan continuation
-
-The async media-validation path owns `pressureReclaimEvaluationToken`, clears it on callback, then validates the captured inactive plan. If that captured plan is stale while pressure is still warning/critical, the current guard returns without restarting progressive candidate selection. Another eligible Automatic Runtime can therefore remain unreclaimed until some unrelated later lifecycle event re-enters pressure evaluation.
-
-The exact-head `isPlaying == true` branch itself already marks media protection and schedules pressure continuation; it is **not** the remaining defect. Corrective scope is stale/invalidated async evaluation and equivalent owned-evaluation exits under sustained pressure.
-
-### C. V7 deterministic time-test contract
-
-Policy V7 requires lifecycle-stage tests to inject time rather than wait in real time. Production currently reads `ProcessInfo.processInfo.systemUptime` directly and at least one stage-boundary test still depends on real waiting. Machine evidence is therefore incomplete against the frozen test contract. Add a bounded monotonic-time/test scheduling seam sufficient to test RECENT → IDLE → LONG_IDLE deterministically without changing production policy timings.
+The independent exact-diff audit found no policy or ownership blocker in the corrective changes, but returned `STOP` because the exact-head full XCTest gate failed. Keep the task active and Human UI acceptance blocked until the full-suite failure is resolved and the required gates are rerun.
 
 ## Preserved WP2 policy
 
@@ -72,15 +72,9 @@ Policy V7 requires lifecycle-stage tests to inject time rather than wait in real
 ## Next gate
 
 ```text
-WP2 corrective A+B+C
-→ focused deterministic regressions
-→ full XCTest
-→ Debug/Release arm64
-→ package-lock + architecture checks
-→ push exact head
-→ self-hosted macOS CI
-→ hosted QA DMG
-→ fresh independent exact-diff / ownership / data-safety audit
+diagnose or resolve the exact-head full XCTest failure
+→ rerun full XCTest and exact-head self-hosted macOS CI
+→ refresh independent exact-diff / ownership / data-safety audit if implementation changes
 → only if all PASS: user-owned Human UI acceptance
 ```
 
