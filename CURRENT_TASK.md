@@ -2,170 +2,198 @@
 
 **Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
 **Card ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001`  
-**Title:** Replace fixed-count normal Runtime reclaim with staged Automatic lifecycle  
-**Status:** **ACTIVE / WP2 WAITING FOR HUMAN UI ACCEPTANCE**  
-**Mode:** `HUMAN ACCEPTANCE / EXISTING DRAFT PR / NO FURTHER ENGINEERING MUTATION / NO MERGE OR RELEASE`  
-**Task class:** `WEB RUNTIME / LIFECYCLE POLICY + HUMAN ACCEPTANCE`  
+**Title:** WP2 closeout hardening — reconcile CI/test scope before long-run diagnostics observation  
+**Status:** **ACTIVE / CI-TEST BOUNDARY CORRECTIVE AUTHORIZED**  
+**Mode:** `EXECUTE / TEST+CI ONLY / EXISTING DRAFT PR / NO PRODUCT MUTATION / NO MERGE OR RELEASE`  
+**Task class:** `CI / TEST GOVERNANCE + WP2 CLOSEOUT`  
 **Baseline:** `origin/main@2a52800f770266f7c901eb612a0b319ddca142df`  
 **Branch:** `codex/adaptive-lifecycle-wp2-policy`  
 **PR:** `#195 OPEN / DRAFT / UNMERGED`
 
-## Authority
+## Decision
 
-Durable WP2 policy: `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`  
-WP1 regression authority: `docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`
+Short-run human smoke on the installed WP2 QA build has not exposed a visible product defect. Long-idle and long-duration confidence will be collected through normal-use Runtime Diagnostics rather than requiring one long blocking manual session.
 
-Product policy remains frozen. The current task is no longer an implementation task unless human acceptance returns a concrete defect.
+Before any diagnostics augmentation, the repository must first reduce unnecessary CI/test churn and retire only evidence-proven stale test material.
 
-## Machine gate — verified green
+## Active work package — CI / test boundary reconciliation
 
-Machine-verified implementation head:
+### Objective A — stop control-only synchronization from rerunning heavy CI
 
-`1f33637b215cf742e20f5a8012818ac14ad459c9`
+The current `pull_request` path filter is not sufficient because GitHub evaluates the PR's three-dot changed-file set. Once a PR contains engineering changes, a later control-only commit still matches those paths.
 
-Verified evidence:
+Implement a bounded synchronization classifier that distinguishes the **new PR head delta** from the accumulated PR diff.
+
+Required behavior:
+
+- `pull_request` `synchronize` with only control/docs delta must finish the required check without running Debug build, Release build, XCTest partitions, or QA DMG;
+- engineering delta must still enter the appropriate machine gate;
+- opened/reopened/final explicit verification paths must fail safe to real verification rather than silently skip;
+- current required-check semantics must remain merge-safe;
+- do not rely only on deleting `CURRENT_STATUS.md` / `CURRENT_TASK.md` from `paths:`.
+
+GitHub synchronize payload `before` / `after` may be used for incremental classification. Preserve normal merge-context testing for the heavy gate; do not accidentally replace it with head-only product verification unless the difference is explicitly justified and accepted.
+
+### Objective B — make routine Draft verification proportional
+
+Routine Draft iteration must not execute the full expensive closeout gate on every synchronization.
+
+Target policy:
 
 ```text
-WP2_POLICY=IMPLEMENTED
-CORRECTIVE_A_HOSTED_RELEASE=PASS
-CORRECTIVE_B_STALE_ASYNC_PRESSURE=PASS
-CORRECTIVE_C_INJECTED_TIME=PASS
-AFFECTED_LIFECYCLE_WP1_REGRESSIONS=PASS_304_OF_304
+CONTROL/DOCS-ONLY SYNCHRONIZE
+  -> lightweight successful scope check only
 
-XCTEST_PROCESS_ISOLATION_EFFECT=SUPPORTED
-TEST_RUNNER_ISOLATION_IMPLEMENTED=YES
-CANONICAL_INVENTORY_COVERAGE=PASS
-OMITTED_TESTS=NONE
-DUPLICATED_TESTS=NONE
-LOCAL_RUN_1_A=PASS_1103_OF_1103
-LOCAL_RUN_1_B=PASS_62_OF_62
-LOCAL_RUN_2_A=PASS_1103_OF_1103
-LOCAL_RUN_2_B=PASS_62_OF_62
+DRAFT ENGINEERING SYNCHRONIZE
+  -> fast machine gate sufficient to catch compile/configuration breakage
+  -> no automatic full canonical XCTest + QA DMG on every small iteration
 
-SELF_HOSTED_PR_CI=PASS
-MACOS_CI_RUN=41579374549
-PARTITION_A_CI=PASS
-PARTITION_B_CI=PASS
-QA_DMG_RUN=41579374564_PASS
-EXACT_DIFF_AUDIT=PASS
-NO_PRODUCTION_SOURCE_MUTATION=YES
-MACHINE_GATE=GREEN
+FINAL / EXPLICIT CLOSEOUT GATE
+  -> full canonical XCTest coverage using mandatory Partition A + Partition B fresh processes
+  -> Debug + Release build
+  -> native arm64 verification
+  -> QA DMG when required
+
+MAIN
+  -> retain strong post-merge verification appropriate to release safety
 ```
 
-Fresh exact-diff audit confirms the durable corrective commit changes only `.github/workflows/macos-ci.yml`. The canonical unit-test gate now requires two fresh XCTest processes; the three WebKit-heavy classes are isolated, not skipped.
+The implementation may choose the smallest workflow structure that preserves these semantics. Avoid adding a large CI framework.
 
-The internal WebKit/XPC root cause remains unproven. This does not block WP2 because the minimum evidence-supported safe corrective boundary is verified and durable.
+### Objective C — test inventory / stale material audit
 
-## Current authorization — human acceptance only
+Audit `FloatTabsTests` against current architecture/product authority and classify each removal candidate as one of:
 
-No further production/test/CI mutation is authorized by default.
+- CURRENT_REQUIRED
+- DUPLICATE_CURRENT_COVERAGE
+- RETIRED_CONTRACT
+- TEMPORARY_INCIDENT_HARNESS
+- UNKNOWN_KEEP
 
-Use the verified QA build from implementation head `1f33637b` or a later control-only head with identical product source.
+Only `DUPLICATE_CURRENT_COVERAGE`, `RETIRED_CONTRACT`, or `TEMPORARY_INCIDENT_HARNESS` with concrete evidence may be removed.
 
-Human acceptance must explicitly check the product behavior below.
+Do not delete tests merely because they are old, slow, flaky, numerous, or inconvenient.
 
-### 1. Data/session safety
+In particular preserve current coverage for:
 
-Confirm existing:
+- Browser Profile / site-data isolation and persistence;
+- Slot/runtime lifecycle policy;
+- data/session safety;
+- focus/input;
+- fullscreen/window synchronization;
+- Attention/notification behavior still in product scope;
+- persistence/recovery;
+- current WebKit integration boundaries.
 
-- Slots;
-- Browser Profiles;
-- website logins/sessions;
-- Runtime Retention selections
+The preserved fixture-teardown experiment is still `SUPERSEDED_FOR_THIS_INCIDENT / NOT_FOR_MERGE`; do not cherry-pick it into this corrective.
 
-remain intact. No reset/re-login/data loss is acceptable.
+### Objective D — local historical artifact cleanup
 
-### 2. Automatic behavior
+After evidence needed for the current task is identified, stale `/private/tmp/FloatTabs-*` and obsolete `.xcresult`/DerivedData diagnostic artifacts may be listed for cleanup.
 
-For at least one `Automatic` slot:
+Do not delete the currently identified preserved evidence checkouts until their disposition is explicitly returned. Never delete Browser Profile, website session/data, preferences, backup, Application Support user data, or installed user configuration.
 
-- switch away and back during ordinary use;
-- hide/show FloatTabs;
-- leave the slot inactive long enough to exercise lifecycle behavior where practical;
-- return to it and confirm the Web App becomes usable normally without a blank/stuck surface or requiring manual reload/restart.
+## Allowed mutation
 
-### 3. Keep Loaded behavior
+- `.github/workflows/**` relevant to FloatTabs CI / QA DMG;
+- small `tools/ci/**` helper if it materially reduces duplicated workflow logic;
+- test project/source only for evidence-proven stale/retired test cleanup;
+- CURRENT_STATUS / CURRENT_TASK final reconciliation after verification.
 
-For at least one `Keep Loaded` slot:
+## Not authorized in this work package
 
-- switch away / hide / leave inactive;
-- return and confirm it remains immediately usable and is not visibly reclaimed by FloatTabs lifecycle behavior.
-
-### 4. Persistence
-
-Change or confirm a Slot's Runtime Retention choice, relaunch FloatTabs, and verify the choice persists.
-
-### 5. Protected behavior regression
-
-During normal use, confirm no visible regression for relevant protected states used by the user, including active/generating interaction and media/fullscreen behavior where exercised.
-
-## Acceptance decision
-
-### If human acceptance PASS
-
-Return an explicit human PASS with any observations. Then Project Governance may perform final literal-head/control reconciliation, decide Draft → Ready, and make the merge decision.
-
-Do **not** merge automatically from the human test context.
-
-### If human acceptance FAIL
-
-Return:
-
-- exact Slot / retention mode;
-- user action sequence;
-- visible failure;
-- whether reload/restart changes the symptom;
-- any available diagnostics/snapshot.
-
-Then STOP. Project Governance will reconcile a bounded corrective before any new mutation.
-
-## Incident evidence disposition
-
-The previous fixture-teardown experiment is **SUPERSEDED FOR THIS TASK / NOT FOR MERGE**. It established a real hygiene omission but did not resolve or alter the incident.
-
-Do not cherry-pick or mix that experiment into PR #195. No separate fixture-hygiene task is active. Preserved local evidence workspaces can be cleaned after the final PR disposition.
-
-## Mutation boundary
-
-Not authorized while waiting for human acceptance:
-
-- production source changes;
-- test source/assertion changes;
-- CI/test-runner changes;
-- WebsiteData / process-pool changes;
-- lifecycle-policy changes;
-- timeout/retry changes;
-- Browser Profile/session/cookie clearing;
-- private WebKit SPI;
-- WP3/WP4 implementation;
+- FloatTabs production behavior/source changes;
+- Runtime lifecycle policy changes;
+- WebsiteDataStore / WKProcessPool changes;
+- Browser Profile/session/cookie/site-data clearing;
+- assertion weakening to make tests pass;
+- timeout/retry inflation;
+- permanent skipping of current required coverage;
+- diagnostics production mutation yet;
+- WP3/WP4;
 - merge or release.
 
-If human acceptance exposes a defect, return to Project Governance before mutation.
+If removing a candidate test requires changing current production semantics or current contract, STOP and return it as `UNKNOWN_KEEP`.
 
-## Human / merge gate
+## Verification gate
+
+The corrective is accepted only if evidence proves all of the following:
 
 ```text
-MACHINE_GATE=GREEN
-HUMAN_UI_ACCEPTANCE=PENDING
-PR_195=OPEN_DRAFT_UNMERGED
-MERGE_READY=NO_UNTIL_HUMAN_PASS_AND_FINAL_RECONCILIATION
+CONTROL_ONLY_SYNC_HEAVY_CI=SKIPPED
+CONTROL_ONLY_SYNC_REQUIRED_CHECK=PASS
+DRAFT_ENGINEERING_FAST_GATE=PASS
+FINAL_FULL_GATE_AVAILABLE=YES
+FINAL_PARTITION_A_REQUIRED=YES
+FINAL_PARTITION_B_REQUIRED=YES
+FINAL_CANONICAL_COVERAGE_NOT_REDUCED=YES
+QA_DMG_NOT_RUN_ON_CONTROL_ONLY_SYNC=YES
+PRODUCTION_FILES_CHANGED=NONE
+CURRENT_REQUIRED_TESTS_REMOVED=NONE
 ```
 
-Do not merge PR #195 or release before explicit human acceptance and final Project Governance closeout.
+For any removed tests, return exact file/method evidence and the current authority that makes them obsolete or duplicate.
+
+## Next work package — blocked until this one closes
+
+`WP2 LONG-RUN DIAGNOSTICS COVERAGE AUDIT / AUGMENTATION`
+
+Existing diagnostics already provide a 60-second long-term checkpoint, JSONL local history/export, bounded retention and several lifecycle events. The next stage must first prove what WP2 evidence is missing, then add only the minimum fields/events required to reconstruct:
+
+```text
+slot/runtime identity
+runtime retention preference
+Automatic stage / inactive age
+protection state + reason
+reclaim eligibility / reason
+actual teardown/hibernate outcome
+subsequent materialization/readiness outcome
+manual reload/restart/recovery boundary when observed
+```
+
+Do not redesign the diagnostics subsystem if existing events can already answer the question.
+
+## Merge / release gate
+
+```text
+PR_195=OPEN_DRAFT_UNMERGED
+MERGE_READY=NO
+RELEASE_READY=NO
+WP3=NOT_STARTED
+WP4=NOT_STARTED
+```
+
+After CI/test-boundary closeout, return to Project Governance before starting diagnostics mutation.
 
 ## Return contract
 
 ```text
-HUMAN_ACCEPTANCE_BUILD
-HUMAN_DATA_SESSION_SAFETY
-HUMAN_AUTOMATIC_BEHAVIOR
-HUMAN_KEEP_LOADED_BEHAVIOR
-HUMAN_RETENTION_PERSISTENCE
-HUMAN_PROTECTED_BEHAVIOR
-HUMAN_UI_ACCEPTANCE=PASS | FAIL
-OBSERVED_ISSUES
+START_HEAD
+FINAL_HEAD
+FILES_CHANGED
+PRODUCTION_FILES_CHANGED
+
+CI_TRIGGER_CLASSIFICATION_DESIGN
+CONTROL_ONLY_SYNC_RESULT
+DRAFT_ENGINEERING_GATE_RESULT
+FINAL_FULL_GATE_RESULT
+QA_DMG_TRIGGER_RESULT
+
+TEST_INVENTORY_AUDITED
+REMOVED_TESTS
+REMOVAL_EVIDENCE
+CURRENT_REQUIRED_TESTS_REMOVED
+
+STALE_LOCAL_ARTIFACTS_IDENTIFIED
+PRESERVED_EVIDENCE_UNCHANGED
+
+SELF_HOSTED_RUNNER_HEAVY_WORK_FOR_CONTROL_ONLY
+EXACT_DIFF_AUDIT
+COMMIT
+PUSH
 PR_STATE
 MERGE=NOT_MERGED
-WP3_SCHEDULING_MUTATION=NOT_STARTED
-WP4_OTHER_MUTATION=NOT_STARTED
+RELEASE=NOT_RELEASED
+
+RECOMMENDED_NEXT_BOUNDARY
 ```

@@ -6,127 +6,98 @@
 
 ## Mode
 
-**MODE: ADAPTIVE LIFECYCLE — WP2 MACHINE GATE GREEN / WAITING FOR HUMAN UI ACCEPTANCE**
+**MODE: ADAPTIVE LIFECYCLE — WP2 CLOSEOUT HARDENING / CI-TEST BOUNDARY FIRST**
 
-Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / WP2-001` — **ACTIVE / HUMAN UI ACCEPTANCE PENDING**.
+Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / WP2-001` — **ACTIVE / CLOSEOUT HARDENING**.
 
 Branch: `codex/adaptive-lifecycle-wp2-policy`  
 Draft PR: `#195`  
 Baseline: `main@2a52800f770266f7c901eb612a0b319ddca142df`  
-Machine-verified implementation head: `1f33637b215cf742e20f5a8012818ac14ad459c9`  
+Machine-verified WP2 implementation head: `1f33637b215cf742e20f5a8012818ac14ad459c9`  
 Durable policy: `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`
 
-## Verified WP2 state
+## Verified WP2 product state
 
 ```text
 WP1=COMPLETE / HUMAN_ACCEPTED
 WP2_STAGED_AUTOMATIC_POLICY=IMPLEMENTED
-WP2_CORRECTIVE_A=PASS
-WP2_CORRECTIVE_B=PASS
-WP2_CORRECTIVE_C=PASS
-FOCUSED_CORRECTIVE_TESTS=PASS
+WP2_CORRECTIVE_A/B/C=PASS
 AFFECTED_LIFECYCLE_WP1_REGRESSIONS=PASS
-DEBUG_RELEASE_ARM64=PASS
-NATIVE_ARM64=PASS
-QA_DMG=PASS
-CORRECTIVE_ATTRIBUTION=DISPROVEN
-XCTEST_PROCESS_ISOLATION_EFFECT=SUPPORTED
-TEST_RUNNER_ISOLATION_IMPLEMENTED=YES
+TEST_RUNNER_PROCESS_ISOLATION=SUPPORTED_AND_IMPLEMENTED
 CANONICAL_INVENTORY_COVERAGE=PASS
-LOCAL_REPEAT_SPLIT_RUN=PASS
-SELF_HOSTED_PR_CI=PASS
-PARTITION_A_CI=PASS
-PARTITION_B_CI=PASS
-EXACT_DIFF_AUDIT=PASS
-NO_PRODUCTION_SOURCE_MUTATION=YES
-MACHINE_GATE=GREEN
-HUMAN_UI_ACCEPTANCE=PENDING
+SELF_HOSTED_IMPLEMENTATION_HEAD_CI=PASS
+QA_DMG_IMPLEMENTATION_HEAD=PASS
+NO_PRODUCTION_SOURCE_MUTATION_IN_RUNNER_CORRECTIVE=YES
+HUMAN_INITIAL_SMOKE=PASS_NO_VISIBLE_ISSUE
+HUMAN_EXTENDED_IDLE_OBSERVATION=DEFERRED_TO_LONG_RUN_DIAGNOSTICS
 PR_195=OPEN_DRAFT_UNMERGED
 WP3=NOT_STARTED
 WP4=NOT_STARTED
 ```
 
-## XCTest incident disposition
+The user has exercised the installed QA build and reports no visible issue in ordinary short-run use. Long-idle and long-duration behavior is intentionally no longer treated as a one-shot blocking manual session; final confidence will come from normal-use diagnostics collected over time.
 
-The blocked full-suite incident is closed at the evidence-supported corrective boundary:
+## Closeout sequence — current authority
 
-```text
-WEBFOCUS_FIXTURE_TEARDOWN_OMISSION=CONFIRMED_DEFECT
-FIXTURE_TEARDOWN_AS_SUFFICIENT_INCIDENT_CAUSE=DISPROVEN
-AFFECTED_WEBVIEW_PROCESS_TERMINATION=DISPROVEN
-AFFECTED_WEBVIEW_JS_NOT_READY=DISPROVEN
-NAVIGATION_COMPLETION_MISMATCH=SUPPORTED
-WEBKIT_NAVIGATION_PIPELINE_STALL_AFTER_ACCUMULATED_SAME_XCTEST_HOST_ACTIVITY=SUPPORTED_BOUNDARY
-ROOT_CAUSE_PROVEN=NO
-SAFE_CORRECTIVE_BOUNDARY=TEST_RUNNER_PROCESS_ISOLATION
-```
+WP2 closeout is now intentionally ordered:
 
-The internal WebKit/XPC mechanism remains unknown and is not required to close WP2. Do not reopen private-mechanism diagnosis unless the isolated canonical gate regresses again.
+1. **CI / test boundary reconciliation — ACTIVE**
+2. **Runtime diagnostics coverage audit / bounded augmentation — NOT STARTED**
+3. **Normal-use observation window + exported diagnostics audit — NOT STARTED**
+4. **Final exact-diff / literal-head reconciliation → merge decision → release DMG — BLOCKED**
 
-## Durable process-isolation corrective — verified
+Do not start diagnostics mutation before the CI/test boundary is reconciled and verified.
 
-Commit `1f33637b215cf742e20f5a8012818ac14ad459c9` changes only `.github/workflows/macos-ci.yml`.
+## Why the CI boundary is being corrected
 
-Canonical unit testing now uses two mandatory fresh XCTest processes:
+The current PR workflow is too broad for the repository's control-plane workflow. `macos-ci.yml` includes product/test/project/workflow paths plus `AGENTS.md`, `CURRENT_STATUS.md`, and `CURRENT_TASK.md`. More importantly, GitHub `pull_request` path filters evaluate the PR's three-dot changed-file set rather than only the latest synchronization delta. Once an open PR already contains product changes, a later control-only commit can therefore retrigger the heavy job even when the new commit changes only control documents.
 
-- **Partition A:** all canonical tests except `WebFocusAdapterTests`, `WebViewFactoryTests`, and `WebsiteLayoutGeometryRegressionTests`;
-- **Partition B:** exactly those three WebKit-heavy classes.
+Observed consequence on PR #195: control-only reconciliation commits repeatedly occupied the self-hosted FloatTabs runner and reran Debug/Release/XCTest work after the implementation head was already machine-green.
 
-The partition is class-filter driven; the observed `1103 + 62 = 1165` count is validation evidence, not a hard-coded permanent inventory.
+The corrective must distinguish **latest PR synchronize delta** from **full PR merge coverage**. Merely deleting control files from `paths:` is not sufficient.
 
-Verified local evidence:
+## Test-hygiene boundary
 
-```text
-RUN_1_A=PASS_1103_OF_1103
-RUN_1_B=PASS_62_OF_62
-RUN_2_A=PASS_1103_OF_1103
-RUN_2_B=PASS_62_OF_62
-UNION_A_B=CANONICAL_INVENTORY
-INTERSECTION_A_B=EMPTY
-OMITTED_TESTS=NONE
-DUPLICATED_TESTS=NONE
-AFFECTED_LIFECYCLE_REGRESSIONS=PASS_304_OF_304
-```
+This phase may audit and retire stale test material, but **age is not evidence of obsolescence**.
 
-Verified literal implementation-head remote evidence:
+A test may be removed or rewritten only when current product/architecture authority proves that it exercises a retired contract, duplicate historical harness, or superseded behavior and the removal does not create a current coverage gap. Current data/session safety, Browser Profile, lifecycle, focus/input, fullscreen, persistence, recovery, Attention, and WebKit integration contracts remain protected.
 
-```text
-MACOS_CI_RUN=41579374549_PASS
-PARTITION_A_STEP=PASS
-PARTITION_B_STEP=PASS
-QA_DMG_RUN=41579374564_PASS
-```
+The previously preserved fixture-teardown experiment remains **SUPERSEDED FOR THIS INCIDENT / NOT FOR MERGE** and must not be mixed into WP2 merely to make the suite smaller.
 
-Fresh exact-diff audit confirms the corrective commit is one commit ahead of the prior control head and changes only `.github/workflows/macos-ci.yml` (`+51/-14`); production and test source are untouched.
+## Diagnostics baseline already available
 
-## Fixture-cleanup experiment disposition
+FloatTabs already has a production Runtime Diagnostics subsystem with:
 
-The preserved fixture-teardown experiment is **SUPERSEDED FOR THIS TASK / NOT FOR MERGE**.
+- `RuntimeDiagnosticMode` Standard / Verbose;
+- local JSONL writer and export;
+- 7-day default retention;
+- bounded segment rotation;
+- optional long-term performance observation on a 60-second cadence;
+- `diagnostics.performance_checkpoint` sampling;
+- page-app counter delta/rate tracking;
+- lifecycle memory-pressure and reclaim/protection events.
 
-Its teardown omission remains a legitimate test-hygiene observation, but the experiment did not affect the incident and must not be mixed into PR #195. No successor hygiene task is active. The local evidence workspaces may remain preserved through WP2 closeout and can be cleaned after the PR disposition is final.
+The next diagnostics stage must therefore be a **gap audit first**, not a replacement logging system. Add only fields/events needed to reconstruct WP2 retention/stage/runtime ownership/protection/reclaim/materialization/recovery behavior from normal-use logs.
 
-## Human UI acceptance gate
-
-Machine acceptance is complete. WP2 now waits for explicit human product acceptance using the verified QA build from implementation head `1f33637b` (or a later control-only head with identical product source).
-
-Human checks should confirm:
-
-1. existing Slots, Browser Profiles, logins and sessions remain intact;
-2. `Automatic` slots switch/show/hide normally and recover cleanly after inactivity without blank/stuck UI or requiring manual reload/restart;
-3. `Keep Loaded` slots remain immediately usable across inactivity and switching;
-4. Runtime Retention selection persists after relaunch;
-5. active/generating/media/fullscreen protected behavior shows no visible lifecycle regression.
-
-A human PASS is required before PR #195 may leave Draft/merge consideration. A human FAIL reopens the task with the exact observed product behavior; do not merge around a failed acceptance.
-
-## Preserved WP2 policy / safety boundary
+## WP2 lifecycle safety boundary remains unchanged
 
 - normal Runtime count is never a reclaim reason;
 - Keep Loaded / Pinned is never automatically reclaimed by normal, warning, or critical FloatTabs policy;
 - Automatic stages remain RECENT `<30s`, IDLE `>=30s && <600s`, LONG_IDLE `>=600s`;
 - warning reclaims only eligible IDLE/LONG_IDLE Automatic progressively;
 - critical may include RECENT Automatic but never Keep Loaded or hard-protected Runtime;
-- pressure progression remains fresh-fact, oldest-first, one-step-at-a-time;
-- WP1 presentation/readiness, generation/Attention, media/fullscreen, notification privacy/routing, and Browser Profile/session data safety remain regression boundaries.
+- Browser Profile/session/cookie/site data must never be cleared as recovery or diagnostics behavior;
+- reload/reset/restart remains recovery evidence only, never root-cause proof.
 
-Do not merge PR #195, release, or begin WP3/WP4 until human UI acceptance and final Project Governance closeout are complete.
+## Merge / release gate
+
+PR #195 stays Draft and unmerged while closeout hardening is active.
+
+Final merge consideration requires:
+
+1. CI/test boundary corrective verified;
+2. diagnostics coverage judged sufficient and any bounded augmentation verified;
+3. a normal-use diagnostics sample reviewed with no blocking lifecycle regression;
+4. final literal-head exact-diff and required machine gate green.
+
+Do not merge, release, or begin WP3/WP4 before those gates are reconciled.
