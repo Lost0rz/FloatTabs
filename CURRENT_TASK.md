@@ -3,9 +3,9 @@
 **Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
 **Card ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001`  
 **Title:** Replace fixed-count normal Runtime reclaim with staged Automatic lifecycle  
-**Status:** **ACTIVE / WP2 PR-LEVEL XCTEST ATTRIBUTION VERIFY**  
-**Mode:** `READ-ONLY VERIFY / EXISTING DRAFT PR / NO PRODUCT OR TEST MUTATION / NO MERGE OR RELEASE`  
-**Task class:** `WEB RUNTIME / LIFECYCLE POLICY`  
+**Status:** **ACTIVE / WP2 XCTEST WEBKIT FIXTURE LIFECYCLE CORRECTIVE**  
+**Mode:** `TEST-HARNESS EXECUTE / EXISTING DRAFT PR / NO PRODUCTION MUTATION / NO MERGE OR RELEASE`  
+**Task class:** `WEB RUNTIME / LIFECYCLE POLICY + XCTEST HARNESS CORRECTIVE`  
 **Baseline:** `origin/main@2a52800f770266f7c901eb612a0b319ddca142df`  
 **Branch:** `codex/adaptive-lifecycle-wp2-policy`  
 **PR:** `#195 OPEN / DRAFT / UNMERGED`
@@ -26,78 +26,118 @@ CORRECTIVE_C_INJECTED_TIME=PASS
 FOCUSED_CORRECTIVE_TESTS=PASS
 AFFECTED_LIFECYCLE_WP1_REGRESSIONS=PASS
 DEBUG_RELEASE_ARM64=PASS
-PACKAGE_LOCK=UNCHANGED
 QA_DMG=PASS
-INDEPENDENT_CORRECTIVE_DIFF_AUDIT=NO_POLICY_OR_OWNERSHIP_BLOCKER
 CORRECTIVE_ATTRIBUTION=DISPROVEN
-FULL_SUITE_ROOT_CAUSE=NARROWED
-MUTATION_RECOMMENDATION=NONE
+WEBFOCUS_FIXTURE_TEARDOWN_OMISSION=CONFIRMED
+TEST_ORDER_SHARED_STATE=STRONGLY_SUPPORTED
+TEST_FIXTURE_RESOURCE_ACCUMULATION=SUPPORTED
+WEBKIT_SHARED_HOST_ACCUMULATION=SUPPORTED_NOT_MECHANISM_PROVEN
+WP2_PRODUCTION_POLICY_ATTRIBUTION=NO_DIRECT_EVIDENCE
+ROOT_CAUSE_PROVEN=NO
 HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
 WP3_SCHEDULING_MUTATION=NOT_STARTED
 WP4_OTHER_MUTATION=NOT_STARTED
 ```
 
-The read-only incident diagnosis reproduced the same 13-method full-suite failure on both corrective base `f0705747c6a095f24d50c9ffdac21675a1bfc662` and corrective semantic head `cc44537635ef451a78dc8894484c9ce9328de936`. The 13 methods pass in fresh-process same-order and reverse-order batches. Serial full-suite execution still fails. A long ordered prefix is required to reproduce the first focus failure. This disproves attribution to Correctives A/B/C and strongly supports cumulative XCTest/WebKit shared-process state; the exact mechanism is still unknown.
+Evidence supporting corrective action:
 
-GitHub comparison additionally confirms that `647178030b5a448916537745e7a993e4eca0a238 → f0705747c6a095f24d50c9ffdac21675a1bfc662` modifies only `CURRENT_STATUS.md` and `CURRENT_TASK.md`, with no source/test delta. Historical full XCTest passed at `6471780...`, while a current same-source/test run at `f070...` fails, reinforcing nondeterministic host/shared-process evidence.
+- the 13-method WebFocusAdapter / WebViewFactory / WebsiteLayoutGeometryRegression failure family passes in fresh XCTest processes but fails after a long accumulated suite prefix;
+- serial execution still fails, so parallel execution is not necessary;
+- WebContent process count accumulated during long runs while memory pressure stayed low, and logs showed `Could not signal service com.apple.WebKit.WebContent: 113` before failures;
+- `WebFocusAdapterTests` creates real ordered-front `NSWindow` + `WKWebView` fixtures retained in `retainedWindows` with no explicit teardown;
+- related Factory/Geometry tests also use real WebKit/AppKit fixtures with partial/inconsistent explicit cleanup;
+- no direct production `SlotLifecycleCoordinator` retain-cycle evidence has been established.
 
-## Current authorization — final read-only WP2 PR attribution check
+The exact WebKit/shared-process causal mechanism remains unknown. The confirmed actionable defect is the test fixture lifecycle omission; its causal contribution to the full-suite incident is supported and will be tested by the corrective itself.
 
-The remaining decision is not whether Correctives A/B/C caused the failure; that question is closed as `DISPROVEN`.
+## Current authorization — test-harness corrective
 
-The remaining decision is whether the full-suite failure is attributable to the WP2 PR as a whole or is independently reproducible on the pre-WP2 baseline.
+The previous whole-WP2 `main@2a528...` vs `6471780...` attribution A/B is not a required prerequisite for this corrective.
 
-Run the canonical full-XCTest command under the same Mac/toolchain/environment on clean isolated checkouts of:
+Implement the smallest deterministic XCTest fixture lifecycle repair within the existing PR/workspace.
 
-1. `main@2a52800f770266f7c901eb612a0b319ddca142df`
-2. `647178030b5a448916537745e7a993e4eca0a238`
+### Primary scope
 
-Use the same invocation used by self-hosted CI. Do not edit source/tests/workflow. Do not clear caches, website data, Browser Profiles, or kill/restart WebKit helpers as part of the primary comparison.
+`WebFocusAdapterTests`
 
-If the first A/B outcomes differ, alternate/repeat enough to distinguish a stable ref-dependent difference from nondeterministic host/shared-process behavior.
+- establish explicit cleanup for every real `WKWebView` / `NSWindow` fixture created by the class;
+- stop active loading before release where applicable;
+- clear WebKit delegates/handlers owned by the fixture where safe and relevant;
+- detach WebView/content ownership from its host window;
+- order out / close real windows rather than relying only on XCTest instance deallocation;
+- release retained test references at the test boundary;
+- preserve existing behavioral assertions and production semantics.
 
-## Required decision
+### Secondary bounded scope
 
-Return exactly one whole-PR attribution verdict:
+Audit and normalize equivalent real WebKit/AppKit fixture cleanup only where needed in:
+
+- `WebViewFactoryTests`
+- `WebsiteLayoutGeometryRegressionTests`
+
+A shared test-only cleanup helper may be introduced if it reduces duplication without changing product behavior.
+
+Use `.nonPersistent()` only for a test whose semantics clearly do not require the default website data store; document the justification in the diff/receipt. Do not use data-store changes merely to mask missing lifecycle cleanup.
+
+## Mutation boundary
+
+Authorized:
+
+- test source changes required for deterministic fixture teardown;
+- test-only helper changes required by the same cleanup;
+- control-file updates reflecting verified outcome;
+- normal commit/push to the existing PR branch after verification.
+
+Not authorized without task reconciliation:
+
+- production `SlotLifecycleCoordinator`, `WebViewPool`, `WebViewFactory`, profile/session/persistence behavior changes;
+- lifecycle policy changes;
+- CI workflow weakening;
+- test skipping or assertion weakening;
+- increasing timeouts as the fix;
+- Browser Profile/session/cookie/website-data clearing;
+- private WebKit SPI;
+- killing/restarting WebKit helpers as root-cause proof;
+- WP3/WP4 implementation;
+- merge or release.
+
+If test-only repair is insufficient and evidence points to production ownership, STOP and return the evidence before expanding scope.
+
+## Verification / acceptance
+
+Run the smallest relevant verification first, then the canonical gate.
+
+Required:
 
 ```text
-WP2_PR_ATTRIBUTION=DISPROVEN
-WP2_PR_ATTRIBUTION=SUPPORTED
-WP2_PR_ATTRIBUTION=UNPROVEN
+TARGETED_WEBFOCUS_TESTS=PASS
+TARGETED_FACTORY_GEOMETRY_TESTS=PASS_IF_CHANGED
+AFFECTED_LIFECYCLE_REGRESSIONS=PASS
+CANONICAL_FULL_XCTEST_RUN_1=PASS
+CANONICAL_FULL_XCTEST_RUN_2=PASS
+SELF_HOSTED_PR_CI=PASS
+REQUIRED_QA_DMG_JOB=PASS_IF_TRIGGERED
+NO_PRODUCTION_SOURCE_MUTATION=YES
 ```
 
-Interpretation:
+For the two full-suite runs, use the repository canonical/self-hosted CI XCTest invocation and fresh test processes. Do not kill WebKit helpers between runs to manufacture isolation.
 
-- `DISPROVEN`: pre-WP2 main reproduces the same material failure family under comparable conditions.
-- `SUPPORTED`: main repeatedly passes while the WP2 implementation ref repeatedly fails under comparable conditions; further localization is required before mutation.
-- `UNPROVEN`: outcomes vary or evidence is otherwise insufficient to distinguish ref effect from harness/host nondeterminism.
-
-Also return:
+Capture before/after observational evidence where practical:
 
 ```text
-MAIN_BASELINE_FULL_XCTEST_RESULT
-WP2_647_FULL_XCTEST_RESULT
-ALTERNATING_REPEAT_RESULT
-FAILURE_SET_COMPARISON
-HOST_TOOLCHAIN_IDENTITY
-WP2_PR_ATTRIBUTION
-FULL_SUITE_ROOT_CAUSE
-MUTATION_RECOMMENDATION
+WEBCONTENT_PROCESS_COUNT_TREND
+WINDOW_RETENTION_TREND_IF_OBSERVABLE
+ORIGINAL_13_METHOD_FAILURE_FAMILY_PRESENT_OR_ABSENT
 ```
 
-## Machine-gate disposition
+Those observations support causal confidence but do not substitute for the canonical full-suite/CI gate.
 
-Do not promote Human UI acceptance yet.
-
-After the whole-PR attribution verdict:
-
-- if WP2 attribution is `SUPPORTED`, stop and reconcile a bounded corrective/diagnostic scope before mutation;
-- if attribution is `DISPROVEN`, return to Project Governance to decide how the known unrelated harness/full-suite failure should be dispositioned without weakening or silently bypassing the canonical test gate;
-- if attribution is `UNPROVEN`, keep the machine gate blocked and return the unresolved evidence.
+If full XCTest still fails after the bounded cleanup, return the new exact failure set and resource observations and STOP. Do not automatically change production code.
 
 ## Frozen product/regression boundary
 
 Preserve:
+
 - no fixed normal resident count;
 - Keep Loaded/Pinned never FloatTabs-auto-reclaimed under normal/warning/critical;
 - RECENT `<30s`, IDLE `30s..<600s`, LONG_IDLE `>=600s`;
@@ -106,34 +146,38 @@ Preserve:
 - generation/media/fullscreen protection;
 - Browser Profile/session/login/cookie data safety.
 
-## STOP conditions
+## Human / merge gate
 
-Stop and report evidence if verification would require:
-- product source/test mutation;
-- CI workflow mutation;
-- increasing timeouts or disabling tests;
-- clearing Browser Profile/session/cache/website data;
-- private WebKit SPI;
-- killing/restarting WebKit helpers as root-cause proof;
-- entering WP3/WP4;
-- merge/release.
+Human UI acceptance remains blocked until the corrective machine gate is green.
+
+Do not merge PR #195 or release. After machine verification passes, return to Project Governance for exact-diff/control reconciliation and the next acceptance decision.
 
 ## Return contract
 
 ```text
-DIAGNOSTIC_BASELINE
-MAIN_BASELINE_FULL_XCTEST_RESULT
-WP2_647_FULL_XCTEST_RESULT
-ALTERNATING_REPEAT_RESULT
-FAILURE_SET_COMPARISON
-HOST_TOOLCHAIN_IDENTITY
-WP2_PR_ATTRIBUTION
-FULL_SUITE_ROOT_CAUSE
-MUTATION_RECOMMENDATION
+START_HEAD
+FINAL_HEAD
+FILES_CHANGED
+PRODUCTION_FILES_CHANGED
+TEST_FIXTURE_CHANGES
+TARGETED_WEBFOCUS_TESTS
+TARGETED_FACTORY_GEOMETRY_TESTS
+AFFECTED_LIFECYCLE_REGRESSIONS
+CANONICAL_FULL_XCTEST_RUN_1
+CANONICAL_FULL_XCTEST_RUN_2
+SELF_HOSTED_PR_CI
+REQUIRED_QA_DMG_JOB
+WEBCONTENT_PROCESS_COUNT_TREND
+WINDOW_RETENTION_TREND_IF_OBSERVABLE
+ORIGINAL_13_METHOD_FAILURE_FAMILY
+ROOT_CAUSE_PROVEN
+TEST_FIXTURE_RESOURCE_ACCUMULATION
+GIT_STATUS
+REMOTE_BRANCH_HEAD
+PR_STATE
 HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
 WP3_SCHEDULING_MUTATION=NOT_STARTED
 WP4_OTHER_MUTATION=NOT_STARTED
-PR_STATE
 ```
 
 Do not merge PR #195. Do not release.
