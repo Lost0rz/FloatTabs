@@ -1,5 +1,11 @@
 name: macOS CI
 
+# One heavy gate per ref at a time: a superseded head's queued run is
+# cancelled instead of occupying the self-hosted runner behind the newest one.
+concurrency:
+  group: macos-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:
@@ -13,29 +19,134 @@ on:
       - 'CURRENT_STATUS.md'
       - 'CURRENT_TASK.md'
       - 'tools/release/**'
+  # No `paths` filter on pull_request, on purpose. GitHub evaluates pull_request
+  # path filters against the accumulated three-dot PR diff, so once a PR carries
+  # engineering changes, later control-only synchronize commits still rerun every
+  # heavy job. A filtered-out run would also leave the required check
+  # "Build & Test (Apple Silicon arm64)" permanently "Expected", which blocks
+  # merge. The workflow therefore always reports, and the classify job decides
+  # the gate from the incremental synchronize delta (event before -> after).
   pull_request:
     branches:
       - main
-    paths:
-      - 'FloatTabs/**'
-      - 'FloatTabsTests/**'
-      - 'FloatTabs.xcodeproj/**'
-      - '.github/workflows/macos-ci.yml'
-      - 'AGENTS.md'
-      - 'CURRENT_STATUS.md'
-      - 'CURRENT_TASK.md'
-      - 'tools/release/**'
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
   workflow_dispatch:
 
 jobs:
+  classify:
+    name: CI scope classification
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: [self-hosted, macOS, ARM64, mac-mini-ci]
+    outputs:
+      gate: ${{ steps.classify.outputs.gate }}
+      delta: ${{ steps.classify.outputs.delta }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Incremental synchronize classification needs the event's `before`
+          # commit to be present in the local object store.
+          fetch-depth: 0
+
+      - name: Classify synchronize delta
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+          event='${{ github.event_name }}'
+          action='${{ github.event.action }}'
+          before='${{ github.event.before }}'
+          after='${{ github.event.after }}'
+          draft='${{ github.event.pull_request.draft }}'
+          gate='full'
+          delta='unclassified-failsafe'
+
+          is_control_only_file_list() {
+            # True when every listed path is a control-plane document.
+            local line
+            while IFS= read -r line; do
+              case "$line" in
+                AGENTS.md|CURRENT_STATUS.md|CURRENT_TASK.md|docs/*) ;;
+                *) return 1 ;;
+              esac
+            done
+            return 0
+          }
+
+          can_classify_incrementally() {
+            [[ "$event" == 'pull_request' && "$action" == 'synchronize' \
+               && -n "$before" && ! "$before" =~ ^0+$ ]]
+          }
+
+          if can_classify_incrementally; then
+            if ! delta_files="$(git diff --name-only "$before" "$after" 2>/dev/null)" || [[ -z "$delta_files" ]]; then
+              # Diff not computable (e.g. force push with an unreachable
+              # before commit): fail safe to the full gate.
+              gate='full'
+              delta='unclassified-failsafe'
+            elif printf '%s\n' "$delta_files" | is_control_only_file_list; then
+              gate='control-only'
+              delta='control-docs-only'
+            elif [[ "$draft" == 'true' ]]; then
+              gate='draft-fast'
+              delta='engineering'
+            else
+              gate='full'
+              delta='engineering'
+            fi
+          fi
+
+          {
+            echo "gate=$gate"
+            echo "delta=$delta"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo '## macOS CI gate decision'
+            echo "- event: \`$event\` / action: \`$action\`"
+            echo "- incremental synchronize delta: \`$delta\`"
+            echo "- gate: \`$gate\` (control-only = scope check only, draft-fast = Debug compile gate, full = closeout gate)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if can_classify_incrementally; then
+            {
+              echo
+              echo 'Changed files in the synchronize delta:'
+              echo '```'
+              git diff --name-only "$before" "$after" || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   build-and-test:
     name: Build & Test (Apple Silicon arm64)
+    needs: classify
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: [self-hosted, macOS, ARM64, mac-mini-ci]
     steps:
       - uses: actions/checkout@v5
 
+      - name: CI gate decision
+        run: |
+          echo "gate=${{ needs.classify.outputs.gate }}"
+          echo "delta=${{ needs.classify.outputs.delta }}"
+
+      # Control/docs-only synchronize: report a real, fast success for the
+      # required check without building. The job still runs (instead of being
+      # skipped at job level) so the required check never depends on
+      # skipped-check semantics and never stays "Expected".
+      - name: Control-only synchronize scope check
+        if: needs.classify.outputs.gate == 'control-only'
+        run: |
+          echo "Synchronize delta is control/docs-only; heavy CI intentionally skipped."
+          echo "Final gate remains available via ready_for_review, synchronize with"
+          echo "engineering delta, or workflow_dispatch."
+
       - name: Runner environment
+        if: needs.classify.outputs.gate != 'control-only'
         shell: bash
         run: |
           set -euo pipefail
@@ -51,9 +162,12 @@ jobs:
           sysctl -n machdep.cpu.brand_string || true
 
       - name: Xcode version
+        if: needs.classify.outputs.gate != 'control-only'
         run: xcodebuild -version
 
+      # Draft fast gate from here down: package resolution + Debug compile only.
       - name: Resolve Swift packages
+        if: needs.classify.outputs.gate != 'control-only'
         run: >-
           xcodebuild
           -project FloatTabs.xcodeproj
@@ -62,9 +176,11 @@ jobs:
           -onlyUsePackageVersionsFromResolvedFile
 
       - name: Verify package lock is unchanged
+        if: needs.classify.outputs.gate != 'control-only'
         run: git diff --exit-code -- FloatTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
       - name: Debug build
+        if: needs.classify.outputs.gate != 'control-only'
         run: >-
           xcodebuild
           -project FloatTabs.xcodeproj
@@ -75,7 +191,9 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           build
 
+      # Final closeout gate from here down: Release build + canonical XCTest.
       - name: Release build
+        if: needs.classify.outputs.gate == 'full'
         run: >-
           xcodebuild
           -project FloatTabs.xcodeproj
@@ -87,6 +205,7 @@ jobs:
           build
 
       - name: Verify native Release architecture
+        if: needs.classify.outputs.gate == 'full'
         shell: bash
         run: |
           set -euo pipefail
@@ -109,6 +228,7 @@ jobs:
       # isolated, not skipped: both partitions are required, and any new
       # test outside these three classes runs in Partition A automatically.
       - name: Unit tests - Partition A (main suite)
+        if: needs.classify.outputs.gate == 'full'
         shell: bash
         run: |
           set -o pipefail
@@ -127,6 +247,7 @@ jobs:
             test 2>&1 | tee "$RUNNER_TEMP/xcodebuild-test-partition-a.log"
 
       - name: Unit tests - Partition B (WebKit-heavy classes, fresh process)
+        if: needs.classify.outputs.gate == 'full'
         shell: bash
         run: |
           set -o pipefail
