@@ -6,17 +6,17 @@
 
 ## Mode
 
-**MODE: ADAPTIVE LIFECYCLE — WP2 CORRECTIVE / MACHINE GATE**
+**MODE: ADAPTIVE LIFECYCLE — WP2 FULL-XCTEST INCIDENT DIAGNOSIS**
 
-Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / WP2-001` — **ACTIVE / CORRECTIVE AUTHORIZED**.
+Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / WP2-001` — **ACTIVE / READ-ONLY INCIDENT DIAGNOSIS**.
 
 Branch: `codex/adaptive-lifecycle-wp2-policy`  
 Draft PR: `#195`  
 Baseline: `main@2a52800f770266f7c901eb612a0b319ddca142df`  
 Control/design bootstrap: `e289171eff3d5045c48a86c229b7967e126ec087`  
-Prior WP2 implementation evidence head: `647178030b5a448916537745e7a993e4eca0a238`
-WP2 corrective base head: `f0705747c6a095f24d50c9ffdac21675a1bfc662`
-WP2 corrective implementation / semantic head: `cc44537635ef451a78dc8894484c9ce9328de936`
+WP2 corrective base head: `f0705747c6a095f24d50c9ffdac21675a1bfc662`  
+WP2 corrective implementation / semantic head: `cc44537635ef451a78dc8894484c9ce9328de936`  
+Incident-diagnosis authority commit: `d4f8e1167503d664445320942417b7a368154655`  
 Durable policy: `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`
 
 ## Repository / gate state
@@ -25,38 +25,70 @@ Durable policy: `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`
 WP1=COMPLETE / HUMAN_ACCEPTED
 WP2_FIXED_RESIDENT_COUNT=REMOVED
 WP2_STAGED_AUTOMATIC_POLICY=IMPLEMENTED
-WP2_CORRECTIVE_A=IMPLEMENTED / HOSTED_XCODE_26.6_RELEASE_PASS
-WP2_CORRECTIVE_B=IMPLEMENTED / FRESH_SELECTION_REGRESSIONS_PASS
-WP2_CORRECTIVE_C=IMPLEMENTED / INJECTED_TIME_REGRESSIONS_PASS
+WP2_CORRECTIVE_A=PASS
+WP2_CORRECTIVE_B=PASS
+WP2_CORRECTIVE_C=PASS
 LOCAL_FOCUSED_CORRECTIVE_TESTS=PASS (10 run / 0 failed)
 LOCAL_AFFECTED_LIFECYCLE_WP1_REGRESSIONS=PASS (503 run / 0 failed)
-LOCAL_FULL_XCTEST=FAIL (1,152 passed; 13 test methods / 93 assertion failures; reproduced in three full runs)
-ISOLATED_RERUN_OF_FULL_SUITE_FAILURES=PASS (13 run / 0 failed)
+LOCAL_FULL_XCTEST=FAIL (13 test methods / 93 assertion failures; reproduced in three full runs)
+ISOLATED_13_METHOD_RERUN=PASS
 LOCAL_DEBUG_RELEASE_ARM64=PASS
 NATIVE_ARM64=PASS
 PACKAGE_LOCK=UNCHANGED
 GIT_DIFF_CHECK=PASS
-EXACT_HEAD_SELF_HOSTED_CI=FAIL / 41554110074 (build, package-lock, architecture pass; unit tests fail)
-EXACT_HEAD_QA_DMG=PASS / 41554110135 (Xcode 26.6)
-INDEPENDENT_AUDIT=STOP (exact-head XCTest gate failed; no policy blocker found in corrective diff)
+IMPLEMENTATION_HEAD_SELF_HOSTED_CI=FAIL / 41554110074 (Unit Tests)
+IMPLEMENTATION_HEAD_QA_DMG=PASS / 41554110135
+FINAL_PRE_DIAG_CONTROL_HEAD_SELF_HOSTED_CI=FAIL / 41555572505 (Unit Tests only; build/package/arm64 pass)
+FINAL_PRE_DIAG_CONTROL_HEAD_QA_DMG=PASS / 41555572558
+INDEPENDENT_CORRECTIVE_DIFF_AUDIT=NO_POLICY_OR_OWNERSHIP_BLOCKER / STOP_ON_XCTEST_GATE
 FULL_SUITE_FAILURE_ROOT_CAUSE=UNKNOWN
+CORRECTIVE_ATTRIBUTION=UNPROVEN
 HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
 PR_195=OPEN_DRAFT_UNMERGED
 WP3_SCHEDULING_MUTATION=NOT_STARTED
 WP4_OTHER_MUTATION=NOT_STARTED
 ```
 
-## Corrective outcome and remaining gate
+## Corrective outcome
 
-Correctives A, B, and C are implemented in the two-file corrective diff from `f0705747c6a095f24d50c9ffdac21675a1bfc662` to `cc44537635ef451a78dc8894484c9ce9328de936`:
+Correctives A, B, and C are implemented at semantic head `cc44537635ef451a78dc8894484c9ce9328de936`:
 
-- A uses explicit typed lifecycle-stage computation; the hosted Xcode 26.6 Release/WMO QA DMG build passed.
-- B re-enters canonical pressure candidate selection from fresh facts when an owned async media result finds its captured plan stale; the old plan cannot reclaim a replacement Runtime.
-- C injects monotonic time and delayed scheduling for deterministic stage-boundary and stale timer/token tests while preserving production defaults.
+- A: explicit compiler-unambiguous lifecycle-stage computation; hosted Xcode 26.6 QA DMG passes.
+- B: stale async media-plan callbacks cannot reclaim stale Runtime and re-enter canonical pressure selection from fresh facts while pressure remains active.
+- C: injected monotonic uptime and delayed scheduling make RECENT/IDLE/LONG_IDLE and stale timer/token regressions deterministic without real sleeping; production defaults remain system uptime/main-queue scheduling.
 
-The exact-head macOS CI completed package-lock, Debug/Release build, and native arm64 steps, then failed in full XCTest. The same 13 failing test methods passed when run individually, but this does not clear the full-suite gate. Failures appeared in WebFocusAdapter, WebViewFactory, and WebsiteLayoutGeometryRegression tests; their cause and relation to the corrective are unverified.
+Focused/affected regressions pass and the independent corrective diff audit found no policy/ownership blocker.
 
-The independent exact-diff audit found no policy or ownership blocker in the corrective changes, but returned `STOP` because the exact-head full XCTest gate failed. Keep the task active and Human UI acceptance blocked until the full-suite failure is resolved and the required gates are rerun.
+## Remaining incident
+
+The remaining blocker is the canonical full XCTest gate. Failures occur in unchanged WebFocusAdapter, WebViewFactory, and WebsiteLayoutGeometryRegression tests. The same 13 methods pass individually. Failing runs contain WebKit fixture/page-load timeouts and related WebContent/runtime errors. Current evidence does not establish whether the corrective caused the failure, exposed pre-existing shared-state/test-order contamination, or coincided with runner/WebKit host instability/resource pressure.
+
+The self-hosted final pre-diagnosis run `41555572505` passed package resolution/lock, Debug build, Release build, and native arm64 verification; only Unit Tests failed.
+
+## Current diagnostic gate
+
+`CURRENT_TASK.md` now authorizes a bounded read-only incident diagnosis. Required causal comparison includes:
+
+```text
+exact failure inventory
+→ 13-test same-order/reverse-order fresh-process batches
+→ full-suite A/B on corrective base f0705747... vs semantic head cc445376...
+→ prefix/order contamination narrowing when applicable
+→ diagnostic-only serial comparison when applicable
+→ bounded WebKit process/runtime observations
+→ attribution/root-cause verdict
+```
+
+No production/test mutation is authorized during this stage.
+
+Required verdicts:
+
+```text
+CORRECTIVE_ATTRIBUTION=PROVEN | DISPROVEN | UNPROVEN
+FULL_SUITE_ROOT_CAUSE=KNOWN | NARROWED | UNKNOWN
+```
+
+Only evidence supporting a specific bounded mutation can authorize another EXECUTE corrective.
 
 ## Preserved WP2 policy
 
@@ -72,9 +104,10 @@ The independent exact-diff audit found no policy or ownership blocker in the cor
 ## Next gate
 
 ```text
-diagnose or resolve the exact-head full XCTest failure
-→ rerun full XCTest and exact-head self-hosted macOS CI
-→ refresh independent exact-diff / ownership / data-safety audit if implementation changes
+complete read-only full-XCTest incident diagnosis
+→ if mutation is proven necessary, reconcile authority before mutation
+→ rerun canonical full XCTest and exact-head self-hosted CI
+→ fresh independent audit as required
 → only if all PASS: user-owned Human UI acceptance
 ```
 
