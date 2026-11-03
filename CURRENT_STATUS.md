@@ -39,9 +39,7 @@ WP3=NOT_STARTED
 WP4=NOT_STARTED
 ```
 
-## Incident findings established
-
-The incident is now localized enough to define a safe corrective boundary without claiming a private WebKit root cause.
+## Incident boundary
 
 Verified findings:
 
@@ -57,11 +55,11 @@ ROOT_CAUSE_PROVEN=NO
 
 At the first failing affected test after the accumulated suite prefix, the WebView remained alive and could execute `1+1`, but its new `loadHTMLString` navigation never emitted provisional-start, commit, finish, or failure callbacks and remained `isLoading=true`. DOM-dependent JavaScript failed because the expected document never loaded.
 
-The internal WebKit/XPC mechanism remains unknown. Correlated WebKit/XPC log messages are supporting observations only.
+The private WebKit/XPC mechanism remains unknown. Correlated WebKit/XPC log messages are supporting observations only.
 
 ## Process-isolation validation — complete
 
-The canonical test inventory was proven to contain 1165 unique tests. A bounded validation split it into two fresh XCTest processes without source/assertion changes:
+The canonical inventory contains 1165 unique tests. Validation split the inventory into two fresh XCTest processes without source/assertion changes:
 
 ```text
 PARTITION_A=1103 tests
@@ -80,7 +78,7 @@ Partition B contains exactly:
 - `WebViewFactoryTests`
 - `WebsiteLayoutGeometryRegressionTests`
 
-Two complete split runs were green:
+Two complete split runs passed:
 
 ```text
 SPLIT_RUN_1_A=PASS_1103_OF_1103
@@ -92,24 +90,24 @@ NAVIGATION_STALL_REPRODUCED_UNDER_SPLIT=NO
 XCTEST_PROCESS_ISOLATION_EFFECT=SUPPORTED
 ```
 
-Therefore same-XCTest-host accumulated WebKit state is a necessary environment condition for the observed incident, and **test-runner process isolation is now the minimum evidence-supported corrective boundary**. This does not prove the internal WebKit root cause.
+This establishes same-XCTest-host accumulated WebKit state as a necessary environment condition for the observed incident and makes **test-runner process isolation the minimum evidence-supported corrective boundary**. It does not prove the internal WebKit root cause.
 
 ## Current corrective authorization
 
-Make the split execution durable in the repository/self-hosted CI while preserving the complete canonical test inventory and all existing assertions.
+Make the validated split durable in the repository/self-hosted CI while preserving the complete canonical test inventory and all existing assertions.
 
 Required behavior:
 
 1. run all canonical tests except the three WebKit-heavy classes in one fresh XCTest process;
 2. run those three classes together in a second fresh XCTest process;
-3. preserve exact inventory coverage: 1103 + 62 = 1165 at the current test inventory;
-4. keep the implementation maintainable as tests are added; do not hard-code the total count as product truth;
-5. do not change production behavior, WebsiteData semantics, process-pool policy, lifecycle policy, test assertions, or timeouts;
+3. preserve exact inventory coverage; current 1103 + 62 = 1165 is validation evidence, not a permanent hard-coded count;
+4. new tests must not silently disappear from the canonical machine gate;
+5. do not change production behavior, WebsiteData semantics, process-pool policy, lifecycle policy, assertions, or timeouts;
 6. validate locally and through literal-head self-hosted CI before any merge decision.
 
-A small runner/helper or CI workflow change is authorized if required to make this split deterministic. The corrective belongs to test-runner/CI architecture, not production runtime code.
+A small runner/helper or CI workflow change is authorized if required to make the split deterministic. The corrective belongs to test-runner/CI architecture, not production runtime code.
 
-## Preserved experiments / disposition
+## Preserved experiments
 
 Preserve until the durable corrective has passed and evidence is reconciled:
 
@@ -117,7 +115,7 @@ Preserve until the durable corrective has passed and evidence is reconciled:
 - `/private/tmp/FloatTabs-WP2-DIAG-6a55` — process-state diagnostic checkout;
 - `/private/tmp/FloatTabs-WP2-ISO-VAL` — process-isolation validation checkout.
 
-The fixture-cleanup experiment is not required for the isolation corrective and must not be implicitly committed with it. Its later disposition is a separate reconciliation decision.
+The fixture-cleanup experiment is not required for the isolation corrective and must not be implicitly committed with it.
 
 ## Machine acceptance gate
 
