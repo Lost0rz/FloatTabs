@@ -2,152 +2,118 @@
 
 **Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
 **Card ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001`  
-**Title:** WP2 closeout — Runtime Diagnostics coverage gap audit before long-run observation  
-**Status:** **ACTIVE / READ-ONLY DIAGNOSTICS GAP AUDIT AUTHORIZED**  
-**Mode:** `AUDIT / EXISTING DRAFT PR / NO SOURCE MUTATION / NO MERGE OR RELEASE`  
-**Task class:** `WEB RUNTIME / DIAGNOSTICS EVIDENCE / WP2 CLOSEOUT`  
+**Title:** WP2 closeout — field observation with existing Runtime Diagnostics  
+**Status:** **ACTIVE / FIELD OBSERVATION**  
+**Mode:** `OBSERVE / PACKAGE QA FIELD BUILD / NO PRODUCT MUTATION / NO MERGE OR RELEASE`  
+**Task class:** `WEB RUNTIME / FIELD OBSERVATION / WP2 CLOSEOUT`  
 **Baseline:** `origin/main@2a52800f770266f7c901eb612a0b319ddca142df`  
 **Branch:** `codex/adaptive-lifecycle-wp2-policy`  
 **PR:** `#195 OPEN / DRAFT / UNMERGED`
 
-## Authority
+## Decision
 
-- `AGENTS.md`
-- `CURRENT_STATUS.md`
-- `docs/architecture/DOMAIN_MAP.md`
-- `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`
-- production source/tests at current PR head
+The user has completed short-run manual use without finding a visible WP2 defect and explicitly chose normal daily use plus background diagnostics instead of a blocking long-duration manual test session.
 
-The CI/test-boundary corrective is closed and verified. No test or CI mutation remains active in this work package.
+The previous pre-observation Runtime Diagnostics coverage audit is deferred. Existing diagnostics are sufficient to begin field observation now. Any future instrumentation must be justified by an actual evidence gap found in uploaded logs.
 
-## Objective
+## Current authorization
 
-Perform a read-only audit of existing Runtime Diagnostics and determine whether normal-use exported JSONL can reconstruct the WP2 lifecycle chain with enough evidence to support long-run closeout.
+Authorized now:
 
-Do **not** add logging yet. First prove what is already observable and what, if anything, is missing.
+1. package the current PR product state as a QA/field-observation DMG;
+2. install/use that build as the user's normal FloatTabs application;
+3. enable existing Runtime Diagnostics and long-term observation;
+4. collect logs during ordinary use;
+5. export and remotely audit JSONL after a representative observation window or immediately after a visible anomaly.
 
-## Required evidence matrix
+No production source mutation is authorized during observation by default.
 
-For each row below, return `COMPLETE`, `PARTIAL`, or `MISSING`, with exact current event/field/symbol evidence:
+## Observation settings
 
-1. **Slot identity** — exact Slot correlation across lifecycle events.
-2. **Physical Runtime identity** — generation / WebView instance / document epoch or equivalent identity sufficient to distinguish old vs rebuilt Runtime.
-3. **Runtime retention preference** — `Automatic` vs `Keep Loaded` at the decision point.
-4. **Automatic stage** — RECENT / IDLE / LONG_IDLE and enough timing/inactive-age evidence to explain stage resolution.
-5. **Protection state** — media / Attention / fullscreen / active-visible or other hard-protection reason used by lifecycle policy.
-6. **Reclaim eligibility** — why a Runtime was or was not eligible at normal long-idle or memory-pressure evaluation.
-7. **Actual reclaim outcome** — requested release vs actual hibernate/teardown completion, with reason.
-8. **Subsequent materialization** — when a reclaimed Runtime is requested again, whether a new Runtime is materialized and which identity owns it.
-9. **Readiness/navigation outcome** — loading / ready / failed / navigation finish or stall evidence after rematerialization.
-10. **Recovery boundary** — reload/reset/restart/manual recovery events when they occur, without treating recovery as root-cause proof.
-11. **Long-run checkpoint usefulness** — whether the existing 60-second checkpoint includes enough per-Slot/runtime lifecycle context to correlate trends over several hours/days.
-12. **Export completeness/privacy** — whether exported JSONL preserves the above evidence within current bounded retention/privacy rules.
-
-## Source scope to inspect
-
-At minimum inspect the current implementations and relevant tests around:
-
-- `FloatTabs/Diagnostics/**`
-- `LongTermPerformanceObservationCoordinator`
-- `RuntimeDiagnosticWriter`
-- `RuntimeDiagnostics`
-- `PanelController.captureLongTermDiagnosticsCheckpoint`
-- `SlotLifecycleCoordinator`
-- `WebViewPool` runtime identity / hibernate / materialization paths
-- navigation/readiness observer paths
-- existing diagnostics/privacy tests
-
-Use `docs/architecture/DOMAIN_MAP.md` to locate additional authoritative entry points instead of broad repository wandering.
-
-## Audit rules
-
-- Existing evidence wins over proposed new instrumentation.
-- Do not create duplicate event families if existing events can be correlated.
-- A field present only during memory pressure does not automatically satisfy normal long-idle observability.
-- A Slot ID alone is insufficient for rebuilt-runtime attribution when the question requires physical Runtime identity.
-- A count or aggregate host metric must not be used as a substitute for unsupported WebContent process attribution.
-- Diagnostics may record facts but must not become a lifecycle decision owner.
-- Do not infer root cause from reload/restart/hibernate success.
-
-## Output required
-
-Return a compact coverage matrix:
+Use:
 
 ```text
-EVIDENCE_ITEM | STATUS | EXISTING_EVENT/FIELD | GAP | DECISION_IMPACT
+Runtime Diagnostics = Verbose
+Keep local diagnostic history = ON
+Long-term performance observation = ON
 ```
 
-Then return one of:
+Existing long-term observation runs on the production diagnostics scheduler; no separate manual timer/test loop is required.
 
-### A. `EXISTING_DIAGNOSTICS_SUFFICIENT`
-No production diagnostics mutation is needed. Recommend exact user settings/observation window/export procedure and the fields/events to inspect after upload.
+## Observation procedure
 
-### B. `BOUNDED_AUGMENTATION_REQUIRED`
-List only the minimum missing evidence required for WP2 closeout, including:
+Normal use is the test surface. The user should continue ordinary Slot switching, hide/show, Automatic/Keep Loaded use, ChatGPT generation, media/fullscreen and long idle naturally rather than staging a dedicated manual test session.
 
-- exact production owner/file where evidence should be emitted;
-- proposed event/field names;
-- correlation identity used;
-- whether it is periodic or event-driven;
-- privacy/cardinality/performance impact;
-- focused tests required;
-- explicit proof that lifecycle behavior remains unchanged.
+If no visible issue occurs, export Recent Diagnostics within the default 7-day retention window after representative daily use.
 
-Do not implement the proposal in this audit.
+If an anomaly occurs, before manual reload/restart where practical:
 
-## Not authorized
+- note approximate time;
+- note Slot and Runtime Retention mode;
+- export Recent Diagnostics;
+- record whether reload/restart later changes the symptom.
 
-- production source mutation;
-- test source mutation;
-- workflow mutation;
-- lifecycle policy changes;
-- persistence/profile/session/cookie/site-data changes;
-- reload/retry/reset behavior changes;
-- private WebKit SPI;
-- merge/release;
-- WP3/WP4.
+Reload/restart recovery remains evidence of a recovery boundary only, not root-cause proof.
 
-## STOP conditions
-
-STOP and return the ambiguity if:
-
-- an evidence item depends on unsupported WebContent-process attribution;
-- the only way to observe a fact would change runtime ownership/lifecycle behavior;
-- a proposed field could expose URL/content/session/private user data beyond current privacy rules;
-- current source/authority is inconsistent enough that a logging proposal would encode the wrong product truth.
-
-## Return contract
+## Current evidence already closed
 
 ```text
-START_HEAD =
-AUDIT_HEAD =
-FILES_READ =
-FILES_CHANGED = NONE
+CI_TEST_BOUNDARY=COMPLETE
+DRAFT_ENGINEERING_FAST_GATE=PASS
+CONTROL_ONLY_SCOPE_GATE=PASS
+FINAL_FULL_GATE_AVAILABLE=YES
+CANONICAL_TEST_COVERAGE_REDUCED=NO
+CURRENT_REQUIRED_TESTS_REMOVED=NONE
+HUMAN_INITIAL_SMOKE=PASS_NO_VISIBLE_ISSUE
+```
 
-COVERAGE_MATRIX =
-SLOT_IDENTITY = COMPLETE|PARTIAL|MISSING
-RUNTIME_IDENTITY = COMPLETE|PARTIAL|MISSING
-RETENTION_PREFERENCE = COMPLETE|PARTIAL|MISSING
-AUTOMATIC_STAGE = COMPLETE|PARTIAL|MISSING
-PROTECTION_STATE = COMPLETE|PARTIAL|MISSING
-RECLAIM_ELIGIBILITY = COMPLETE|PARTIAL|MISSING
-RECLAIM_OUTCOME = COMPLETE|PARTIAL|MISSING
-REMATERIALIZATION = COMPLETE|PARTIAL|MISSING
-READINESS_NAVIGATION = COMPLETE|PARTIAL|MISSING
-RECOVERY_BOUNDARY = COMPLETE|PARTIAL|MISSING
-LONG_RUN_CHECKPOINT = COMPLETE|PARTIAL|MISSING
-EXPORT_PRIVACY = COMPLETE|PARTIAL|MISSING
+## Package boundary
 
-VERDICT = EXISTING_DIAGNOSTICS_SUFFICIENT | BOUNDED_AUGMENTATION_REQUIRED | BLOCKED
-MINIMUM_AUGMENTATION =
-PROPOSED_FILES =
-PROPOSED_EVENTS_FIELDS =
-FOCUSED_TESTS_REQUIRED =
-PRODUCTION_BEHAVIOR_CHANGE_REQUIRED = NO
-ROOT_CAUSE_CLAIM = NONE
+A QA/field-observation DMG may be built from the current PR branch/head. The product source after the machine-verified WP2 implementation has not been changed by the subsequent CI/control commits; those later commits change workflow/control state only.
 
-PR_STATE = OPEN_DRAFT_UNMERGED
-MERGE = NOT_MERGED
-RELEASE = NOT_RELEASED
-RECOMMENDED_NEXT_BOUNDARY =
+The field DMG is for normal user observation before merge. It is not the final GitHub release artifact.
+
+## Not authorized during field observation
+
+- lifecycle-policy mutation;
+- WebViewPool/runtime ownership changes;
+- Browser Profile/session/cookie/site-data clearing;
+- diagnostics source changes without a concrete uploaded-log evidence gap;
+- timeout/retry/reset workaround;
+- unsupported private WebKit SPI;
+- WP3/WP4;
+- merge;
+- final release.
+
+## Next decision boundary
+
+When the user uploads a diagnostics JSONL sample:
+
+1. audit actual lifecycle/runtime/navigation/recovery evidence remotely;
+2. if logs are sufficient and show no blocking WP2 regression, proceed toward final full gate and merge closeout;
+3. if a product defect is visible, reconcile a bounded corrective;
+4. if the only blocker is missing evidence, authorize only the minimum diagnostics augmentation needed for that concrete question.
+
+## Merge / release gate
+
+```text
+PR_195=OPEN_DRAFT_UNMERGED
+FIELD_OBSERVATION=ACTIVE
+LOG_SAMPLE_REVIEW=PENDING
+MERGE_READY=NO
+RELEASE_READY=NO
+WP3=NOT_STARTED
+WP4=NOT_STARTED
+```
+
+## Return contract after observation
+
+```text
+OBSERVATION_BUILD =
+OBSERVATION_WINDOW =
+VISIBLE_ISSUES =
+DIAGNOSTICS_FILE =
+RELOAD_REQUIRED = YES|NO|NOT_APPLICABLE
+RESTART_REQUIRED = YES|NO|NOT_APPLICABLE
+FIELD_OBSERVATION_RESULT = NO_BLOCKING_ISSUE | ISSUE_OBSERVED
 ```

@@ -6,17 +6,18 @@
 
 ## Mode
 
-**MODE: ADAPTIVE LIFECYCLE — WP2 CLOSEOUT / LONG-RUN DIAGNOSTICS COVERAGE AUDIT**
+**MODE: ADAPTIVE LIFECYCLE — WP2 FIELD OBSERVATION / NORMAL DAILY USE**
 
-Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / WP2-001` — **ACTIVE / DIAGNOSTICS GAP AUDIT**.
+Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / WP2-001` — **ACTIVE / FIELD OBSERVATION**.
 
 Branch: `codex/adaptive-lifecycle-wp2-policy`  
 Draft PR: `#195`  
 Baseline: `main@2a52800f770266f7c901eb612a0b319ddca142df`  
 Machine-verified WP2 implementation head: `1f33637b215cf742e20f5a8012818ac14ad459c9`  
-Current PR head before this control transition: `d02b1a24718fe7aaa569dd7c49713bba4c39c1ac`
+CI/test-boundary corrective: `6c6665a7c1c91d72a103d297379fbfd54d6443b1`  
+Last verified control-only head before field-observation transition: `0a28939d64deb995d555d1d1c399421f8f422788`
 
-## Verified WP2 product state
+## Verified state
 
 ```text
 WP1=COMPLETE / HUMAN_ACCEPTED
@@ -25,115 +26,83 @@ WP2_CORRECTIVE_A/B/C=PASS
 AFFECTED_LIFECYCLE_WP1_REGRESSIONS=PASS
 TEST_RUNNER_PROCESS_ISOLATION=SUPPORTED_AND_IMPLEMENTED
 CANONICAL_INVENTORY_COVERAGE=PASS
-SELF_HOSTED_IMPLEMENTATION_HEAD_CI=PASS
-QA_DMG_IMPLEMENTATION_HEAD=PASS
+CI_TEST_BOUNDARY=COMPLETE
+DRAFT_FAST_GATE=VERIFIED
+CONTROL_ONLY_SCOPE_GATE=VERIFIED
+CURRENT_REQUIRED_TESTS_REMOVED=NONE
 HUMAN_INITIAL_SMOKE=PASS_NO_VISIBLE_ISSUE
-HUMAN_EXTENDED_IDLE_OBSERVATION=DEFERRED_TO_LONG_RUN_DIAGNOSTICS
 PR_195=OPEN_DRAFT_UNMERGED
 WP3=NOT_STARTED
 WP4=NOT_STARTED
 ```
 
-The installed QA build has shown no visible defect in ordinary short-run use. Long-idle and long-duration confidence will be collected from normal-use Runtime Diagnostics rather than from a single blocking manual session.
+The installed WP2 QA build has shown no visible defect in ordinary short-run use. The user has chosen to stop treating long-duration lifecycle verification as a blocking one-shot test session. WP2 now enters normal daily field observation using the existing production Runtime Diagnostics subsystem.
 
 ## CI / test boundary — CLOSED
 
-The CI/test-boundary corrective is verified and complete.
+The CI/test-boundary corrective is complete and verified.
 
-Implementation commit: `6c6665a7c1c91d72a103d297379fbfd54d6443b1`  
-Control verification head: `d02b1a24718fe7aaa569dd7c49713bba4c39c1ac`
+- Draft engineering synchronize: macOS CI run `41584306688` PASS; Debug PASS; Release/Partition A/Partition B skipped; QA DMG not triggered.
+- Control-only synchronize: macOS CI runs `41585108388` and `41585642707` PASS; scope-check PASS; Xcode/Debug/Release/Partition A/Partition B skipped; QA DMG not triggered.
+- Final full gate remains available for closeout and retains Debug + Release + arm64 verification + mandatory fresh-process Partition A + Partition B.
+- All 38 tracked test files were audited; zero tests removed.
 
-Verified behavior:
+## Runtime Diagnostics observation baseline
 
-```text
-DRAFT_ENGINEERING_FAST_GATE=PASS
-  run=41584306688
-  Debug build=PASS
-  Release build=SKIPPED
-  Partition A=SKIPPED
-  Partition B=SKIPPED
-  QA DMG=NOT_RUN
+No diagnostics source mutation is required before field observation.
 
-CONTROL_ONLY_SYNC_REQUIRED_CHECK=PASS
-  run=41585108388
-  scope-check=PASS
-  Debug build=SKIPPED
-  Release build=SKIPPED
-  Partition A=SKIPPED
-  Partition B=SKIPPED
-  QA DMG=NOT_RUN
-
-FINAL_FULL_GATE_AVAILABLE=YES
-FINAL_PARTITION_A_REQUIRED=YES
-FINAL_PARTITION_B_REQUIRED=YES
-FINAL_CANONICAL_COVERAGE_NOT_REDUCED=YES
-CURRENT_REQUIRED_TESTS_REMOVED=NONE
-PRODUCTION_FILES_CHANGED=NONE
-```
-
-PR #195 is mergeable/CLEAN with no required-check Pending after the corrective verification.
-
-All 38 tracked `FloatTabsTests` files were audited. No test met the evidence bar for duplicate/retired/temporary-harness removal, so **zero tests were deleted** and canonical coverage remains unchanged.
-
-Closed-phase local test/diagnostic artifacts were cleaned without touching user data. Preserved evidence and other-task artifacts remain intact.
-
-## Current closeout sequence
-
-1. **CI / test boundary reconciliation — COMPLETE**
-2. **Runtime Diagnostics coverage gap audit — ACTIVE / READ-ONLY FIRST**
-3. **Bounded diagnostics augmentation — BLOCKED UNTIL AUDIT PROVES A GAP**
-4. **Normal-use observation window + exported diagnostics audit — BLOCKED**
-5. **Final literal-head full gate / exact-diff → merge decision → release DMG — BLOCKED**
-
-## Diagnostics baseline already available
-
-FloatTabs already provides:
+Existing production diagnostics already provide:
 
 - Standard / Verbose Runtime Diagnostics;
 - local JSONL persistence and export;
 - default 7-day bounded retention and segmented rotation;
-- optional 60-second long-term performance observation;
+- optional long-term performance observation on a 60-second cadence;
 - `diagnostics.performance_checkpoint` sampling;
 - page-app counter delta/rate tracking;
-- lifecycle memory-pressure, reclaim, protection, hibernate and related events;
-- runtime/navigation/materialization/readiness diagnostics in existing production paths.
+- lifecycle, memory-pressure, reclaim/protection, runtime/navigation/materialization/readiness events already present in production paths.
 
-The active audit must determine whether those existing events can reconstruct the complete WP2 lifecycle chain before any new logging is added.
-
-Required reconstructable evidence:
+For this observation window, use:
 
 ```text
-slot/runtime identity
-runtime retention preference
-Automatic stage + inactive age
-protection state + reason
-reclaim eligibility + reason
-actual hibernate/teardown outcome
-subsequent materialization/readiness outcome
-recovery boundary when reload/restart/manual recovery occurs
+Runtime Diagnostics = Verbose
+Keep local diagnostic history = ON
+Long-term performance observation = ON
 ```
 
-If existing diagnostics already answer an item, reuse them. Do not create duplicate events merely for convenience.
+The app should be used normally as the user's primary FloatTabs build. No dedicated 10–20 minute blocking manual session is required.
+
+If a visible anomaly occurs, export Recent Diagnostics before reload/restart where practical and record the approximate time/Slot/retention mode. Otherwise export after normal use within the 7-day retention window.
+
+Diagnostics remain evidence only. Reload/reset/restart may prove a recovery boundary but never root cause.
+
+## Current closeout sequence
+
+1. **CI / test boundary reconciliation — COMPLETE**
+2. **Normal-use field observation with existing Runtime Diagnostics — ACTIVE**
+3. **Exported JSONL remote audit — PENDING USER SAMPLE**
+4. **Evidence-driven bounded diagnostics/product corrective — ONLY IF LOGS JUSTIFY IT**
+5. **Final literal-head full gate + exact diff → merge decision → release DMG — BLOCKED UNTIL OBSERVATION REVIEW**
+
+A separate pre-observation diagnostics coverage audit is no longer a blocking gate. If the uploaded logs later prove an evidence gap, add only the minimum instrumentation required to answer that concrete question.
 
 ## Safety boundary
 
-- diagnostics do not define product truth;
-- logging must never mutate lifecycle policy or runtime ownership;
-- Browser Profile/session/cookie/site data must never be cleared for observation or recovery;
-- Keep Loaded / Pinned protection and Automatic stage policy remain unchanged;
-- reload/reset/restart remains recovery evidence only, not root-cause proof;
-- no WP3/WP4 implementation during WP2 closeout.
+- no Browser Profile/session/cookie/site-data clearing;
+- no lifecycle ownership change for observation;
+- no unsupported WebContent process attribution workaround;
+- no runtime-count or host-RSS substitute for aggregate WebContent working-set truth;
+- Keep Loaded / Automatic policy remains unchanged;
+- no WP3/WP4 during WP2 field observation.
 
 ## Merge / release gate
 
-PR #195 remains Draft and unmerged.
+PR #195 remains Draft and unmerged during field observation.
 
-Final merge consideration requires:
+Final merge/release consideration requires:
 
-1. diagnostics coverage audit complete;
-2. any evidence-proven diagnostics gap corrected and machine-verified;
-3. normal-use diagnostics sample reviewed with no blocking WP2 regression;
-4. final literal-head **full** gate green, including Debug + Release + arm64 + mandatory Partition A + Partition B and QA DMG as required;
-5. fresh exact-diff/control reconciliation.
+1. a representative normal-use diagnostics sample reviewed with no blocking WP2 regression, or any observed blocking regression corrected;
+2. final literal-head full machine gate green;
+3. fresh exact-diff/control reconciliation;
+4. explicit merge decision.
 
-Do not merge or release before these gates are complete.
+The field-observation build may be packaged and installed for normal daily use before merge; that package is a QA/field build, not the final release artifact.
