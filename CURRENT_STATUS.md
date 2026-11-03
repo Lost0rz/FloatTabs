@@ -6,20 +6,19 @@
 
 ## Mode
 
-**MODE: ADAPTIVE LIFECYCLE — WP2 FULL-XCTEST INCIDENT DIAGNOSIS**
+**MODE: ADAPTIVE LIFECYCLE — WP2 FULL-XCTEST INCIDENT / PR-LEVEL ATTRIBUTION VERIFY**
 
-Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / WP2-001` — **ACTIVE / READ-ONLY INCIDENT DIAGNOSIS**.
+Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001 / WP2-001` — **ACTIVE / READ-ONLY PR-LEVEL ATTRIBUTION VERIFY**.
 
 Branch: `codex/adaptive-lifecycle-wp2-policy`  
 Draft PR: `#195`  
 Baseline: `main@2a52800f770266f7c901eb612a0b319ddca142df`  
-Control/design bootstrap: `e289171eff3d5045c48a86c229b7967e126ec087`  
+Original WP2 implementation evidence head: `647178030b5a448916537745e7a993e4eca0a238`  
 WP2 corrective base head: `f0705747c6a095f24d50c9ffdac21675a1bfc662`  
-WP2 corrective implementation / semantic head: `cc44537635ef451a78dc8894484c9ce9328de936`  
-Incident-diagnosis authority commit: `d4f8e1167503d664445320942417b7a368154655`  
+WP2 corrective semantic head: `cc44537635ef451a78dc8894484c9ce9328de936`  
 Durable policy: `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`
 
-## Repository / gate state
+## Verified WP2 / corrective state
 
 ```text
 WP1=COMPLETE / HUMAN_ACCEPTED
@@ -28,67 +27,80 @@ WP2_STAGED_AUTOMATIC_POLICY=IMPLEMENTED
 WP2_CORRECTIVE_A=PASS
 WP2_CORRECTIVE_B=PASS
 WP2_CORRECTIVE_C=PASS
-LOCAL_FOCUSED_CORRECTIVE_TESTS=PASS (10 run / 0 failed)
-LOCAL_AFFECTED_LIFECYCLE_WP1_REGRESSIONS=PASS (503 run / 0 failed)
-LOCAL_FULL_XCTEST=FAIL (13 test methods / 93 assertion failures; reproduced in three full runs)
-ISOLATED_13_METHOD_RERUN=PASS
-LOCAL_DEBUG_RELEASE_ARM64=PASS
+FOCUSED_CORRECTIVE_TESTS=PASS
+AFFECTED_LIFECYCLE_WP1_REGRESSIONS=PASS
+DEBUG_RELEASE_ARM64=PASS
 NATIVE_ARM64=PASS
 PACKAGE_LOCK=UNCHANGED
-GIT_DIFF_CHECK=PASS
-IMPLEMENTATION_HEAD_SELF_HOSTED_CI=FAIL / 41554110074 (Unit Tests)
-IMPLEMENTATION_HEAD_QA_DMG=PASS / 41554110135
-FINAL_PRE_DIAG_CONTROL_HEAD_SELF_HOSTED_CI=FAIL / 41555572505 (Unit Tests only; build/package/arm64 pass)
-FINAL_PRE_DIAG_CONTROL_HEAD_QA_DMG=PASS / 41555572558
-INDEPENDENT_CORRECTIVE_DIFF_AUDIT=NO_POLICY_OR_OWNERSHIP_BLOCKER / STOP_ON_XCTEST_GATE
-FULL_SUITE_FAILURE_ROOT_CAUSE=UNKNOWN
-CORRECTIVE_ATTRIBUTION=UNPROVEN
+QA_DMG=PASS
+INDEPENDENT_CORRECTIVE_DIFF_AUDIT=NO_POLICY_OR_OWNERSHIP_BLOCKER
+CORRECTIVE_ATTRIBUTION=DISPROVEN
+FULL_SUITE_ROOT_CAUSE=NARROWED
 HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
 PR_195=OPEN_DRAFT_UNMERGED
 WP3_SCHEDULING_MUTATION=NOT_STARTED
 WP4_OTHER_MUTATION=NOT_STARTED
 ```
 
-## Corrective outcome
+## XCTest incident diagnosis result
 
-Correctives A, B, and C are implemented at semantic head `cc44537635ef451a78dc8894484c9ce9328de936`:
+Read-only incident diagnosis established:
 
-- A: explicit compiler-unambiguous lifecycle-stage computation; hosted Xcode 26.6 QA DMG passes.
-- B: stale async media-plan callbacks cannot reclaim stale Runtime and re-enter canonical pressure selection from fresh facts while pressure remains active.
-- C: injected monotonic uptime and delayed scheduling make RECENT/IDLE/LONG_IDLE and stale timer/token regressions deterministic without real sleeping; production defaults remain system uptime/main-queue scheduling.
+- the same 13 WebFocusAdapter / WebViewFactory / WebsiteLayoutGeometryRegression methods fail in canonical full-suite runs on corrective base `f0705747...` and corrective semantic head `cc445376...`;
+- all 13 pass together in fresh-process same-order and reverse-order batches;
+- serial full-suite execution still fails, so parallel execution is not required;
+- a long ordered prefix reproduces the first focus failure, while the target passes without that accumulated prefix;
+- memory pressure remained low during comparable runs, while WebKit WebContent process count accumulated substantially and logs reported `Could not signal service com.apple.WebKit.WebContent: 113` before failures;
+- the exact underlying WebKit/shared-process mechanism remains unknown.
 
-Focused/affected regressions pass and the independent corrective diff audit found no policy/ownership blocker.
-
-## Remaining incident
-
-The remaining blocker is the canonical full XCTest gate. Failures occur in unchanged WebFocusAdapter, WebViewFactory, and WebsiteLayoutGeometryRegression tests. The same 13 methods pass individually. Failing runs contain WebKit fixture/page-load timeouts and related WebContent/runtime errors. Current evidence does not establish whether the corrective caused the failure, exposed pre-existing shared-state/test-order contamination, or coincided with runner/WebKit host instability/resource pressure.
-
-The self-hosted final pre-diagnosis run `41555572505` passed package resolution/lock, Debug build, Release build, and native arm64 verification; only Unit Tests failed.
-
-## Current diagnostic gate
-
-`CURRENT_TASK.md` now authorizes a bounded read-only incident diagnosis. Required causal comparison includes:
+Verdict:
 
 ```text
-exact failure inventory
-→ 13-test same-order/reverse-order fresh-process batches
-→ full-suite A/B on corrective base f0705747... vs semantic head cc445376...
-→ prefix/order contamination narrowing when applicable
-→ diagnostic-only serial comparison when applicable
-→ bounded WebKit process/runtime observations
-→ attribution/root-cause verdict
+H1_CORRECTIVE_REGRESSION=DISPROVEN
+H2_PREEXISTING_AT_CORRECTIVE_BASE=CONFIRMED
+H3_TEST_ORDER_SHARED_STATE=STRONGLY_SUPPORTED
+H4_WEBKIT_HOST_RESOURCE=UNPROVEN
+H5_PARALLEL_CONCURRENCY=NOT_NECESSARY
+CORRECTIVE_ATTRIBUTION=DISPROVEN
+FULL_SUITE_ROOT_CAUSE=NARROWED
+MUTATION_RECOMMENDATION=NONE
 ```
 
-No production/test mutation is authorized during this stage.
+## Important identity fact
 
-Required verdicts:
+GitHub comparison confirms `647178030b5a448916537745e7a993e4eca0a238 → f0705747c6a095f24d50c9ffdac21675a1bfc662` changes only:
+
+- `CURRENT_STATUS.md`
+- `CURRENT_TASK.md`
+
+There is no production-source or test-source delta between those two heads. Historical full XCTest passed at `6471780...`, while the current same-source/test `f070...` full run fails. This materially supports nondeterministic accumulated XCTest/WebKit host/shared-process state, but it does not by itself prove that the entire WP2 PR is unrelated because both refs already contain the WP2 implementation.
+
+## Remaining gate — whole-WP2 attribution
+
+Before WP2 may enter Human UI acceptance, close the remaining attribution question with a same-host/same-command read-only baseline comparison:
 
 ```text
-CORRECTIVE_ATTRIBUTION=PROVEN | DISPROVEN | UNPROVEN
-FULL_SUITE_ROOT_CAUSE=KNOWN | NARROWED | UNKNOWN
+main@2a52800f770266f7c901eb612a0b319ddca142df
+vs
+647178030b5a448916537745e7a993e4eca0a238
 ```
 
-Only evidence supporting a specific bounded mutation can authorize another EXECUTE corrective.
+Use the canonical full-XCTest command on the same Mac/toolchain. If outcomes differ, alternate/repeat enough to determine whether the difference is stable.
+
+Decision:
+
+```text
+if main and 647 reproduce the same failure family:
+    WP2_PR_ATTRIBUTION=DISPROVEN
+
+if main repeatedly passes and 647 repeatedly fails:
+    WP2_PR_ATTRIBUTION=SUPPORTED / further localization required
+
+if outcomes vary across identical-source/test reruns:
+    WP2_PR_ATTRIBUTION=UNPROVEN / harness-host nondeterminism remains
+```
+
+No production/test mutation is authorized by this status.
 
 ## Preserved WP2 policy
 
@@ -104,11 +116,10 @@ Only evidence supporting a specific bounded mutation can authorize another EXECU
 ## Next gate
 
 ```text
-complete read-only full-XCTest incident diagnosis
-→ if mutation is proven necessary, reconcile authority before mutation
-→ rerun canonical full XCTest and exact-head self-hosted CI
-→ fresh independent audit as required
-→ only if all PASS: user-owned Human UI acceptance
+same-host canonical full XCTest on main@2a528... and 6471780...
+→ determine WP2_PR_ATTRIBUTION
+→ reconcile machine-gate disposition
+→ only then decide Human UI acceptance
 ```
 
 Do not merge PR #195, release, or begin WP3/WP4 before that gate is complete.
