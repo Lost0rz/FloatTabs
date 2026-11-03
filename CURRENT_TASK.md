@@ -3,8 +3,8 @@
 **Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
 **Card ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001`  
 **Title:** Replace fixed-count normal Runtime reclaim with staged Automatic lifecycle  
-**Status:** **ACTIVE / WP2 FULL-XCTEST INCIDENT DIAGNOSIS**  
-**Mode:** `READ-ONLY INCIDENT DIAGNOSIS / EXISTING DRAFT PR / NO PRODUCT MUTATION / NO MERGE OR RELEASE`  
+**Status:** **ACTIVE / WP2 PR-LEVEL XCTEST ATTRIBUTION VERIFY**  
+**Mode:** `READ-ONLY VERIFY / EXISTING DRAFT PR / NO PRODUCT OR TEST MUTATION / NO MERGE OR RELEASE`  
 **Task class:** `WEB RUNTIME / LIFECYCLE POLICY`  
 **Baseline:** `origin/main@2a52800f770266f7c901eb612a0b319ddca142df`  
 **Branch:** `codex/adaptive-lifecycle-wp2-policy`  
@@ -15,9 +15,9 @@
 Durable WP2 policy: `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`  
 WP1 regression authority: `docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`
 
-WP2 Correctives A/B/C are implemented at semantic head `cc44537635ef451a78dc8894484c9ce9328de936`. The product policy is frozen and must not be redesigned during this incident diagnosis.
+WP2 Correctives A/B/C are implemented at semantic head `cc44537635ef451a78dc8894484c9ce9328de936`. Product policy remains frozen.
 
-## Verified corrective state
+## Verified diagnosis state
 
 ```text
 CORRECTIVE_A_HOSTED_RELEASE=PASS
@@ -29,102 +29,71 @@ DEBUG_RELEASE_ARM64=PASS
 PACKAGE_LOCK=UNCHANGED
 QA_DMG=PASS
 INDEPENDENT_CORRECTIVE_DIFF_AUDIT=NO_POLICY_OR_OWNERSHIP_BLOCKER
-FULL_XCTEST=FAIL
-SELF_HOSTED_CI=FAIL_AT_UNIT_TESTS
-FULL_SUITE_FAILURE_ROOT_CAUSE=UNKNOWN
-CORRECTIVE_ATTRIBUTION=UNPROVEN
+CORRECTIVE_ATTRIBUTION=DISPROVEN
+FULL_SUITE_ROOT_CAUSE=NARROWED
+MUTATION_RECOMMENDATION=NONE
 HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
 WP3_SCHEDULING_MUTATION=NOT_STARTED
 WP4_OTHER_MUTATION=NOT_STARTED
 ```
 
-The full-suite failure reproduces in unchanged WebFocusAdapter, WebViewFactory, and WebsiteLayoutGeometryRegression tests. The same 13 failing methods pass when run individually. Current evidence includes WebKit fixture/page-load timeouts and related WebContent/runtime errors. These facts narrow the incident but do not prove whether the corrective caused it, exposed a pre-existing shared-state/test-order issue, or coincided with runner/WebKit host instability.
+The read-only incident diagnosis reproduced the same 13-method full-suite failure on both corrective base `f0705747c6a095f24d50c9ffdac21675a1bfc662` and corrective semantic head `cc44537635ef451a78dc8894484c9ce9328de936`. The 13 methods pass in fresh-process same-order and reverse-order batches. Serial full-suite execution still fails. A long ordered prefix is required to reproduce the first focus failure. This disproves attribution to Correctives A/B/C and strongly supports cumulative XCTest/WebKit shared-process state; the exact mechanism is still unknown.
 
-## Current authorization — bounded incident diagnosis
+GitHub comparison additionally confirms that `647178030b5a448916537745e7a993e4eca0a238 → f0705747c6a095f24d50c9ffdac21675a1bfc662` modifies only `CURRENT_STATUS.md` and `CURRENT_TASK.md`, with no source/test delta. Historical full XCTest passed at `6471780...`, while a current same-source/test run at `f070...` fails, reinforcing nondeterministic host/shared-process evidence.
 
-Before any further product/test mutation, establish causal attribution for the full XCTest failure using controlled read-only executions and existing artifacts.
+## Current authorization — final read-only WP2 PR attribution check
 
-Required hypotheses to distinguish:
+The remaining decision is not whether Correctives A/B/C caused the failure; that question is closed as `DISPROVEN`.
 
-1. **Corrective regression:** the corrective semantic changes cause cumulative/shared WebKit failure during the full suite.
-2. **Pre-existing WP2/full-suite issue:** the same failure reproduces on corrective base `f0705747c6a095f24d50c9ffdac21675a1bfc662` under the same command/environment.
-3. **Test-order/shared-state contamination:** a preceding test/suite poisons WebKit state and the 13 tests fail only after a specific prefix or within a shared full-suite process.
-4. **Runner/WebKit host instability/resource exhaustion:** process/bootstrap/load failure appears independently of the corrective and correlates with host/runtime state rather than product semantics.
-5. **Parallel/concurrency interaction:** full-suite concurrency changes the result while serial execution does not.
+The remaining decision is whether the full-suite failure is attributable to the WP2 PR as a whole or is independently reproducible on the pre-WP2 baseline.
 
-Diagnosis must prefer exact A/B evidence over intuition. Retry/pass, runner restart, service restart, or app restart is recovery evidence only and never root-cause proof.
+Run the canonical full-XCTest command under the same Mac/toolchain/environment on clean isolated checkouts of:
 
-## Required diagnostic matrix
+1. `main@2a52800f770266f7c901eb612a0b319ddca142df`
+2. `647178030b5a448916537745e7a993e4eca0a238`
 
-Use clean temporary worktrees or equivalent isolated checkouts. Preserve all unique work. Do not mutate the active WP2 branch during diagnosis.
+Use the same invocation used by self-hosted CI. Do not edit source/tests/workflow. Do not clear caches, website data, Browser Profiles, or kill/restart WebKit helpers as part of the primary comparison.
 
-### A — exact failure inventory
+If the first A/B outcomes differ, alternate/repeat enough to distinguish a stable ref-dependent difference from nondeterministic host/shared-process behavior.
 
-From the failing `.xcresult` / CI diagnostics, record:
-- exact 13 failing test methods;
-- first failing test in execution order;
-- failure timestamps/order;
-- WebKit/WebContent/NetworkProcess errors immediately preceding the first load timeout;
-- whether failures are primary load-timeout failures followed by dependent assertions.
+## Required decision
 
-### B — current corrective head, fresh-process batch
-
-On corrective semantic head `cc44537635ef451a78dc8894484c9ce9328de936` (or a control-only descendant only after proving source/test identity):
-- run the 13 failing methods together in one fresh xcodebuild process in the same order;
-- run them together in reverse order;
-- record PASS/FAIL and first failure.
-
-### C — full-suite causal A/B against corrective base
-
-Run the same full XCTest command, same machine/toolchain/environment, on:
-- corrective base `f0705747c6a095f24d50c9ffdac21675a1bfc662`;
-- corrective semantic head `cc44537635ef451a78dc8894484c9ce9328de936`.
-
-Prefer alternating runs rather than completing all runs on one ref first. Obtain at least one fresh comparable full run per ref. If outcomes differ, repeat enough to determine whether the difference is stable or flaky. Do not infer causality from different machines/toolchains.
-
-### D — order/prefix contamination
-
-If the 13-test batch passes but full suite fails:
-- identify the test/suite prefix immediately before the first failing method;
-- run that prefix followed by the first failing test in one xcodebuild process;
-- narrow the smallest practical poisoning prefix by grouped/binary search;
-- do not edit product code while narrowing.
-
-### E — serial/concurrency diagnostic
-
-If the canonical full-suite command permits test parallelism, run a diagnostic-only serial equivalent (`-parallel-testing-enabled NO` or repository-appropriate equivalent) on the same ref.
-
-This is diagnostic evidence only. Do not weaken the canonical CI gate or change workflow configuration solely because serial execution passes.
-
-### F — bounded host/runtime observations
-
-During comparable runs capture non-destructive observations only:
-- WebKit.WebContent / Network process counts before, during, after;
-- relevant process/fd counts where practical;
-- macOS memory-pressure state if available through supported ordinary tools;
-- exact WebKit bootstrap/sandbox/process errors from failing runs.
-
-Do not kill helpers, clear caches, delete website data, restart services, or reboot as part of primary diagnosis.
-
-## Decision gate
-
-Return one of:
+Return exactly one whole-PR attribution verdict:
 
 ```text
-CORRECTIVE_ATTRIBUTION=PROVEN
-CORRECTIVE_ATTRIBUTION=DISPROVEN
-CORRECTIVE_ATTRIBUTION=UNPROVEN
+WP2_PR_ATTRIBUTION=DISPROVEN
+WP2_PR_ATTRIBUTION=SUPPORTED
+WP2_PR_ATTRIBUTION=UNPROVEN
 ```
 
-and:
+Interpretation:
+
+- `DISPROVEN`: pre-WP2 main reproduces the same material failure family under comparable conditions.
+- `SUPPORTED`: main repeatedly passes while the WP2 implementation ref repeatedly fails under comparable conditions; further localization is required before mutation.
+- `UNPROVEN`: outcomes vary or evidence is otherwise insufficient to distinguish ref effect from harness/host nondeterminism.
+
+Also return:
 
 ```text
-FULL_SUITE_ROOT_CAUSE=KNOWN
-FULL_SUITE_ROOT_CAUSE=NARROWED
-FULL_SUITE_ROOT_CAUSE=UNKNOWN
+MAIN_BASELINE_FULL_XCTEST_RESULT
+WP2_647_FULL_XCTEST_RESULT
+ALTERNATING_REPEAT_RESULT
+FAILURE_SET_COMPARISON
+HOST_TOOLCHAIN_IDENTITY
+WP2_PR_ATTRIBUTION
+FULL_SUITE_ROOT_CAUSE
+MUTATION_RECOMMENDATION
 ```
 
-Only after evidence supports a specific bounded mutation may another EXECUTE corrective be authorized. Do not modify production source or tests during this read-only incident stage.
+## Machine-gate disposition
+
+Do not promote Human UI acceptance yet.
+
+After the whole-PR attribution verdict:
+
+- if WP2 attribution is `SUPPORTED`, stop and reconcile a bounded corrective/diagnostic scope before mutation;
+- if attribution is `DISPROVEN`, return to Project Governance to decide how the known unrelated harness/full-suite failure should be dispositioned without weakening or silently bypassing the canonical test gate;
+- if attribution is `UNPROVEN`, keep the machine gate blocked and return the unresolved evidence.
 
 ## Frozen product/regression boundary
 
@@ -139,36 +108,26 @@ Preserve:
 
 ## STOP conditions
 
-Stop and report evidence if diagnosis would require:
+Stop and report evidence if verification would require:
 - product source/test mutation;
+- CI workflow mutation;
+- increasing timeouts or disabling tests;
 - clearing Browser Profile/session/cache/website data;
 - private WebKit SPI;
-- killing WebKit helpers;
-- weakening canonical CI/full-XCTest acceptance;
-- treating restart/retry success as root cause;
+- killing/restarting WebKit helpers as root-cause proof;
 - entering WP3/WP4;
 - merge/release.
 
 ## Return contract
 
-Return observed values for:
-
 ```text
 DIAGNOSTIC_BASELINE
-CURRENT_CORRECTIVE_HEAD
-FAILURE_SET
-FIRST_FAILURE
-PRIMARY_FAILURE_PATTERN
-CURRENT_13_SAME_ORDER_RESULT
-CURRENT_13_REVERSE_ORDER_RESULT
-BASE_F070_FULL_XCTEST_RESULT
-CURRENT_CC445_FULL_XCTEST_RESULT
+MAIN_BASELINE_FULL_XCTEST_RESULT
+WP2_647_FULL_XCTEST_RESULT
 ALTERNATING_REPEAT_RESULT
-POISONING_PREFIX_RESULT
-SERIAL_FULL_XCTEST_RESULT
-WEBKIT_PROCESS_OBSERVATIONS
-WEBKIT_ERROR_EVIDENCE
-CORRECTIVE_ATTRIBUTION
+FAILURE_SET_COMPARISON
+HOST_TOOLCHAIN_IDENTITY
+WP2_PR_ATTRIBUTION
 FULL_SUITE_ROOT_CAUSE
 MUTATION_RECOMMENDATION
 HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
