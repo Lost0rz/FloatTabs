@@ -1,4 +1,5 @@
 import AppKit
+import Dispatch
 import XCTest
 @testable import FloatTabs
 
@@ -810,7 +811,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
-    func testAutomaticStageBoundariesKeepIdleResidentThenReclaimAtLongIdle() async throws {
+    func testAutomaticStageBoundariesKeepIdleResidentThenReclaimAtLongIdle() throws {
         XCTAssertEqual(
             AutomaticLifecycleStage.resolve(
                 inactiveDuration: 29,
@@ -849,21 +850,35 @@ final class WebAttentionLifecycleTests: XCTestCase {
         _ = try pool.webView(for: profile)
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let scheduler = ManualLifecycleScheduler(now: 100)
         let lifecycle = makeLifecycle(
             pool: pool,
-            recentStageDuration: 0.025,
-            longIdleThreshold: 0.10,
+            recentStageDuration: 30,
+            longIdleThreshold: 600,
+            monotonicUptime: { scheduler.now },
+            scheduleDelayedWork: { delay, workItem in
+                scheduler.schedule(after: delay, workItem: workItem)
+            },
             diagnostics: diagnostics
         )
 
         makeInactive(lifecycle, profile: profile)
-        try await wait(milliseconds: 10)
         XCTAssertEqual(lifecycle.debugInactiveStage(slotID: profile.id), .recent)
         XCTAssertTrue(pool.contains(slotID: profile.id))
-        try await wait(milliseconds: 35)
+
+        scheduler.advance(to: 129.999)
+        XCTAssertEqual(lifecycle.debugInactiveStage(slotID: profile.id), .recent)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+
+        scheduler.advance(to: 130)
         XCTAssertEqual(lifecycle.debugInactiveStage(slotID: profile.id), .idle)
         XCTAssertTrue(pool.contains(slotID: profile.id))
-        try await wait(milliseconds: 90)
+
+        scheduler.advance(to: 699.999)
+        XCTAssertEqual(lifecycle.debugInactiveStage(slotID: profile.id), .idle)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+
+        scheduler.advance(to: 700)
         XCTAssertFalse(pool.contains(slotID: profile.id))
         let hibernations = writer.events.filter { $0.event == "slot_lifecycle.hibernate" }
         XCTAssertEqual(hibernations.count, 1)
@@ -871,6 +886,35 @@ final class WebAttentionLifecycleTests: XCTestCase {
             hibernations.first?.fields["release_reason"],
             .string("automatic_long_idle_expired")
         )
+    }
+
+    func testReactivationInvalidatesScheduledStageBoundary() throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "ReactivatedBeforeBoundary", policy: .warm)
+        _ = try pool.webView(for: profile)
+        let scheduler = ManualLifecycleScheduler(now: 100)
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            recentStageDuration: 30,
+            longIdleThreshold: 600,
+            monotonicUptime: { scheduler.now },
+            scheduleDelayedWork: { delay, workItem in
+                scheduler.schedule(after: delay, workItem: workItem)
+            }
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        XCTAssertNotNil(lifecycle.debugInactivePlanToken(slotID: profile.id))
+
+        scheduler.advance(to: 110)
+        lifecycle.activate(profile: profile)
+        XCTAssertNil(lifecycle.debugInactivePlanToken(slotID: profile.id))
+
+        // Run the old plan's queued boundary after reactivation. Its captured
+        // token must not reclaim or mutate the current Runtime.
+        scheduler.advance(to: 800)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertNil(lifecycle.debugInactivePlanToken(slotID: profile.id))
     }
 
     func testCriticalMayBypassRecentButWarningMustWaitUntilIdle() throws {
@@ -1010,6 +1054,181 @@ final class WebAttentionLifecycleTests: XCTestCase {
 
         try await wait(milliseconds: 700)
         XCTAssertEqual(pool.count, 0)
+    }
+
+    func testMediaPlayingPressureCandidateStaysProtectedWhileAnotherEligibleRuntimeProgresses() throws {
+        let pool = makePool()
+        var mediaProfile = makeProfile(name: "PressureMedia", policy: .warm)
+        mediaProfile.backgroundMediaPolicy = .allowBackgroundAudio
+        let eligibleProfile = makeProfile(name: "PressureEligible", policy: .warm)
+        _ = try pool.webView(for: mediaProfile)
+        _ = try pool.webView(for: eligibleProfile)
+
+        let scheduler = ManualLifecycleScheduler(now: 1_000)
+        var mediaQueryCount = 0
+        var pressureMediaResult: ((Bool) -> Void)?
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            recentStageDuration: 30,
+            longIdleThreshold: 600,
+            monotonicUptime: { scheduler.now },
+            scheduleDelayedWork: { delay, workItem in
+                scheduler.schedule(after: delay, workItem: workItem)
+            },
+            mediaPlayingQuery: { slotID, completion in
+                guard slotID == mediaProfile.id else { return }
+                mediaQueryCount += 1
+                if mediaQueryCount == 1 {
+                    completion(false)
+                } else {
+                    pressureMediaResult = completion
+                }
+            }
+        )
+
+        makeInactive(lifecycle, profile: mediaProfile)
+        XCTAssertEqual(mediaQueryCount, 1)
+        scheduler.advance(to: 1_001)
+        makeInactive(lifecycle, profile: eligibleProfile)
+        scheduler.advance(to: 1_031)
+        XCTAssertEqual(lifecycle.debugInactiveStage(slotID: mediaProfile.id), .idle)
+        XCTAssertEqual(lifecycle.debugInactiveStage(slotID: eligibleProfile.id), .idle)
+
+        lifecycle.handleMemoryPressure(.warning)
+        XCTAssertNotNil(pressureMediaResult)
+        pressureMediaResult?(true)
+        XCTAssertTrue(lifecycle.mediaProtectedIDs.contains(mediaProfile.id))
+
+        // The async media result schedules the existing progressive step.
+        // It skips the protected oldest candidate and reselects the other
+        // eligible Runtime from current facts.
+        scheduler.advance(to: 1_031.5)
+        XCTAssertTrue(pool.contains(slotID: mediaProfile.id))
+        XCTAssertTrue(lifecycle.mediaProtectedIDs.contains(mediaProfile.id))
+        XCTAssertFalse(pool.contains(slotID: eligibleProfile.id))
+    }
+
+    func testStaleAsyncPressurePlanReentersFreshCandidateSelection() throws {
+        let pool = makePool()
+        var mediaProfile = makeProfile(name: "StalePressureMedia", policy: .warm)
+        mediaProfile.backgroundMediaPolicy = .allowBackgroundAudio
+        let nextEligibleProfile = makeProfile(name: "FreshPressureCandidate", policy: .warm)
+        _ = try pool.webView(for: mediaProfile)
+        _ = try pool.webView(for: nextEligibleProfile)
+
+        let scheduler = ManualLifecycleScheduler(now: 2_000)
+        var mediaQueries: [(UUID, (Bool) -> Void)] = []
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            recentStageDuration: 30,
+            longIdleThreshold: 600,
+            monotonicUptime: { scheduler.now },
+            scheduleDelayedWork: { delay, workItem in
+                scheduler.schedule(after: delay, workItem: workItem)
+            },
+            mediaPlayingQuery: { slotID, completion in
+                mediaQueries.append((slotID, completion))
+            }
+        )
+
+        makeInactive(lifecycle, profile: mediaProfile)
+        let (initialSlotID, initialMediaResult) = mediaQueries.removeFirst()
+        XCTAssertEqual(initialSlotID, mediaProfile.id)
+        initialMediaResult(false)
+
+        scheduler.advance(to: 2_001)
+        makeInactive(lifecycle, profile: nextEligibleProfile)
+        scheduler.advance(to: 2_030)
+        lifecycle.handleMemoryPressure(.warning)
+        XCTAssertEqual(mediaQueries.count, 1)
+        let (pressureSlotID, pressureMediaResult) = mediaQueries.removeFirst()
+        XCTAssertEqual(pressureSlotID, mediaProfile.id)
+
+        // Make the captured oldest plan stale while its media query is still
+        // in flight. The other candidate becomes IDLE before that callback.
+        scheduler.advance(to: 2_031)
+        lifecycle.activate(profile: mediaProfile)
+        pressureMediaResult(false)
+
+        XCTAssertTrue(pool.contains(slotID: mediaProfile.id))
+        XCTAssertFalse(pool.contains(slotID: nextEligibleProfile.id))
+    }
+
+    func testPressureNormalizationDuringAsyncMediaEvaluationDoesNotRestartReclaim() throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "NormalizedAsyncPressure", policy: .warm)
+        profile.backgroundMediaPolicy = .allowBackgroundAudio
+        _ = try pool.webView(for: profile)
+
+        let scheduler = ManualLifecycleScheduler(now: 3_000)
+        var mediaQueries: [(UUID, (Bool) -> Void)] = []
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            recentStageDuration: 30,
+            longIdleThreshold: 600,
+            monotonicUptime: { scheduler.now },
+            scheduleDelayedWork: { delay, workItem in
+                scheduler.schedule(after: delay, workItem: workItem)
+            },
+            mediaPlayingQuery: { slotID, completion in
+                mediaQueries.append((slotID, completion))
+            }
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        let (_, initialMediaResult) = mediaQueries.removeFirst()
+        initialMediaResult(false)
+        scheduler.advance(to: 3_030)
+
+        lifecycle.handleMemoryPressure(.warning)
+        XCTAssertEqual(mediaQueries.count, 1)
+        let (_, stalePressureResult) = mediaQueries.removeFirst()
+        lifecycle.handleMemoryPressureNormalized()
+        stalePressureResult(false)
+
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        scheduler.advance(to: 3_100)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+    }
+
+    func testOldPressureEvaluationTokenCannotMutateNewCriticalEvaluation() throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "PressureTokenIsolation", policy: .warm)
+        profile.backgroundMediaPolicy = .allowBackgroundAudio
+        _ = try pool.webView(for: profile)
+
+        let scheduler = ManualLifecycleScheduler(now: 4_000)
+        var mediaQueries: [(UUID, (Bool) -> Void)] = []
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            recentStageDuration: 30,
+            longIdleThreshold: 600,
+            monotonicUptime: { scheduler.now },
+            scheduleDelayedWork: { delay, workItem in
+                scheduler.schedule(after: delay, workItem: workItem)
+            },
+            mediaPlayingQuery: { slotID, completion in
+                mediaQueries.append((slotID, completion))
+            }
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        let (_, initialMediaResult) = mediaQueries.removeFirst()
+        initialMediaResult(false)
+        scheduler.advance(to: 4_030)
+
+        lifecycle.handleMemoryPressure(.warning)
+        XCTAssertEqual(mediaQueries.count, 1)
+        let (_, staleWarningResult) = mediaQueries.removeFirst()
+        lifecycle.handleMemoryPressure(.critical)
+        XCTAssertEqual(mediaQueries.count, 1)
+        let (_, currentCriticalResult) = mediaQueries.removeFirst()
+
+        staleWarningResult(false)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+
+        currentCriticalResult(false)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
     // MARK: Sustained-pressure eligibility re-entry
@@ -1308,35 +1527,45 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: ordinary.id))
     }
 
-    func testStaleTimerCallbackCannotReleaseSlotAfterAttentionStarts() async throws {
+    func testStaleTimerCallbackCannotReleaseSlotAfterAttentionStarts() throws {
         let pool = makePool()
         let profile = makeProfile(name: "StaleTimer", policy: .warm)
         _ = try pool.webView(for: profile)
         var attentionProtected = false
+        let scheduler = ManualLifecycleScheduler(now: 100)
         let lifecycle = makeLifecycle(
             pool: pool,
             longIdleThreshold: 0.02,
+            monotonicUptime: { scheduler.now },
+            scheduleDelayedWork: { delay, workItem in
+                scheduler.schedule(after: delay, workItem: workItem)
+            },
             attentionProtectionQuery: { _ in attentionProtected }
         )
 
         makeInactive(lifecycle, profile: profile)
-        try await wait(milliseconds: 10)
+        scheduler.advance(to: 100.01)
         attentionProtected = true
-        try await wait(milliseconds: 60)
+        scheduler.advance(to: 100.03)
 
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
-    func testStaleAsyncMediaResultCannotReleaseNewlyAttentionProtectedSlot() async throws {
+    func testStaleAsyncMediaResultCannotReleaseNewlyAttentionProtectedSlot() throws {
         let pool = makePool()
         var profile = makeProfile(name: "StaleMedia", policy: .cold)
         profile.backgroundMediaPolicy = .allowBackgroundAudio
         _ = try pool.webView(for: profile)
         var pendingMediaResult: ((Bool) -> Void)?
         var attentionProtected = false
+        let scheduler = ManualLifecycleScheduler(now: 100)
         let lifecycle = makeLifecycle(
             pool: pool,
             longIdleThreshold: 0.02,
+            monotonicUptime: { scheduler.now },
+            scheduleDelayedWork: { delay, workItem in
+                scheduler.schedule(after: delay, workItem: workItem)
+            },
             mediaPlayingQuery: { _, completion in
                 pendingMediaResult = completion
             },
@@ -1347,22 +1576,27 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertNotNil(pendingMediaResult)
         attentionProtected = true
         pendingMediaResult?(false)
-        try await wait(milliseconds: 70)
+        scheduler.advance(to: 100.07)
 
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
-    func testAsyncMediaResultFromReleasedRuntimeCannotAdvanceOldPlan() async throws {
+    func testAsyncMediaResultFromReleasedRuntimeCannotAdvanceOldPlan() throws {
         let pool = makePool()
         var profile = makeProfile(name: "ReleasedMedia", policy: .cold)
         profile.backgroundMediaPolicy = .allowBackgroundAudio
         _ = try pool.webView(for: profile)
         var pendingMediaResults: [(Bool) -> Void] = []
         var mediaQueryCount = 0
+        let scheduler = ManualLifecycleScheduler(now: 100)
         let lifecycle = makeLifecycle(
             pool: pool,
             longIdleThreshold: 0.02,
             mediaProtectionPollDelay: 0.01,
+            monotonicUptime: { scheduler.now },
+            scheduleDelayedWork: { delay, workItem in
+                scheduler.schedule(after: delay, workItem: workItem)
+            },
             mediaPlayingQuery: { _, completion in
                 mediaQueryCount += 1
                 pendingMediaResults.append(completion)
@@ -1374,19 +1608,24 @@ final class WebAttentionLifecycleTests: XCTestCase {
         // The pending query belongs to this exact Runtime.
         pool.release(slotID: profile.id)
         pendingMediaResults.removeFirst()(true)
-        try await wait(milliseconds: 70)
+        scheduler.advance(to: 100.1)
 
         XCTAssertEqual(mediaQueryCount, 1)
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
-    func testOldInactivePlanCannotReclaimReplacementRuntimeGeneration() async throws {
+    func testOldInactivePlanCannotReclaimReplacementRuntimeGeneration() throws {
         let pool = makePool()
         let profile = makeProfile(name: "ReplacementRuntime", policy: .warm)
         _ = try pool.webView(for: profile)
+        let scheduler = ManualLifecycleScheduler(now: 100)
         let lifecycle = makeLifecycle(
             pool: pool,
-            longIdleThreshold: 0.04
+            longIdleThreshold: 0.04,
+            monotonicUptime: { scheduler.now },
+            scheduleDelayedWork: { delay, workItem in
+                scheduler.schedule(after: delay, workItem: workItem)
+            }
         )
         makeInactive(lifecycle, profile: profile)
         let oldPlanToken = try XCTUnwrap(lifecycle.debugInactivePlanToken(slotID: profile.id))
@@ -1395,7 +1634,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         _ = try pool.webView(for: profile)
         XCTAssertEqual(lifecycle.debugInactivePlanToken(slotID: profile.id), oldPlanToken)
 
-        try await wait(milliseconds: 90)
+        scheduler.advance(to: 100.04)
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
@@ -1410,6 +1649,10 @@ final class WebAttentionLifecycleTests: XCTestCase {
         hiddenActiveGraceDelay: TimeInterval = 120,
         mediaProtectionPollDelay: TimeInterval = 0.01,
         pressureStepDelay: TimeInterval = 0.02,
+        monotonicUptime: @escaping SlotLifecycleCoordinator.MonotonicUptimeProvider = {
+            ProcessInfo.processInfo.systemUptime
+        },
+        scheduleDelayedWork: SlotLifecycleCoordinator.DelayedWorkScheduler? = nil,
         mediaPlayingQuery: SlotLifecycleCoordinator.MediaPlayingQuery? = nil,
         prepareRuntimeForRelease: @escaping SlotLifecycleCoordinator.RuntimeReleasePreparation = { _ in },
         onRuntimeReleased: @escaping SlotLifecycleCoordinator.RuntimeReleasedHandler = { _ in },
@@ -1429,6 +1672,8 @@ final class WebAttentionLifecycleTests: XCTestCase {
             hiddenActiveGraceDelay: hiddenActiveGraceDelay,
             mediaProtectionPollDelay: mediaProtectionPollDelay,
             pressureStepDelay: pressureStepDelay,
+            monotonicUptime: monotonicUptime,
+            scheduleDelayedWork: scheduleDelayedWork,
             mediaPlayingQuery: mediaPlayingQuery,
             onRuntimeReleased: onRuntimeReleased,
             prepareRuntimeForRelease: prepareRuntimeForRelease,
@@ -1481,6 +1726,53 @@ final class WebAttentionLifecycleTests: XCTestCase {
                 return false
             }
             try await wait(milliseconds: pollMilliseconds)
+        }
+    }
+}
+
+@MainActor
+private final class ManualLifecycleScheduler {
+    private struct ScheduledWork {
+        let deadline: TimeInterval
+        let order: UInt64
+        let workItem: DispatchWorkItem
+    }
+
+    private(set) var now: TimeInterval
+    private var nextOrder: UInt64 = 0
+    private var scheduledWork: [ScheduledWork] = []
+
+    init(now: TimeInterval) {
+        self.now = now
+    }
+
+    func schedule(after delay: TimeInterval, workItem: DispatchWorkItem) {
+        scheduledWork.append(
+            ScheduledWork(
+                deadline: now + max(delay, 0),
+                order: nextOrder,
+                workItem: workItem
+            )
+        )
+        nextOrder += 1
+    }
+
+    func advance(to target: TimeInterval) {
+        let boundedTarget = max(now, target)
+        now = boundedTarget
+        while let nextIndex = scheduledWork.indices
+            .filter({ scheduledWork[$0].deadline <= boundedTarget })
+            .min(by: {
+                let lhs = scheduledWork[$0]
+                let rhs = scheduledWork[$1]
+                return lhs.deadline == rhs.deadline
+                    ? lhs.order < rhs.order
+                    : lhs.deadline < rhs.deadline
+            }) {
+            let next = scheduledWork.remove(at: nextIndex)
+            if !next.workItem.isCancelled {
+                next.workItem.perform()
+            }
         }
     }
 }

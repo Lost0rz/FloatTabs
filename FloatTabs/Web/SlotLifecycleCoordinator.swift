@@ -81,6 +81,8 @@ final class SlotLifecycleCoordinator {
     typealias RuntimeReleasePreparation = @MainActor (UUID) -> Void
     typealias SlotBecameInactiveHandler = @MainActor (WebAppProfile) -> Void
     typealias AttentionProtectionQuery = @MainActor (UUID) -> Bool
+    typealias MonotonicUptimeProvider = @MainActor () -> TimeInterval
+    typealias DelayedWorkScheduler = @MainActor (TimeInterval, DispatchWorkItem) -> Void
 
     private struct InactivePlan {
         let token: UUID
@@ -105,6 +107,8 @@ final class SlotLifecycleCoordinator {
     private let mediaProtectionPollDelay: TimeInterval
     private let mediaPlayingQuery: MediaPlayingQuery
     private let mediaPauseAction: MediaPauseAction
+    private let monotonicUptime: MonotonicUptimeProvider
+    private let scheduleDelayedWork: DelayedWorkScheduler
     private let onRuntimeReleased: RuntimeReleasedHandler
     private let prepareRuntimeForRelease: RuntimeReleasePreparation
     private let onSlotBecameInactive: SlotBecameInactiveHandler
@@ -137,6 +141,8 @@ final class SlotLifecycleCoordinator {
         hiddenActiveGraceDelay: TimeInterval = SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay,
         mediaProtectionPollDelay: TimeInterval = SlotLifecycleCoordinator.defaultMediaProtectionPollDelay,
         pressureStepDelay: TimeInterval = SlotLifecycleCoordinator.defaultPressureStepDelay,
+        monotonicUptime: @escaping MonotonicUptimeProvider = { ProcessInfo.processInfo.systemUptime },
+        scheduleDelayedWork: DelayedWorkScheduler? = nil,
         mediaPlayingQuery: MediaPlayingQuery? = nil,
         mediaPauseAction: MediaPauseAction? = nil,
         onRuntimeReleased: @escaping RuntimeReleasedHandler = { _ in },
@@ -153,6 +159,10 @@ final class SlotLifecycleCoordinator {
         self.hiddenActiveGraceDelay = max(hiddenActiveGraceDelay, 0)
         self.mediaProtectionPollDelay = max(mediaProtectionPollDelay, 0.01)
         self.pressureStepDelay = max(pressureStepDelay, 0)
+        self.monotonicUptime = monotonicUptime
+        self.scheduleDelayedWork = scheduleDelayedWork ?? { delay, workItem in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+        }
         self.mediaPlayingQuery = mediaPlayingQuery ?? { [weak webViewPool] slotID, completion in
             guard let webViewPool else {
                 completion(false)
@@ -382,7 +392,7 @@ final class SlotLifecycleCoordinator {
             id: UUID(),
             kind: .memoryPressure,
             trigger: level == .critical ? "critical" : "warning",
-            startedAtUptime: ProcessInfo.processInfo.systemUptime
+            startedAtUptime: monotonicUptime()
         )
         let previousLevel = latestMemoryPressureLevel
         latestMemoryPressureLevel = level
@@ -555,7 +565,7 @@ final class SlotLifecycleCoordinator {
 
     private func createInactivePlan(
         for profile: WebAppProfile,
-        inactiveSinceUptime: TimeInterval = ProcessInfo.processInfo.systemUptime,
+        inactiveSinceUptime: TimeInterval? = nil,
         mediaFactAlreadyChecked: Bool = false
     ) {
         guard profile.runtimeRetentionPreference == .automatic else {
@@ -567,15 +577,16 @@ final class SlotLifecycleCoordinator {
             return
         }
         let runtimeObjectID = ObjectIdentifier(webView)
+        let inactiveSince = inactiveSinceUptime ?? monotonicUptime()
         let initialStage = profile.runtimeRetentionPreference == .automatic
-            ? stage(forInactiveSince: inactiveSinceUptime)
+            ? stage(forInactiveSince: inactiveSince)
             : nil
         let plan = InactivePlan(
             token: UUID(),
             profile: profile,
             retentionPreference: profile.runtimeRetentionPreference,
             backgroundMediaPolicy: profile.backgroundMediaPolicy,
-            inactiveSinceUptime: inactiveSinceUptime,
+            inactiveSinceUptime: inactiveSince,
             runtimeObjectID: runtimeObjectID,
             stage: initialStage
         )
@@ -667,14 +678,14 @@ final class SlotLifecycleCoordinator {
         for profile: WebAppProfile,
         plan: InactivePlan
     ) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + mediaProtectionPollDelay) { [weak self] in
+        scheduleDelayedWork(mediaProtectionPollDelay, DispatchWorkItem { [weak self] in
             guard let self,
                   self.planMatches(plan, slotID: profile.id),
                   !self.isVisibleSlot(profile.id) else {
                 return
             }
             self.evaluateMediaProtection(for: profile, plan: plan)
-        }
+        })
     }
 
     private func scheduleNextStageBoundary(
@@ -693,10 +704,10 @@ final class SlotLifecycleCoordinator {
         case .longIdle:
             return
         }
-        let elapsed = max(ProcessInfo.processInfo.systemUptime - plan.inactiveSinceUptime, 0)
+        let elapsed = max(monotonicUptime() - plan.inactiveSinceUptime, 0)
         let delay = max(nextBoundary - elapsed, 0)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        scheduleDelayedWork(delay, DispatchWorkItem { [weak self] in
             guard let self,
                   self.planMatches(plan, slotID: profile.id),
                   !self.isVisibleSlot(profile.id),
@@ -708,7 +719,7 @@ final class SlotLifecycleCoordinator {
                 expectedPlan: plan,
                 refreshPressureEligibility: true
             )
-        }
+        })
     }
 
     private func advanceInactiveStage(
@@ -831,7 +842,7 @@ final class SlotLifecycleCoordinator {
             ]
         )
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + hiddenActiveGraceDelay) { [weak self] in
+        scheduleDelayedWork(hiddenActiveGraceDelay, DispatchWorkItem { [weak self] in
             guard let self,
                   self.hiddenActiveToken == token,
                   !self.panelIsVisible,
@@ -862,7 +873,7 @@ final class SlotLifecycleCoordinator {
             )
             self.prepareInactive(profile: profile)
             self.reconcileProgressivePressureIfNeeded()
-        }
+        })
     }
 
     private func pressureCandidates() -> [RuntimePressurePolicy.Candidate] {
@@ -906,7 +917,7 @@ final class SlotLifecycleCoordinator {
 
     private func stage(forInactiveSince inactiveSinceUptime: TimeInterval) -> AutomaticLifecycleStage {
         AutomaticLifecycleStage.resolve(
-            inactiveDuration: ProcessInfo.processInfo.systemUptime - inactiveSinceUptime,
+            inactiveDuration: monotonicUptime() - inactiveSinceUptime,
             recentStageDuration: recentStageDuration,
             longIdleThreshold: longIdleThreshold
         )
@@ -982,8 +993,13 @@ final class SlotLifecycleCoordinator {
                     return
                 }
                 self.pressureReclaimEvaluationToken = nil
-                guard self.planMatches(plan, slotID: candidate.slotID),
-                      let currentLevel = self.latestMemoryPressureLevel else {
+                guard let currentLevel = self.latestMemoryPressureLevel else { return }
+                guard self.planMatches(plan, slotID: candidate.slotID) else {
+                    // The captured plan may have been cancelled while media
+                    // validation was in flight. Keep the owned ladder moving
+                    // under sustained pressure, but select again from fresh
+                    // current Runtime and protection facts.
+                    self.reconcileProgressivePressureIfNeeded()
                     return
                 }
                 if isPlaying {
@@ -1026,10 +1042,7 @@ final class SlotLifecycleCoordinator {
             self.beginProgressivePressureReclaim(level: latestLevel)
         }
         pressureReclaimWorkItem = workItem
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + pressureStepDelay,
-            execute: workItem
-        )
+        scheduleDelayedWork(pressureStepDelay, workItem)
     }
 
     private func recordMemoryPressureEvaluations(
@@ -1049,7 +1062,12 @@ final class SlotLifecycleCoordinator {
             let preference = knownProfiles[slotID]?.runtimeRetentionPreference
                 ?? plan?.retentionPreference
                 ?? webViewPool.runtimeRetentionPreference(for: slotID)
-            let stage = plan.map { stage(forInactiveSince: $0.inactiveSinceUptime) }
+            let stage: AutomaticLifecycleStage?
+            if let plan {
+                stage = self.stage(forInactiveSince: plan.inactiveSinceUptime)
+            } else {
+                stage = nil
+            }
             let selectedForRelease = selected == slotID
             let decisionName: String
             let releaseReason: String
