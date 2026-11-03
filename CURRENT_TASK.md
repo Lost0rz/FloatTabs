@@ -3,8 +3,8 @@
 **Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
 **Card ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001`  
 **Title:** Replace fixed-count normal Runtime reclaim with staged Automatic lifecycle  
-**Status:** **ACTIVE / WP2 CORRECTIVE AUTHORIZED**  
-**Mode:** `SOURCE CORRECTIVE / EXISTING DRAFT PR / NO MERGE OR RELEASE`  
+**Status:** **ACTIVE / WP2 FULL-XCTEST INCIDENT DIAGNOSIS**  
+**Mode:** `READ-ONLY INCIDENT DIAGNOSIS / EXISTING DRAFT PR / NO PRODUCT MUTATION / NO MERGE OR RELEASE`  
 **Task class:** `WEB RUNTIME / LIFECYCLE POLICY`  
 **Baseline:** `origin/main@2a52800f770266f7c901eb612a0b319ddca142df`  
 **Branch:** `codex/adaptive-lifecycle-wp2-policy`  
@@ -15,192 +15,163 @@
 Durable WP2 policy: `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`  
 WP1 regression authority: `docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`
 
-The frozen WP2 product policy remains unchanged. This corrective closes machine/audit evidence gaps only; it does not authorize a policy redesign, WP3 scheduling work, WP4 work, merge, or release.
+WP2 Correctives A/B/C are implemented at semantic head `cc44537635ef451a78dc8894484c9ce9328de936`. The product policy is frozen and must not be redesigned during this incident diagnosis.
 
-## Verified implementation state
-
-Implementation evidence head: `647178030b5a448916537745e7a993e4eca0a238`.
-
-Verified results on that head:
+## Verified corrective state
 
 ```text
-fixed normal resident-count reclaim removed = YES
-Automatic RECENT / IDLE / LONG_IDLE model = IMPLEMENTED
-Keep Loaded excluded from normal/warning/critical reclaim = YES
-focused local tests = PASS (589 run / 4 skipped / 0 failed)
-full local XCTest = PASS (1160 run / 4 skipped / 0 failed)
-local Debug/Release arm64 = PASS
-Package.resolved = unchanged
-self-hosted exact-head macOS CI = PASS / run 41481345174
-hosted exact-head QA DMG = FAIL / run 41481345149
-fresh independent audit = STOP / IMPORTANT
-human UI acceptance = BLOCKED / USER OWNED
+CORRECTIVE_A_HOSTED_RELEASE=PASS
+CORRECTIVE_B_STALE_ASYNC_PRESSURE=PASS
+CORRECTIVE_C_INJECTED_TIME=PASS
+FOCUSED_CORRECTIVE_TESTS=PASS
+AFFECTED_LIFECYCLE_WP1_REGRESSIONS=PASS
+DEBUG_RELEASE_ARM64=PASS
+PACKAGE_LOCK=UNCHANGED
+QA_DMG=PASS
+INDEPENDENT_CORRECTIVE_DIFF_AUDIT=NO_POLICY_OR_OWNERSHIP_BLOCKER
+FULL_XCTEST=FAIL
+SELF_HOSTED_CI=FAIL_AT_UNIT_TESTS
+FULL_SUITE_FAILURE_ROOT_CAUSE=UNKNOWN
+CORRECTIVE_ATTRIBUTION=UNPROVEN
+HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
+WP3_SCHEDULING_MUTATION=NOT_STARTED
+WP4_OTHER_MUTATION=NOT_STARTED
 ```
 
-## Corrective authorization
+The full-suite failure reproduces in unchanged WebFocusAdapter, WebViewFactory, and WebsiteLayoutGeometryRegression tests. The same 13 failing methods pass when run individually. Current evidence includes WebKit fixture/page-load timeouts and related WebContent/runtime errors. These facts narrow the incident but do not prove whether the corrective caused it, exposed a pre-existing shared-state/test-order issue, or coincided with runner/WebKit host instability.
 
-### A — Hosted Release compiler compatibility
+## Current authorization — bounded incident diagnosis
 
-Fix the exact semantic expression at `SlotLifecycleCoordinator.swift` that currently uses a locally inferred `plan.map { stage(...) }` form and fails in the hosted Xcode 26.6 Release/WMO build.
+Before any further product/test mutation, establish causal attribution for the full XCTest failure using controlled read-only executions and existing artifacts.
 
-Required result:
+Required hypotheses to distinguish:
 
-- make the lifecycle-stage optional computation explicit and compiler-unambiguous;
-- preserve the exact diagnostic semantics;
-- do not suppress the QA build, change workflow/toolchain to hide the error, or weaken Release verification.
+1. **Corrective regression:** the corrective semantic changes cause cumulative/shared WebKit failure during the full suite.
+2. **Pre-existing WP2/full-suite issue:** the same failure reproduces on corrective base `f0705747c6a095f24d50c9ffdac21675a1bfc662` under the same command/environment.
+3. **Test-order/shared-state contamination:** a preceding test/suite poisons WebKit state and the 13 tests fail only after a specific prefix or within a shared full-suite process.
+4. **Runner/WebKit host instability/resource exhaustion:** process/bootstrap/load failure appears independently of the corrective and correlates with host/runtime state rather than product semantics.
+5. **Parallel/concurrency interaction:** full-suite concurrency changes the result while serial execution does not.
 
-A straightforward explicit `if let` / explicitly typed optional computation is preferred over clever overload disambiguation.
+Diagnosis must prefer exact A/B evidence over intuition. Retry/pass, runner restart, service restart, or app restart is recovery evidence only and never root-cause proof.
 
-### B — Progressive pressure async stale-plan recovery
+## Required diagnostic matrix
 
-The progressive pressure ladder must not stall merely because an asynchronous media-validation result returns for a captured inactive plan that became stale while pressure is still warning/critical.
+Use clean temporary worktrees or equivalent isolated checkouts. Preserve all unique work. Do not mutate the active WP2 branch during diagnosis.
 
-Required semantics:
+### A — exact failure inventory
+
+From the failing `.xcresult` / CI diagnostics, record:
+- exact 13 failing test methods;
+- first failing test in execution order;
+- failure timestamps/order;
+- WebKit/WebContent/NetworkProcess errors immediately preceding the first load timeout;
+- whether failures are primary load-timeout failures followed by dependent assertions.
+
+### B — current corrective head, fresh-process batch
+
+On corrective semantic head `cc44537635ef451a78dc8894484c9ce9328de936` (or a control-only descendant only after proving source/test identity):
+- run the 13 failing methods together in one fresh xcodebuild process in the same order;
+- run them together in reverse order;
+- record PASS/FAIL and first failure.
+
+### C — full-suite causal A/B against corrective base
+
+Run the same full XCTest command, same machine/toolchain/environment, on:
+- corrective base `f0705747c6a095f24d50c9ffdac21675a1bfc662`;
+- corrective semantic head `cc44537635ef451a78dc8894484c9ce9328de936`.
+
+Prefer alternating runs rather than completing all runs on one ref first. Obtain at least one fresh comparable full run per ref. If outcomes differ, repeat enough to determine whether the difference is stable or flaky. Do not infer causality from different machines/toolchains.
+
+### D — order/prefix contamination
+
+If the 13-test batch passes but full suite fails:
+- identify the test/suite prefix immediately before the first failing method;
+- run that prefix followed by the first failing test in one xcodebuild process;
+- narrow the smallest practical poisoning prefix by grouped/binary search;
+- do not edit product code while narrowing.
+
+### E — serial/concurrency diagnostic
+
+If the canonical full-suite command permits test parallelism, run a diagnostic-only serial equivalent (`-parallel-testing-enabled NO` or repository-appropriate equivalent) on the same ref.
+
+This is diagnostic evidence only. Do not weaken the canonical CI gate or change workflow configuration solely because serial execution passes.
+
+### F — bounded host/runtime observations
+
+During comparable runs capture non-destructive observations only:
+- WebKit.WebContent / Network process counts before, during, after;
+- relevant process/fd counts where practical;
+- macOS memory-pressure state if available through supported ordinary tools;
+- exact WebKit bootstrap/sandbox/process errors from failing runs.
+
+Do not kill helpers, clear caches, delete website data, restart services, or reboot as part of primary diagnosis.
+
+## Decision gate
+
+Return one of:
 
 ```text
-pressure candidate selected
-→ async media validation owns evaluation token
-→ callback clears exact evaluation ownership
-→ pressure normalized? stop
-→ captured plan still current? evaluate/reclaim/protect normally
-→ captured plan stale/invalid? re-enter progressive selection from fresh facts
+CORRECTIVE_ATTRIBUTION=PROVEN
+CORRECTIVE_ATTRIBUTION=DISPROVEN
+CORRECTIVE_ATTRIBUTION=UNPROVEN
 ```
 
-Every owned async evaluation exit must leave the pressure ladder in one of two valid states:
-
-1. pressure is normal / no continuation required; or
-2. sustained pressure can continue from fresh current candidates.
-
-Do not reclaim using stale captured facts. Do not precompute a batch. Do not introduce a second pressure/lifecycle writer.
-
-The exact-head `isPlaying == true` path already marks media protection and schedules a pressure continuation; preserve that behavior. Add regression specifically proving that a stale async plan callback cannot strand another eligible Automatic Runtime.
-
-### C — Deterministic lifecycle-time tests
-
-Policy V7 requires lifecycle-stage tests to inject time instead of sleeping in wall/real time.
-
-Add the smallest bounded monotonic-time/test-scheduling seam owned by `SlotLifecycleCoordinator` that allows deterministic testing of:
+and:
 
 ```text
-RECENT (<30s)
-→ IDLE (>=30s)
-→ LONG_IDLE (>=600s)
+FULL_SUITE_ROOT_CAUSE=KNOWN
+FULL_SUITE_ROOT_CAUSE=NARROWED
+FULL_SUITE_ROOT_CAUSE=UNKNOWN
 ```
 
-Production defaults must still use monotonic system uptime and normal main-queue scheduling. Test-only/fake time must not become persisted product state or a second policy source.
+Only after evidence supports a specific bounded mutation may another EXECUTE corrective be authorized. Do not modify production source or tests during this read-only incident stage.
 
-Required result:
+## Frozen product/regression boundary
 
-- no real-time sleep is required to prove RECENT → IDLE → LONG_IDLE stage boundaries;
-- stale timer/token behavior remains deterministic;
-- production timing values and policy are unchanged.
-
-The concrete seam is an implementation choice. Prefer dependency injection over new public API or test-only mutation of private state.
-
-## Frozen product policy / regression boundary
-
-Preserve all Policy V7 decisions:
-
+Preserve:
 - no fixed normal resident count;
-- Keep Loaded / Pinned = no FloatTabs automatic exit under normal/warning/critical;
-- Automatic RECENT `<30s`, IDLE `30s..<600s`, LONG_IDLE `>=600s`;
-- warning excludes RECENT;
-- critical may bypass RECENT for inactive unprotected Automatic only;
-- progressive oldest-first fresh-fact reclaim;
-- pressure normalization cancels pending continuation;
-- SlotLifecycleCoordinator remains sole lifecycle writer;
-- exact plan token + Runtime identity safety;
-- WP1 cold presentation/readiness and A→B→A correctness;
-- generation/Attention/media/fullscreen/supplemental visibility protection;
-- notification exact-Slot/privacy behavior;
-- Browser Profile/login/cookie/session/conversation data safety.
-
-## Explicitly forbidden
-
-- replacing removed target=2 with any other fixed Runtime count;
-- changing 30s/600s product values as part of this corrective;
-- automatic reclaim of Keep Loaded;
-- using stale async media facts to reclaim;
-- batch/purge pressure logic;
-- second lifecycle/presentation writer;
-- private WebKit SPI/helper killing;
-- reload/reset/restart workaround;
-- clearing Browser Profile/session/login/cookies/cache/conversation data;
-- weakening QA workflow/toolchain to make the hosted build green;
-- WP3/WP4 mutation.
-
-## Required focused regressions
-
-At minimum add/retain proofs for:
-
-1. hosted-Release-compatible stage diagnostic computation;
-2. media-playing candidate under pressure remains protected while another eligible Automatic candidate can progress;
-3. stale async media callback re-enters fresh pressure selection under sustained pressure;
-4. pressure normalization during async evaluation does not restart reclaim;
-5. exact evaluation token prevents foreign/old callback mutation;
-6. RECENT → IDLE → LONG_IDLE boundaries use injected monotonic time, not real sleeping;
-7. reactivation/stale plan timer cannot reclaim current Runtime;
-8. five resident Automatic Runtime are not count-evicted under normal pressure;
-9. Keep Loaded remains unreclaimed under warning and critical;
-10. WP1 presentation/A→B→A/focus/unread/notification regressions remain green;
-11. generation/media/fullscreen protections remain green.
-
-## Verification gate
-
-After corrective implementation:
-
-- focused lifecycle/cross-feature/pool/WP1/notification/diagnostic/privacy suites;
-- full XCTest;
-- Debug arm64;
-- Release arm64;
-- native arm64 verification;
-- package-lock check;
-- push exact branch head and verify remote delivery;
-- exact-head self-hosted macOS CI;
-- exact-head hosted QA DMG;
-- fresh independent exact-diff / ownership / data-safety audit.
-
-Only if all required machine gates and the independent audit PASS may the task move to `HUMAN_UI_ACCEPTANCE=PENDING / USER_OWNED`.
+- Keep Loaded/Pinned never FloatTabs-auto-reclaimed under normal/warning/critical;
+- RECENT `<30s`, IDLE `30s..<600s`, LONG_IDLE `>=600s`;
+- progressive fresh-fact pressure reclaim;
+- WP1 presentation/readiness;
+- generation/media/fullscreen protection;
+- Browser Profile/session/login/cookie data safety.
 
 ## STOP conditions
 
-Stop if the corrective requires a policy redesign, another lifecycle writer, Keep Loaded reclaim, stale-fact reclaim, real-time-only stage verification, WP1 regression, generation/media/fullscreen regression, Browser Profile/session mutation, private SPI/helper kill/reload-reset workaround, or any required exact-head machine gate failure attributable to the corrective.
+Stop and report evidence if diagnosis would require:
+- product source/test mutation;
+- clearing Browser Profile/session/cache/website data;
+- private WebKit SPI;
+- killing WebKit helpers;
+- weakening canonical CI/full-XCTest acceptance;
+- treating restart/retry success as root cause;
+- entering WP3/WP4;
+- merge/release.
 
 ## Return contract
 
-Return verified values for:
+Return observed values for:
 
 ```text
-BASELINE_IDENTITY
-CORRECTIVE_BASE_HEAD
-FINAL_BRANCH_HEAD
-CHANGED_FILES
-REMOTE_DELIVERY
-HOSTED_RELEASE_COMPATIBILITY_RESULT
-ASYNC_PRESSURE_STALE_PLAN_RESULT
-MEDIA_PROTECTED_PRESSURE_PROGRESSION_RESULT
-PRESSURE_NORMALIZATION_DURING_ASYNC_RESULT
-EVALUATION_TOKEN_ISOLATION_RESULT
-INJECTED_TIME_MODEL
-RECENT_IDLE_LONG_IDLE_DETERMINISTIC_RESULT
-STALE_TIMER_RESULT
-FIXED_RESIDENT_COUNT_REGRESSION
-PINNED_WARNING_CRITICAL_REGRESSION
-WP1_PRESENTATION_REGRESSION
-WP1_A_B_A_REGRESSION
-NOTIFICATION_REGRESSION
-GENERATION_PROTECTION_REGRESSION
-DATA_SAFETY_RESULT
-FOCUSED_TESTS
-FULL_XCTEST
-DEBUG_BUILD
-RELEASE_BUILD
-ARM64_VERIFICATION
-PACKAGE_LOCK
-CI_STATE
-QA_DMG_STATE
-INDEPENDENT_AUDIT
-HUMAN_UI_ACCEPTANCE=PENDING
+DIAGNOSTIC_BASELINE
+CURRENT_CORRECTIVE_HEAD
+FAILURE_SET
+FIRST_FAILURE
+PRIMARY_FAILURE_PATTERN
+CURRENT_13_SAME_ORDER_RESULT
+CURRENT_13_REVERSE_ORDER_RESULT
+BASE_F070_FULL_XCTEST_RESULT
+CURRENT_CC445_FULL_XCTEST_RESULT
+ALTERNATING_REPEAT_RESULT
+POISONING_PREFIX_RESULT
+SERIAL_FULL_XCTEST_RESULT
+WEBKIT_PROCESS_OBSERVATIONS
+WEBKIT_ERROR_EVIDENCE
+CORRECTIVE_ATTRIBUTION
+FULL_SUITE_ROOT_CAUSE
+MUTATION_RECOMMENDATION
+HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
 WP3_SCHEDULING_MUTATION=NOT_STARTED
 WP4_OTHER_MUTATION=NOT_STARTED
 PR_STATE
