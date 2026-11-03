@@ -102,36 +102,71 @@ jobs:
             exit 1
           fi
 
-      - name: Unit tests
+      # Canonical unit-test gate: two mandatory fresh XCTest processes.
+      # Partition B isolates the WebKit-heavy classes whose loadHTMLString
+      # navigations stall after a long same-process suite prefix (see
+      # CURRENT_STATUS.md, WP2 XCTest incident evidence). The classes are
+      # isolated, not skipped: both partitions are required, and any new
+      # test outside these three classes runs in Partition A automatically.
+      - name: Unit tests - Partition A (main suite)
         shell: bash
         run: |
           set -o pipefail
+          rm -rf "$RUNNER_TEMP/FloatTabsTests-A.xcresult"
           xcodebuild \
             -project FloatTabs.xcodeproj \
             -scheme FloatTabs \
             -configuration Debug \
             -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData" \
-            -resultBundlePath "$RUNNER_TEMP/FloatTabsTests.xcresult" \
+            -resultBundlePath "$RUNNER_TEMP/FloatTabsTests-A.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
-            test 2>&1 | tee "$RUNNER_TEMP/xcodebuild-test.log"
+            -skip-testing:FloatTabsTests/WebFocusAdapterTests \
+            -skip-testing:FloatTabsTests/WebViewFactoryTests \
+            -skip-testing:FloatTabsTests/WebsiteLayoutGeometryRegressionTests \
+            test 2>&1 | tee "$RUNNER_TEMP/xcodebuild-test-partition-a.log"
+
+      - name: Unit tests - Partition B (WebKit-heavy classes, fresh process)
+        shell: bash
+        run: |
+          set -o pipefail
+          rm -rf "$RUNNER_TEMP/FloatTabsTests-B.xcresult"
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/FloatTabsTests-B.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            -only-testing:FloatTabsTests/WebFocusAdapterTests \
+            -only-testing:FloatTabsTests/WebViewFactoryTests \
+            -only-testing:FloatTabsTests/WebsiteLayoutGeometryRegressionTests \
+            test 2>&1 | tee "$RUNNER_TEMP/xcodebuild-test-partition-b.log"
 
       - name: Report XCTest failures
         if: failure()
         shell: bash
         run: |
           echo '::group::Filtered xcodebuild failures'
-          if [ -f "$RUNNER_TEMP/xcodebuild-test.log" ]; then
-            grep -E 'Test Case .* failed|error:|Assertion|XCTAssert|failed \(' "$RUNNER_TEMP/xcodebuild-test.log" || true
-          fi
+          for partition in a b; do
+            log="$RUNNER_TEMP/xcodebuild-test-partition-$partition.log"
+            if [ -f "$log" ]; then
+              echo "::group::Partition ${partition^^}"
+              grep -E 'Test Case .* failed|error:|Assertion|XCTAssert|failed \(' "$log" || true
+              echo '::endgroup::'
+            fi
+          done
           echo '::endgroup::'
 
-          if [ -d "$RUNNER_TEMP/FloatTabsTests.xcresult" ]; then
-            echo '::group::XCResult test summary'
-            xcrun xcresulttool get test-results summary \
-              --path "$RUNNER_TEMP/FloatTabsTests.xcresult" || true
-            echo '::endgroup::'
-          fi
+          for partition in A B; do
+            if [ -d "$RUNNER_TEMP/FloatTabsTests-$partition.xcresult" ]; then
+              echo "::group::XCResult test summary (Partition $partition)"
+              xcrun xcresulttool get test-results summary \
+                --path "$RUNNER_TEMP/FloatTabsTests-$partition.xcresult" || true
+              echo '::endgroup::'
+            fi
+          done
 
       - name: Upload XCTest diagnostics
         if: always()
@@ -140,5 +175,7 @@ jobs:
           name: FloatTabs-XCTest-diagnostics-arm64
           if-no-files-found: ignore
           path: |
-            ${{ runner.temp }}/xcodebuild-test.log
-            ${{ runner.temp }}/FloatTabsTests.xcresult
+            ${{ runner.temp }}/xcodebuild-test-partition-a.log
+            ${{ runner.temp }}/xcodebuild-test-partition-b.log
+            ${{ runner.temp }}/FloatTabsTests-A.xcresult
+            ${{ runner.temp }}/FloatTabsTests-B.xcresult
