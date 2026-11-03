@@ -3,8 +3,8 @@
 **Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
 **Card ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001`  
 **Title:** Replace fixed-count normal Runtime reclaim with staged Automatic lifecycle  
-**Status:** **ACTIVE / WP2 FULL-XCTEST WEBKIT PROCESS-STATE INCIDENT DIAGNOSIS**  
-**Mode:** `DIAGNOSE / TEST-ONLY PROBE AUTHORIZED / EXISTING DRAFT PR / NO PRODUCTION MUTATION / NO MERGE OR RELEASE`  
+**Status:** **ACTIVE / WP2 XCTEST WEBKIT PROCESS-ISOLATION VALIDATION**  
+**Mode:** `DIAGNOSE / TEST-RUNNER A-B ONLY / EXISTING DRAFT PR / NO PRODUCT MUTATION / NO MERGE OR RELEASE`  
 **Task class:** `WEB RUNTIME / LIFECYCLE POLICY + XCTEST WEBKIT INCIDENT`  
 **Baseline:** `origin/main@2a52800f770266f7c901eb612a0b319ddca142df`  
 **Branch:** `codex/adaptive-lifecycle-wp2-policy`  
@@ -15,157 +15,166 @@
 Durable WP2 policy: `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md`  
 WP1 regression authority: `docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`
 
-WP2 Correctives A/B/C remain implemented at semantic head `cc44537635ef451a78dc8894484c9ce9328de936`. Product policy remains frozen.
+Product policy remains frozen. No production lifecycle mutation is authorized by this task.
 
-## Verified incident state
+## Verified incident boundary
 
-The bounded fixture teardown corrective has been falsified as a sufficient fix:
+The process-state diagnostic established:
 
 ```text
-TARGETED_WEBFOCUS_TESTS=PASS_28_OF_28
-TARGETED_FACTORY_TESTS=PASS_27_OF_27
-TARGETED_GEOMETRY_TESTS=PASS_7_OF_7
-AFFECTED_LIFECYCLE_REGRESSIONS=PASS_304_OF_304
-CANONICAL_FULL_XCTEST_RUN_1=FAIL
-FULL_XCTEST_TOTAL=1165
-FAILED_CASES=13
-ORIGINAL_13_METHOD_FAILURE_FAMILY=PRESENT_UNCHANGED
-WEBCONTENT_DISTINCT_PIDS_OBSERVED=132
-WEBKIT_SIGNAL_113_COUNT=75
-PRODUCTION_FILES_CHANGED=NO
-FIXTURE_CORRECTIVE_COMMIT=NONE
+FRESH_AFFECTED_FAMILY=PASS_62_OF_62
+LONG_PREFIX_FULL_SUITE=FAIL_SAME_13_CASE_FAMILY
+AFFECTED_WEBVIEW_PROCESS_TERMINATION=DISPROVEN
+AFFECTED_WEBVIEW_JS_NOT_READY=DISPROVEN
+NAVIGATION_COMPLETION_MISMATCH=SUPPORTED
+FIRST_FAILURE_IS_LOADING=TRUE
+FIRST_FAILURE_NAVIGATION_CALLBACKS=NONE
+FIRST_FAILURE_MINIMAL_JS_LIVENESS=PASS
+FIRST_FAILURE_DOM_DEPENDENT_JS=FAIL_DOM_NOT_LOADED
 ROOT_CAUSE_PROVEN=NO
 ```
 
-The fixture teardown omission is a real test-harness defect, but repairing it did not remove or materially alter the incident. Do not continue treating teardown cleanup as the primary root-cause line.
+The first failing WebView remains alive and executes JavaScript, but its new `loadHTMLString` navigation never begins after accumulated same-process suite activity. The observed XPC/WebKit errors are correlation only; the private WebKit mechanism is not established.
 
-The failed corrective experiment remains uncommitted in `/Volumes/Jack-Dev/Projects/FloatTabs-adaptive-lifecycle-wp2-policy`. Preserve that worktree and its five changed files; do not reset/delete/commit them under this diagnostic task.
+The previous fixture teardown experiment is also closed as a sufficient-cause hypothesis: the teardown defect is real, but the same 13-case family reproduced unchanged after cleanup.
+
+Preserve without modification:
+
+- `/Volumes/Jack-Dev/Projects/FloatTabs-adaptive-lifecycle-wp2-policy` — uncommitted fixture-cleanup experiment;
+- `/private/tmp/FloatTabs-WP2-DIAG-6a55` — process-state diagnostic checkout.
 
 ## Hard evidence gate
 
 ```text
-MISSING_FACT = Whether an affected WKWebView has experienced WebContent process termination/replacement or is otherwise not navigation/JavaScript-ready at the exact point the 13-case failure family begins after the accumulated suite prefix.
+MISSING_FACT = Whether the full canonical test inventory is stable when the affected WebKit-heavy classes run in a separate fresh XCTest process instead of after the accumulated main-suite prefix.
 
-BLOCKED_DECISION = Whether the next corrective belongs in test synchronization/process-state handling, test WebKit isolation architecture, or a deeper production/WebKit ownership boundary.
+BLOCKED_DECISION = Whether a test-runner/CI process-isolation corrective is sufficient and appropriate, or whether a deeper WebKit test-architecture investigation is still required.
 ```
 
-`Could not signal service com.apple.WebKit.WebContent: 113` is observational evidence only. Do not use its count as root-cause proof. Likewise, do not assume a new `WKWebViewConfiguration` implies a uniquely owned durable WebContent process; process allocation/reuse is WebKit-controlled.
+## Current authorization — process-isolation A/B only
 
-## Current authorization — bounded test-only process-state probe
+Use a clean isolated checkout of the current PR head. Do not use or clean either preserved evidence worktree.
 
-Use a clean isolated diagnostic checkout of the current PR head. Do not modify the dirty fixture-corrective worktree.
+Do not change test source for this experiment unless a temporary external runner script is strictly necessary to select tests; prefer existing `xcodebuild` selection flags and keep any helper outside tracked repository state.
 
-The probe may add temporary test-only instrumentation solely to establish the missing fact above.
+Run the same canonical test inventory as two fresh XCTest processes:
 
-Capture, for the first reproducible failing WebKit-dependent case and a fresh-process passing control where practical:
+### Partition A — non-affected inventory
 
-- test/method identity and timestamps;
-- WebView object identity available from public/test-visible state;
-- navigation start/finish/failure callbacks where already owned or safely observable;
-- `webViewWebContentProcessDidTerminate(_:)` if it can be observed without replacing production delegate behavior;
-- `isLoading`, URL and navigation state immediately before the failing assertion;
-- exact `evaluateJavaScript` completion value and error;
-- whether the same WebView can execute a minimal side-effect-free JS liveness probe at that boundary;
-- relevant public WebKit/XCTest log events in the same time window.
+Run every canonical FloatTabs test except these three classes:
 
-Prefer existing delegate/observer seams. If a test-only multiplexer/proxy is required, keep it local to the diagnostic checkout and prove that the targeted tests still pass fresh before using it for the long-prefix reproduction.
+- `WebFocusAdapterTests`
+- `WebViewFactoryTests`
+- `WebsiteLayoutGeometryRegressionTests`
 
-Do not add broad telemetry or a permanent diagnostic framework.
+### Partition B — isolated WebKit-heavy affected family
 
-## Probe decision matrix
+In a new fresh XCTest process, run exactly:
 
-Return one of these bounded findings:
+- `WebFocusAdapterTests`
+- `WebViewFactoryTests`
+- `WebsiteLayoutGeometryRegressionTests`
+
+Before accepting results, prove:
 
 ```text
-AFFECTED_WEBVIEW_PROCESS_TERMINATION=SUPPORTED | DISPROVEN | UNPROVEN
-AFFECTED_WEBVIEW_JS_NOT_READY=SUPPORTED | DISPROVEN | UNPROVEN
-NAVIGATION_COMPLETION_MISMATCH=SUPPORTED | DISPROVEN | UNPROVEN
+UNION_PARTITION_A_B = CANONICAL_TEST_INVENTORY
+INTERSECTION_PARTITION_A_B = EMPTY
+OMITTED_TESTS = NONE
+DUPLICATED_TESTS = NONE
+ASSERTIONS_CHANGED = NO
 ```
 
-Interpretation:
+If both partitions pass, repeat the same two-part execution once more using fresh XCTest processes.
 
-- If termination/replacement is observed immediately before the failure, localize why the test/runtime continues to use that WebView before proposing a fix.
-- If no termination is observed but navigation/JS readiness is absent, localize the missing readiness boundary before proposing synchronization changes.
-- If the WebView is demonstrably live/ready and JS still fails only after accumulated host state, stop with that evidence; then a separate WebKit isolation/process-churn experiment may be reconciled.
+## Interpretation
 
-Do not implement a corrective in the same diagnostic pass.
+### If split execution passes twice
+
+Return:
+
+```text
+XCTEST_PROCESS_ISOLATION_EFFECT=SUPPORTED
+NAVIGATION_STALL_REPRODUCED_UNDER_SPLIT=NO
+```
+
+Then STOP. Do not implement the CI/test-runner corrective in the same pass. The next task reconciliation may authorize making this isolation durable.
+
+### If either partition fails
+
+Capture the exact failing methods and whether the same navigation-stall boundary appears, then STOP.
+
+Return:
+
+```text
+XCTEST_PROCESS_ISOLATION_EFFECT=DISPROVEN_OR_INSUFFICIENT
+```
+
+Do not broaden automatically into WebsiteData, process pool, production source, or timing changes.
 
 ## Mutation boundary
 
 Authorized:
 
-- temporary test-only diagnostic instrumentation in a clean isolated diagnostic checkout;
-- local diagnostic logs/artifacts outside the repository;
-- running targeted/fresh/long-prefix XCTest probes needed to establish the missing fact.
+- local fresh checkouts/worktrees;
+- canonical `xcodebuild` invocations with test inclusion/exclusion filters;
+- temporary external scripts/logs outside tracked repo state for inventory accounting;
+- public process/log observation that does not mutate runtime state.
 
 Not authorized:
 
 - production source mutation;
-- changing website data-store semantics;
-- changing process-pool policy;
-- changing lifecycle policy;
-- committing/pushing diagnostic instrumentation;
-- committing/pushing the preserved fixture-cleanup experiment;
-- test skipping/assertion weakening;
-- increasing timeouts as a fix;
+- test assertion/source mutation;
+- committing/pushing any experiment;
+- CI workflow mutation;
+- data-store changes;
+- process-pool changes;
+- lifecycle policy changes;
+- timeout changes;
+- test skip as a permanent solution;
 - Browser Profile/session/cookie/website-data clearing;
 - private WebKit SPI;
 - killing/restarting WebKit helpers as root-cause proof;
 - WP3/WP4 implementation;
 - merge/release.
 
-## Verification / STOP
-
-First verify the diagnostic instrumentation does not break the affected test family in a fresh process. Then reproduce the smallest known long-prefix path that reaches the first failure and capture the process/navigation/JS state at that boundary.
-
-STOP once the missing fact is established or the bounded probe cannot establish it. Do not continue into corrective implementation.
-
-The previous whole-WP2 `main@2a528...` vs `6471780...` full-suite A/B is not the immediate gate. It remains optional evidence if this bounded process-state diagnosis cannot distinguish the mechanism.
-
-## Frozen product/regression boundary
-
-Preserve:
-
-- no fixed normal resident count;
-- Keep Loaded/Pinned never FloatTabs-auto-reclaimed under normal/warning/critical;
-- RECENT `<30s`, IDLE `30s..<600s`, LONG_IDLE `>=600s`;
-- progressive fresh-fact pressure reclaim;
-- WP1 presentation/readiness;
-- generation/media/fullscreen protection;
-- Browser Profile/session/login/cookie data safety.
-
 ## Return contract
 
 ```text
-DIAGNOSTIC_CHECKOUT
+VALIDATION_CHECKOUT
 AUTHORITY_HEAD
-INSTRUMENTATION_FILES_CHANGED
-FRESH_CONTROL_RESULT
-LONG_PREFIX_REPRO_RESULT
-FIRST_FAILING_CASE
-FIRST_FAILURE_TIMESTAMP
-WEBVIEW_IDENTITY
-PROCESS_TERMINATION_EVENT
-NAVIGATION_STATE_AT_FAILURE
-IS_LOADING_AT_FAILURE
-URL_AT_FAILURE
-EVALUATE_JAVASCRIPT_VALUE
-EVALUATE_JAVASCRIPT_ERROR
-MINIMAL_JS_LIVENESS_RESULT
-CORRELATED_WEBKIT_EVENTS
-AFFECTED_WEBVIEW_PROCESS_TERMINATION
-AFFECTED_WEBVIEW_JS_NOT_READY
-NAVIGATION_COMPLETION_MISMATCH
+CANONICAL_TEST_INVENTORY_COUNT
+PARTITION_A_TEST_COUNT
+PARTITION_B_TEST_COUNT
+UNION_PARTITION_A_B
+INTERSECTION_PARTITION_A_B
+OMITTED_TESTS
+DUPLICATED_TESTS
+
+SPLIT_RUN_1_PARTITION_A
+SPLIT_RUN_1_PARTITION_B
+SPLIT_RUN_1_FAILURE_SET
+
+SPLIT_RUN_2_PARTITION_A
+SPLIT_RUN_2_PARTITION_B
+SPLIT_RUN_2_FAILURE_SET
+
+ORIGINAL_13_METHOD_FAILURE_FAMILY
+NAVIGATION_STALL_REPRODUCED_UNDER_SPLIT
+XCTEST_PROCESS_ISOLATION_EFFECT
 ROOT_CAUSE_PROVEN
 RECOMMENDED_NEXT_BOUNDARY
+
+FILES_CHANGED=NONE
 COMMIT=NONE
 PUSH=NONE
 PRODUCTION_FILES_CHANGED=NONE
 PRESERVED_FIXTURE_WORKTREE=UNCHANGED
+PRESERVED_DIAGNOSTIC_CHECKOUT=UNCHANGED
+PR_STATE
 HUMAN_UI_ACCEPTANCE=BLOCKED_NOT_STARTED
 WP3_SCHEDULING_MUTATION=NOT_STARTED
 WP4_OTHER_MUTATION=NOT_STARTED
-PR_STATE
 ```
 
 Do not merge PR #195. Do not release.
