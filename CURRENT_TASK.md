@@ -3,7 +3,7 @@
 **TASK_ID:** `FT-PANEL-CROSS-DISPLAY-001`  
 **TASK_CLASS:** `CORRECTIVE`  
 **TITLE:** Respect user-positioned display across hide/reopen; bound explicit previous-app reactivation  
-**STATE:** `AUTHORIZED / LOCAL IMPLEMENTATION PENDING`  
+**STATE:** `AUTHORIZED / PINNED HIDE-FOCUS CORRECTIVE RETAINED / HOTKEY CORRECTIVE 004 IMPLEMENTED / 166 FOCUSED TESTS PASS / ARM64 DEBUG+RELEASE PASS / NEW LOCAL QA DMG READY / REMOTE REVIEW COMMIT+PUSH AUTHORIZED / HUMAN UI ACCEPTANCE PENDING / CANONICAL GATE DEFERRED PENDING PR #195`
 **BRANCH:** `codex/panel-cross-display-position-001`  
 **BASE OBSERVATION:** `main@2a52800f770266f7c901eb612a0b319ddca142df`
 
@@ -12,6 +12,19 @@
 The user approved this new independent Panel / Window / Focus behavior corrective on 2026-11-04. `CURRENT_TASK.md` in this branch owns this authorization. `AGENTS.md` and the existing UI/shell accepted design contracts govern owner boundaries; use `docs/README.md` and `docs/architecture/DOMAIN_MAP.md` for navigation.
 
 Do not modify pending PR #195 or its checkout. PR #195 is a separate, independently write-capable Draft delivery pending human acceptance. The new task is branched from merged `main` rather than stacked onto PR #195; before final merge, refresh main and preserve any independently merged lifecycle changes. Before local edits, check exact refs and classify relevant checkout/worktree unique work, overlapping writers and local branch occupancy. Use an existing safe checkout when possible; no routine new physical worktree.
+
+## User-authorized global-hotkey corrective 004 — 2026-11-04
+
+The user authorized this continuation under the same task and PR #196. Retain the completed cross-display window-positioning and pinned hide-focus changes already present in this worktree. The active corrective is limited to the global shortcut route:
+
+- If the shell window is visible, one shortcut press calls the existing explicit hide path regardless of Pinned state, shell Key Window state, or source-window Key Window state.
+- If the shell window is hidden, one shortcut press presents FloatTabs and preserves the normal native/WebView Focus Handshake.
+- Make `shouldHideForGlobalShortcut()` visibility-only and update its old unit-test assertions in `ExternalShellTests.swift`.
+- Preserve the existing fullscreen/session-locked handling in the hide/show paths and the previous cross-display focus-release policy. Do not bypass or rewrite those guards.
+- No unrelated changes, new task/branch/worktree, PR #195 changes, commit, push, merge, CI, or release. Keep human UI acceptance PENDING.
+- After the focused affected tests, Debug/Release arm64 builds, and `git diff --check` pass, build a **new, unique local QA DMG** using `tools/release/build_dmg.sh`, with fresh source/diff provenance. Do not reuse the prior Focus-QA DMG.
+
+At the local QA stage, this corrective stopped before remote delivery and awaited the user's manual result. On 2026-11-04 the user subsequently authorized a task commit and push to the existing PR #196 branch so remote reviewers/checks can inspect the changes; see the remote-review authorization below. The canonical full-XCTest gate remains deferred pending PR #195's normal acceptance/merge, and human UI acceptance remains PENDING.
 
 ## Frozen product behavior
 
@@ -26,7 +39,7 @@ Do not modify pending PR #195 or its checkout. PR #195 is a separate, independen
 - `FloatTabs/Panel/PanelController.swift`: presentation screen selection for positioned vs unpositioned panel, hide/previous-app focus decision as strictly warranted, save/restore and source-frame synchronization.
 - `FloatTabs/Panel/ScreenPositioning.swift`: bounded pure geometry helper if needed, reuse existing `relocatedFrame`, `bestVisibleFrame`, and fallback logic where sufficient.
 - `FloatTabsTests/ScreenPositioningTests.swift`: A to B drag position, hide and reopen while mouse A, initial presentation, display unplug, size/edge cases.
-- `FloatTabsTests/ExternalShellTests.swift`: focused pure-decision regression for explicit previous-app activation only if source change warrants it.
+- `FloatTabsTests/ExternalShellTests.swift`: focused pure-decision regressions for explicit previous-app activation and hide/deactivation policy when source change warrants it.
 - `CURRENT_STATUS.md`, `CURRENT_TASK.md`: material status/authorization alignment only.
 
 Touching source host, fullscreen, focus adapters, or settings beyond these paths requires explicit task-scope reconciliation **before mutation**.
@@ -39,14 +52,78 @@ Touching source host, fullscreen, focus adapters, or settings beyond these paths
 
 **Gate 2 / Regression tests:** assert A→B→hide→show remains B despite mouse on A; initial presentation behavior unchanged; B unplug recovers visible frame; B remains connected across hide; screen-change callback does not thrash; viewport resize, fixed/per-App sizes, frame persistence, shell/source synchronization, pin/auto-hide, same-display focus behavior and fullscreen restoration are preserved. Focused tests first. Use the **actual workflow on this task branch** as the canonical XCTest gate. At control bootstrap this branch inherits main's single-process `.github/workflows/macos-ci.yml` (not the unmerged PR #195 A+B partition workflow). Do not silently import #195's CI partitions or claim its test evidence applies to this branch. If the branch's formal full suite fails, classify the failure against the exact inherited baseline and STOP rather than skipping tests; if upstream merges materially change the CI contract, reconcile before further execution. Run arm64 Debug/Release and architecture/package checks proportional to high-risk Panel/focus changes. No pointless performance probes.
 
-**Gate 3 / Delivery and acceptance:** fresh exact-diff ownership/data-safety review, commit/push only this task's authorized branch after new refs and writer checks, verify delivered ref, run literal-head CI and QA DMG where applicable. Keep Draft/unmerged until user tests A→B→hide→reopen, cross-display prior-app behavior, click-outside, global hotkey, display detach and ordinary fullscreen/restore. `HUMAN_UI_ACCEPTANCE=PENDING` until explicit user verdict.
+   **Current diagnostic-compatibility corrective:** preserve the legacy integer `previous_display_id` diagnostics while treating the captured `NSScreen.main` value strictly as a diagnostic observation. The newly added failure and affected Panel/ScreenPositioning/ExternalShell/Fullscreen suites are the bounded verification for this corrective. The previously observed 13 exact-base single-process failures remain the canonical gate blocker; do not rerun baseline diagnosis, skip tests, or import PR #195's workflow. The user-authorized corrective below permits its focused suites and conditional local Debug/Release arm64 builds and QA DMG. The canonical full suite, CI, and remote delivery remain deferred until PR #195 completes its normal acceptance and merges; then safely coordinate with current `main` and execute the contract current at that time.
+
+**Gate 3 / Delivery and acceptance:** fresh exact-diff ownership/data-safety review, commit/push only this task's authorized branch after new refs and writer checks, verify delivered ref, run literal-head CI and QA DMG where applicable. Keep Draft/unmerged until user tests A→B→hide→reopen, cross-display prior-app behavior, click-outside, global hotkey, display detach and ordinary fullscreen/restore. The prior local build's `HUMAN_UI_ACCEPTANCE=FAIL`; the corrected-build retest remains pending until explicit user verdict.
+
+## Prior canonical execution evidence — 2026-11-04
+
+- Focused Panel/ScreenPositioning/ExternalShell/Fullscreen suites passed `161/161` on arm64.
+- Canonical single-process XCTest on the task branch completed `1,153 passed / 14 failed` (`1,167` total).
+- Exact inherited baseline `main@2a52800f770266f7c901eb612a0b319ddca142df` completed `1,144 passed / 13 failed` (`1,157` total). The same 13 failures reproduced on both runs; the branch adds one failure in `WebAttentionCrossFeatureTests.testCompletedPresentationTraceIsClearedBeforeIndependentDismissTrace` because the corrective removed `previous_display_id` from restore request/result diagnostics.
+- The branch introduced one additional diagnostic compatibility failure on top of the exact-base 13. The user then authorized a narrow corrective and deferred the canonical gate until PR #195 is accepted and merged.
+
+## Current diagnostic corrective — 2026-11-04
+
+- Restored `PreviousApplicationContext.displayID` solely for diagnostics and restored integer `display_id` / `previous_display_id` fields on the legacy capture, skipped, requested and request-result events. No focus or positioning decision reads that value.
+- `WebAttentionCrossFeatureTests.testCompletedPresentationTraceIsClearedBeforeIndependentDismissTrace`: passed, 1/1.
+- Panel / ScreenPositioning / ExternalShell / Fullscreen focused suites: passed, 161/161.
+- No full XCTest, Debug/Release build, CI, commit/push or QA DMG was run for this narrow corrective. Prior full and exact-base xcresults remain preserved; no baseline rerun was performed.
+- PR #195 remains a separate OPEN / DRAFT dependency. After its normal acceptance and merge, refresh current `main`, reconcile safely, then run the canonical formal gates before delivery.
+
+## User-authorized Pinned hide/focus corrective — 2026-11-04
+
+The user reported that the prior local build failed manual acceptance: after moving a Pinned panel from display A to B and directly hiding it, macOS returned frontmost focus or the visible Space to A. The actual system selection point remains unisolated: the observed production order is shell `panel.orderOut(nil)`, safe source-window `orderOutIfSafe()`, then `NSApp.deactivate()`, followed by optional explicit previous-app activation. Do not attribute the result specifically to either order-out call or deactivation without runtime evidence.
+
+This continuation authorizes a bounded `PanelController` hide/focus policy and focused regressions:
+
+- Explicit hide, Pinned, and observed A→B movement during this visible presentation: do not request `NSApp.deactivate()` and do not explicitly activate the captured previous app. Still order out both shell and source windows, cancel pending presentation-focus work, and verify neither hidden window remains key.
+- Pinned same-display hide and unpinned same-display hide: preserve current deactivation and safe previous-app restore behavior.
+- Unpinned outside-click/application-activation auto-hide: preserve external-app focus ownership.
+- Missing previous-app context: apply the same bounded deactivate decision without inventing or activating another app.
+- Fullscreen/session-locked dismissal: preserve the existing guarded path.
+- Fast hide/show: an old focus generation must not key or focus a window after dismissal; the next explicit show remains functional.
+
+Do not make focus policy depend on `previous_display_id`/`NSScreen.main`; those values remain diagnostic observations. Do not introduce a second writer, focus framework, private API, simulated click, Finder activation, position-policy change, or source-host mutation.
+
+Run the affected Panel/Focus/ScreenPositioning/ExternalShell/Fullscreen suites and diagnostic compatibility test. If they pass, run `git diff --check`, Debug arm64, and Release arm64. Produce a local QA DMG with exact source/ref/diff provenance only if all these gates pass and code/tests show both hidden windows are not key. These are local corrective gates only: do not rerun the known full-suite baseline, skip or weaken official tests, import PR #195's workflow, run CI, commit, push, merge, or release. A QA DMG does not establish human acceptance; keep the corrected-build retest pending.
+
+### Local corrective outcome — 2026-11-04
+
+- Focused `ExternalShellTests`, `ScreenPositioningTests`, `WebFocusAdapterTests`, plus the diagnostic compatibility test: **166 passed / 0 failed** on arm64 macOS 26.6.2. Result bundle: `/tmp/FT-PANEL-CROSS-DISPLAY-001-FOCUS-CORRECTIVE-003-20261104.xcresult`.
+- The hide/reopen test observed both shell and source windows hidden and not key after dismissal; a subsequent show made the shell visible again. The policy matrix covers Pinned cross-display, Pinned same-display, Unpinned same-display, and Unpinned cross-display decisions.
+- Debug arm64 build: **PASS**. Release arm64 build: **PASS**; binary verified arm64-only. `git diff --check`: **PASS**.
+- Local QA DMG: `/Users/ox_miles/Downloads/FloatTabs-Panel-Focus-QA-20261104-1558/FloatTabs-0.5.8.dmg`; `hdiutil verify` and strict ad-hoc signature verification passed. Embedded source is HEAD `a42df8b46d6d9116151efce80d540fc4da732488`, tree `dirty`, exact flag `false`. Adjacent provenance file records the branch, local diff hashes and gate results.
+- Cross-display runtime behavior is **not yet verified**. The prior user-reported return-to-A failure remains the last human result; the corrected-build two-display retest is pending. Causal attribution between ordering out the windows and AppKit deactivation remains unknown.
+- No canonical full XCTest, CI, commit, push, merge, or release was run. PR #196 remains Draft at remote head `a42df8b`; PR #195 remains a separate Draft and was not modified.
+
+## Global-hotkey visibility corrective 004 outcome — 2026-11-04
+
+- `toggleOrPresentFloatTabs()` now hides on the first shortcut press whenever the shell is visible, regardless of Pinned or Key Window state. When hidden, it calls the normal presentation route and starts the existing native/WebView Focus Handshake.
+- `shouldHideForGlobalShortcut()` now takes only shell visibility. The updated predicate and integration tests cover both Pinned and Unpinned hide/show cycles, hidden shell/source windows, cleared pending focus state on hide, and focus-handshake start on show.
+- The existing `hideFloatTabs()` fullscreen/session-locked guard and cross-display focus-release policy are unchanged. The prior cross-display location correction remains in this worktree.
+- Focused `ExternalShellTests`, `ScreenPositioningTests`, `WebFocusAdapterTests`, plus `WebAttentionCrossFeatureTests.testCompletedPresentationTraceIsClearedBeforeIndependentDismissTrace`: **166 passed / 0 failed** on arm64 macOS 26.6.2. Result bundle: `/tmp/FT-PANEL-CROSS-DISPLAY-001-HOTKEY-CORRECTIVE-004-20261104.xcresult`.
+- Debug arm64 build: **PASS**. Release arm64 build: **PASS**, binary verified arm64-only. `git diff --check`: **PASS**.
+- New local QA DMG: `/Users/ox_miles/Downloads/FloatTabs-Hotkey-QA-20261104-1652/FloatTabs-0.5.8.dmg`; `hdiutil verify` and strict ad-hoc signature verification passed. Embedded source is HEAD `a42df8b46d6d9116151efce80d540fc4da732488`, tree `dirty`, exact flag `false`. DMG SHA-256: `3078b4df832034767d11786e8af5069f942a0dedb7ccfd8108794e1944e3dba3`. Provenance is adjacent to the DMG.
+- Machine verification establishes code behavior and packaged source, not real two-display macOS acceptance. Human UI acceptance for this new build is **PENDING**; the prior reported failure remains the latest actual human result until the user retests.
+- PR #196 remains OPEN / DRAFT at `a42df8b46d6d9116151efce80d540fc4da732488`; PR #195 remains unchanged, OPEN / DRAFT at `a9f07ca02df10d2ea3d0292d1afa5669d115da42`. No canonical full XCTest, CI, commit, push, merge, or release was run.
+
+## User-authorized remote-review delivery — 2026-11-04
+
+The user subsequently requested that the related task changes be pushed so the remote can inspect them. This explicitly supersedes the local-only/no-commit/no-push limit above for this delivery step:
+
+- Commit the five task-owned tracked modifications currently in the PR #196 worktree (`CURRENT_STATUS.md`, `CURRENT_TASK.md`, `FloatTabs/Panel/PanelController.swift`, `FloatTabsTests/ExternalShellTests.swift`, `FloatTabsTests/ScreenPositioningTests.swift`) on the existing branch `codex/panel-cross-display-position-001`.
+- Pre-push baseline was local HEAD = `origin/codex/panel-cross-display-position-001` = PR #196 head `a42df8b46d6d9116151efce80d540fc4da732488`; no staged or untracked work was present.
+- Push this task commit to that existing branch for remote review/checks. Do not create or change branches/PRs, touch PR #195, merge, or release.
+- The push may trigger the repository's normal PR workflows; do not rewrite workflow policy or skip any result. Preserve the canonical full-suite deferral and prior exact-base failures as documented above. Keep human UI acceptance PENDING.
 
 ## STOP
 
 - position policy silently changes Browser Profiles, WKWebView/session lifecycle, notification or URL restore;
 - independent source window gets a second canonical frame writer;
 - old previous-app activation causes known cross-display hijack after patch;
-- unknown dirty/unique work, stale or contradictory task refs, non-fast-forward, required CI or focused regression failure;
+- a hidden shell or source window retains keyboard focus, a stale focus task reactivates either window, or public AppKit behavior cannot meet the focus-safety condition;
+- unknown dirty/unique work, stale or contradictory task refs, non-fast-forward, canonical required CI or focused regression failure;
 - fix requires controlling macOS system desktop/Space selection through private APIs, synthetic input or unreliable inferred display identity;
 - #195 is modified or inadvertently merged/released.
 

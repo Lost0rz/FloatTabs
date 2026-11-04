@@ -4,6 +4,57 @@ import WebKit
 
 typealias BrowserProfileSwitchConfirmation = @MainActor (WebAppProfile, BrowserProfile?, String) -> Bool
 
+/// Records display transitions of the shell during one visible presentation.
+/// This uses the Panel's screen and does not infer an external app's screen.
+struct PanelPresentationDisplayMovement {
+    private(set) var lastDisplayID: CGDirectDisplayID?
+    private(set) var didMoveAcrossDisplays = false
+
+    mutating func begin(on displayID: CGDirectDisplayID?) {
+        lastDisplayID = displayID
+        didMoveAcrossDisplays = false
+    }
+
+    mutating func observe(displayID: CGDirectDisplayID?) {
+        guard let displayID else { return }
+        if let lastDisplayID, lastDisplayID != displayID {
+            didMoveAcrossDisplays = true
+        }
+        lastDisplayID = displayID
+    }
+
+    mutating func reset() {
+        lastDisplayID = nil
+        didMoveAcrossDisplays = false
+    }
+}
+
+enum PreviousApplicationActivationDecision {
+    /// Keep ordinary dismissal restoration, but leave focus selection to macOS
+    /// after deactivation when the user moved the Panel across displays.
+    static func shouldActivate(didMoveAcrossDisplays: Bool) -> Bool {
+        !didMoveAcrossDisplays
+    }
+}
+
+struct PanelDismissFocusDecision: Equatable {
+    let shouldDeactivateApplication: Bool
+    let shouldActivatePreviousApplication: Bool
+
+    static func resolve(
+        isPinned: Bool,
+        didMoveAcrossDisplays: Bool
+    ) -> PanelDismissFocusDecision {
+        PanelDismissFocusDecision(
+            shouldDeactivateApplication: !(isPinned && didMoveAcrossDisplays),
+            shouldActivatePreviousApplication:
+                PreviousApplicationActivationDecision.shouldActivate(
+                    didMoveAcrossDisplays: didMoveAcrossDisplays
+                )
+        )
+    }
+}
+
 struct FullscreenVisibilityIntent {
     private(set) var shouldRestoreNormalPresentation = false
 
@@ -147,6 +198,9 @@ enum PresentationNativeFocusPolicy {
 final class PanelController: NSObject, NSWindowDelegate {
     private struct PreviousApplicationContext {
         let application: NSRunningApplication
+        /// Preserved for diagnostic compatibility only. `NSScreen.main` is
+        /// not authoritative for an external application's display and this
+        /// value must not drive positioning or focus restoration.
         let displayID: CGDirectDisplayID?
         /// Diagnostics-only observation. This value never participates in
         /// restore, focus, ordering, or any other business decision.
@@ -239,6 +293,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     )
 
     private var previousApplicationContext: PreviousApplicationContext?
+    private var presentationDisplayMovement = PanelPresentationDisplayMovement()
     private var restoreObservationTracker = RuntimeDiagnosticRestoreObservationTracker()
     private var pendingRestoreObservation: PendingRestoreObservation?
     private var restoredFrame: NSRect?
@@ -357,10 +412,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Present the shell and make its Web surface interactive. This is the
-    /// global-hotkey path: invoking a summon shortcut while the shell is
-    /// already visible must restore focus, not interpret the shortcut as a
-    /// request to hide the shell.
+    /// Present the shell and make its Web surface interactive. If the shell
+    /// is already visible, this explicit presentation path restores focus.
     func presentFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
         presentFloatTabs(
             trace: trace,
@@ -545,23 +598,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             subsystem: "panel",
             trace: trace
         )
-        if Self.shouldHideForGlobalShortcut(
-            shellIsVisible: panel.isVisible,
-            shellIsKey: panel.isKeyWindow,
-            sourceIsKey: sourceHostController.window.isKeyWindow
-        ) {
+        if Self.shouldHideForGlobalShortcut(shellIsVisible: panel.isVisible) {
             hideFloatTabs(trace: trace, dismissSource: .hotkey)
         } else {
             presentFloatTabs(trace: trace)
         }
     }
 
-    static func shouldHideForGlobalShortcut(
-        shellIsVisible: Bool,
-        shellIsKey: Bool,
-        sourceIsKey: Bool
-    ) -> Bool {
-        shellIsVisible && (shellIsKey || sourceIsKey)
+    static func shouldHideForGlobalShortcut(shellIsVisible: Bool) -> Bool {
+        shellIsVisible
     }
 
     var onPanelBecameHidden: (() -> Void)?
@@ -1320,6 +1365,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         webFocusOwner: PresentationWebFocusOwner
     ) {
         let trace = trace ?? diagnostics.beginTrace(root: "panel.summon")
+        presentationDisplayMovement.reset()
         invalidatePendingRestoreObservationForNewPresentation()
         var presentationFields = runtimeDiagnosticSnapshot().fields
         presentationFields["requested_before"] = .bool(requestedVisibility)
@@ -1357,6 +1403,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.orderFrontRegardless()
         activateFloatTabs(trace: trace)
         panel.makeKeyAndOrderFront(nil)
+        presentationDisplayMovement.begin(
+            on: ScreenPositioning.displayID(for: panel.screen)
+        )
         recordRestoringSurfaceWindowVisibilityIfNeeded()
         beginPresentationFocusHandshake(
             trace: trace,
@@ -1382,6 +1431,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     ) {
         let trace = trace ?? diagnostics.beginTrace(root: "panel.dismiss")
         let wasVisible = requestedVisibility
+        let didMoveAcrossDisplays = presentationDisplayMovement.didMoveAcrossDisplays
+        defer { presentationDisplayMovement.reset() }
         finishPendingRestoreObservationAsSuperseded()
         recordDismissBegin(
             trace: trace,
@@ -1444,6 +1495,40 @@ final class PanelController: NSObject, NSWindowDelegate {
         sourceHostController.orderOutIfSafe()
         slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
 
+        let focusDecision = PanelDismissFocusDecision.resolve(
+            isPinned: isPinned,
+            didMoveAcrossDisplays: didMoveAcrossDisplays
+        )
+        diagnostics.record(
+            event: "panel.dismiss.focus-release.decision",
+            level: .info,
+            subsystem: "panel",
+            trace: trace,
+            fields: [
+                "pinned": .bool(isPinned),
+                "panel_moved_across_displays": .bool(didMoveAcrossDisplays),
+                "application_deactivation_requested": .bool(
+                    focusDecision.shouldDeactivateApplication
+                ),
+                "previous_application_activation_allowed": .bool(
+                    focusDecision.shouldActivatePreviousApplication
+                ),
+                "shell_key_after_order_out": .bool(panel.isKeyWindow),
+                "source_key_after_order_out": .bool(sourceHostController.window.isKeyWindow)
+            ]
+        )
+        if focusDecision.shouldDeactivateApplication {
+            NSApp.deactivate()
+        } else {
+            diagnostics.record(
+                event: "app.deactivation.skipped",
+                level: .notice,
+                subsystem: "app",
+                trace: trace,
+                fields: ["reason": .string("pinned_cross_display_hide")]
+            )
+        }
+
         guard let previousApplicationContext else {
             diagnostics.record(
                 event: "previous_app.restore.decision",
@@ -1459,7 +1544,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 trace: trace,
                 fields: ["reason": .string("no_context")]
             )
-            NSApp.deactivate()
             recordDismissCompleted(
                 trace: trace,
                 wasVisible: wasVisible,
@@ -1469,11 +1553,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         self.previousApplicationContext = nil
-        NSApp.deactivate()
-        let sameDisplay = ScreenPositioning.isSameKnownDisplay(
-            previousApplicationContext.displayID,
-            currentPresentationDisplayID
-        )
         diagnostics.record(
             event: "previous_app.restore.decision",
             level: .info,
@@ -1481,17 +1560,20 @@ final class PanelController: NSObject, NSWindowDelegate {
             trace: trace,
             fields: [
                 "has_context": .bool(true),
-                "same_display": .bool(sameDisplay)
+                "panel_moved_across_displays": .bool(didMoveAcrossDisplays),
+                "explicit_activation_allowed": .bool(
+                    focusDecision.shouldActivatePreviousApplication
+                )
             ]
         )
-        guard sameDisplay else {
+        guard focusDecision.shouldActivatePreviousApplication else {
             diagnostics.record(
                 event: "previous_app.restore.skipped",
                 level: .notice,
                 subsystem: "panel",
                 trace: trace,
                 fields: [
-                    "reason": .string("cross_display"),
+                    "reason": .string("panel_moved_across_displays"),
                     "previous_display_id": .integer(Int64(previousApplicationContext.displayID ?? 0)),
                     "current_display_id": .integer(Int64(currentPresentationDisplayID ?? 0))
                 ]
@@ -2390,6 +2472,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         trace: RuntimeDiagnosticTrace? = nil,
         reason: String = "application_deactivated"
     ) {
+        defer { presentationDisplayMovement.reset() }
         let trace = trace ?? presentationTrace ?? diagnostics.beginTrace(root: "panel.dismiss")
         let wasVisible = requestedVisibility
         recordDismissBegin(
@@ -4447,7 +4530,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func focusActiveWebViewIfAvailable(makeSourceWindowMain: Bool = false) {
-        guard !addressOverlayView.isPresented,
+        guard requestedVisibility,
+              !addressOverlayView.isPresented,
               let activeSlotID = tabStore.activeTabID,
               let webView = exactReadyWebView(for: activeSlotID) else { return }
         if sourceHostController.isSessionLocked {
@@ -5641,7 +5725,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         if hasPositionedPanel {
             targetFrame = ScreenPositioning.relocatedFrame(
                 frameWithPreferredSize(panel.frame),
-                visibleFrames: [targetScreen.visibleFrame],
+                visibleFrames: screens.map(\.visibleFrame),
                 fallbackVisibleFrame: targetScreen.visibleFrame
             )
         } else if let restoredFrame {
@@ -5731,6 +5815,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
+        if requestedVisibility {
+            presentationDisplayMovement.observe(
+                displayID: ScreenPositioning.displayID(for: panel.screen)
+            )
+        }
         synchronizeSourceHostFrame(display: false)
     }
 

@@ -71,6 +71,116 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertTrue(intent.consumeRestore(currentVisibility: true))
     }
 
+    func testPresentationDisplayMovementDetectsAndRetainsCrossDisplayMove() {
+        var movement = PanelPresentationDisplayMovement()
+        movement.begin(on: 1)
+
+        movement.observe(displayID: 1)
+        XCTAssertFalse(movement.didMoveAcrossDisplays)
+
+        movement.observe(displayID: 2)
+        XCTAssertTrue(movement.didMoveAcrossDisplays)
+
+        movement.observe(displayID: 1)
+        XCTAssertTrue(movement.didMoveAcrossDisplays)
+    }
+
+    func testPresentationDisplayMovementResetsForNextPresentation() {
+        var movement = PanelPresentationDisplayMovement()
+        movement.begin(on: 1)
+        movement.observe(displayID: 2)
+        XCTAssertTrue(movement.didMoveAcrossDisplays)
+
+        movement.begin(on: 2)
+        XCTAssertFalse(movement.didMoveAcrossDisplays)
+        movement.observe(displayID: 2)
+        XCTAssertFalse(movement.didMoveAcrossDisplays)
+    }
+
+    func testPreviousApplicationRestorationIsSuppressedOnlyAfterCrossDisplayMove() {
+        XCTAssertTrue(
+            PreviousApplicationActivationDecision.shouldActivate(
+                didMoveAcrossDisplays: false
+            )
+        )
+        XCTAssertFalse(
+            PreviousApplicationActivationDecision.shouldActivate(
+                didMoveAcrossDisplays: true
+            )
+        )
+    }
+
+    func testDismissFocusDecisionSkipsBothFocusReleaseRequestsOnlyForPinnedCrossDisplayHide() {
+        let pinnedCrossDisplay = PanelDismissFocusDecision.resolve(
+            isPinned: true,
+            didMoveAcrossDisplays: true
+        )
+        XCTAssertFalse(pinnedCrossDisplay.shouldDeactivateApplication)
+        XCTAssertFalse(pinnedCrossDisplay.shouldActivatePreviousApplication)
+
+        let pinnedSameDisplay = PanelDismissFocusDecision.resolve(
+            isPinned: true,
+            didMoveAcrossDisplays: false
+        )
+        XCTAssertTrue(pinnedSameDisplay.shouldDeactivateApplication)
+        XCTAssertTrue(pinnedSameDisplay.shouldActivatePreviousApplication)
+
+        let unpinnedSameDisplay = PanelDismissFocusDecision.resolve(
+            isPinned: false,
+            didMoveAcrossDisplays: false
+        )
+        XCTAssertTrue(unpinnedSameDisplay.shouldDeactivateApplication)
+        XCTAssertTrue(unpinnedSameDisplay.shouldActivatePreviousApplication)
+
+        let unpinnedCrossDisplay = PanelDismissFocusDecision.resolve(
+            isPinned: false,
+            didMoveAcrossDisplays: true
+        )
+        XCTAssertTrue(unpinnedCrossDisplay.shouldDeactivateApplication)
+        XCTAssertFalse(unpinnedCrossDisplay.shouldActivatePreviousApplication)
+    }
+
+    func testGlobalShortcutTogglesVisibilityAndUsesThePresentationFocusHandshake() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (_, _, controller, _) = try makePhase6Harness(
+            slotName: "HotkeyVisibility",
+            diagnostics: diagnostics
+        )
+        controller.handle(.togglePin)
+
+        controller.toggleOrPresentFloatTabs()
+        let shown = controller.runtimeDiagnosticSnapshot().fields
+        XCTAssertEqual(shown["requested_visibility"], .bool(true))
+        XCTAssertEqual(shown["shell_visible"], .bool(true))
+        XCTAssertTrue(writer.events.contains { $0.event == "presentation_focus.begin" })
+
+        controller.toggleOrPresentFloatTabs()
+
+        let hidden = controller.runtimeDiagnosticSnapshot().fields
+        XCTAssertEqual(hidden["requested_visibility"], .bool(false))
+        XCTAssertEqual(hidden["shell_visible"], .bool(false))
+        XCTAssertEqual(hidden["source_visible"], .bool(false))
+        XCTAssertEqual(hidden["shell_key"], .bool(false))
+        XCTAssertEqual(hidden["source_key"], .bool(false))
+        XCTAssertEqual(hidden["presentation_native_focus_pending"], .bool(false))
+        XCTAssertEqual(hidden["presentation_web_focus_pending"], .bool(false))
+
+        controller.handle(.togglePin)
+        controller.toggleOrPresentFloatTabs()
+        let shownAgain = controller.runtimeDiagnosticSnapshot().fields
+        XCTAssertEqual(shownAgain["requested_visibility"], .bool(true))
+        XCTAssertEqual(shownAgain["shell_visible"], .bool(true))
+
+        controller.toggleOrPresentFloatTabs()
+        let hiddenAgain = controller.runtimeDiagnosticSnapshot().fields
+        XCTAssertEqual(hiddenAgain["requested_visibility"], .bool(false))
+        XCTAssertEqual(hiddenAgain["shell_visible"], .bool(false))
+        XCTAssertEqual(hiddenAgain["source_visible"], .bool(false))
+        XCTAssertEqual(hiddenAgain["shell_key"], .bool(false))
+        XCTAssertEqual(hiddenAgain["source_key"], .bool(false))
+    }
+
     func testFullscreenSourceSlotCannotBeRemovedWhileWebKitOwnsIt() {
         let sourceID = UUID()
 
@@ -438,6 +548,20 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(source.size.height, 820, accuracy: 0.001)
     }
 
+    func testSourceHostFrameKeepsItsRelativePositionWhenShellMovesDisplays() {
+        let shellOnA = NSRect(x: 100, y: 200, width: 688, height: 844)
+        let shellOnB = NSRect(x: 1700, y: 120, width: 688, height: 844)
+        let sourceOnA = FullscreenSourceHostController.sourceFrame(forShellFrame: shellOnA)
+        let sourceOnB = FullscreenSourceHostController.sourceFrame(forShellFrame: shellOnB)
+
+        XCTAssertEqual(sourceOnB.origin.x - sourceOnA.origin.x, shellOnB.origin.x - shellOnA.origin.x)
+        XCTAssertEqual(sourceOnB.origin.y - sourceOnA.origin.y, shellOnB.origin.y - shellOnA.origin.y)
+        XCTAssertEqual(
+            sourceOnB,
+            FullscreenSourceHostController.sourceFrame(forShellFrame: shellOnB)
+        )
+    }
+
     func testSourceHostFrameMatchesCollapsedWebViewport() {
         let shell = NSRect(x: 100, y: 200, width: 688, height: 844)
 
@@ -748,35 +872,9 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(suppression.suppressesAutoHide(nowUptime: 0))
     }
 
-    func testGlobalShortcutHidesOnlyWhenFloatTabsOwnsFocus() {
-        XCTAssertTrue(
-            PanelController.shouldHideForGlobalShortcut(
-                shellIsVisible: true,
-                shellIsKey: true,
-                sourceIsKey: false
-            )
-        )
-        XCTAssertTrue(
-            PanelController.shouldHideForGlobalShortcut(
-                shellIsVisible: true,
-                shellIsKey: false,
-                sourceIsKey: true
-            )
-        )
-        XCTAssertFalse(
-            PanelController.shouldHideForGlobalShortcut(
-                shellIsVisible: true,
-                shellIsKey: false,
-                sourceIsKey: false
-            )
-        )
-        XCTAssertFalse(
-            PanelController.shouldHideForGlobalShortcut(
-                shellIsVisible: false,
-                shellIsKey: true,
-                sourceIsKey: true
-            )
-        )
+    func testGlobalShortcutHidesEveryVisiblePanelAndPresentsEveryHiddenPanel() {
+        XCTAssertTrue(PanelController.shouldHideForGlobalShortcut(shellIsVisible: true))
+        XCTAssertFalse(PanelController.shouldHideForGlobalShortcut(shellIsVisible: false))
     }
 
     func testExternalMouseAutoHideDoesNotRequireFrontmostApplicationChange() {

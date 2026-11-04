@@ -96,6 +96,20 @@ final class ScreenPositioningTests: XCTestCase {
         XCTAssertEqual(frame, visible)
     }
 
+    func testInitialTargetScreenFollowsMouseLocation() throws {
+        let screens = NSScreen.screens
+        let expected = try XCTUnwrap(screens.first)
+        let mouseLocation = NSPoint(x: expected.frame.midX, y: expected.frame.midY)
+
+        let target = ScreenPositioning.targetScreen(
+            mouseLocation: mouseLocation,
+            screens: screens,
+            fallback: nil
+        )
+
+        XCTAssertTrue(target === expected)
+    }
+
     func testClampedFrameKeepsPanelInsideVisibleFrameAndMinimumSize() {
         let visible = NSRect(x: 100, y: 50, width: 800, height: 600)
         let offscreen = NSRect(x: 850, y: -100, width: 250, height: 200)
@@ -147,6 +161,71 @@ final class ScreenPositioningTests: XCTestCase {
         XCTAssertEqual(relocated.size, saved.size)
         XCTAssertEqual(relocated.maxX, display.maxX)
         XCTAssertEqual(relocated.maxY, display.maxY)
+    }
+
+    func testPositionedFrameStaysOnItsConnectedDisplayWhenFallbackIsAnotherScreen() {
+        let displayA = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let displayB = NSRect(x: 1440, y: 0, width: 1920, height: 1080)
+        let frameOnB = NSRect(x: 1700, y: 100, width: 688, height: 844)
+
+        let presented = ScreenPositioning.relocatedFrame(
+            frameOnB,
+            visibleFrames: [displayA, displayB],
+            fallbackVisibleFrame: displayA
+        )
+
+        XCTAssertEqual(presented, frameOnB)
+    }
+
+    func testPositionedFrameDoesNotFollowFallbackChangesWhileDisplayRemainsConnected() {
+        let displayA = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let displayB = NSRect(x: 1440, y: 0, width: 1920, height: 1080)
+        let frameOnB = NSRect(x: 1700, y: 100, width: 688, height: 844)
+
+        let firstPresentation = ScreenPositioning.relocatedFrame(
+            frameOnB,
+            visibleFrames: [displayA, displayB],
+            fallbackVisibleFrame: displayA
+        )
+        let secondPresentation = ScreenPositioning.relocatedFrame(
+            firstPresentation,
+            visibleFrames: [displayA, displayB],
+            fallbackVisibleFrame: displayB
+        )
+
+        XCTAssertEqual(firstPresentation, frameOnB)
+        XCTAssertEqual(secondPresentation, frameOnB)
+    }
+
+    func testRelocationPreservesUserResizedDimensionsOnConnectedDisplay() {
+        let displayA = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let displayB = NSRect(x: 1440, y: 0, width: 1920, height: 1080)
+        let resizedFrameOnB = NSRect(x: 1800, y: 80, width: 940, height: 920)
+
+        let presented = ScreenPositioning.relocatedFrame(
+            resizedFrameOnB,
+            visibleFrames: [displayA, displayB],
+            fallbackVisibleFrame: displayA
+        )
+
+        XCTAssertEqual(presented, resizedFrameOnB)
+    }
+
+    func testRelocationUsesFallbackOnlyWhenSavedDisplayNoLongerIntersects() {
+        let displayA = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let savedFrameOnDisconnectedDisplay = NSRect(x: 1700, y: 100, width: 688, height: 844)
+
+        let relocated = ScreenPositioning.relocatedFrame(
+            savedFrameOnDisconnectedDisplay,
+            visibleFrames: [displayA],
+            fallbackVisibleFrame: displayA
+        )
+
+        XCTAssertEqual(relocated.size, savedFrameOnDisconnectedDisplay.size)
+        XCTAssertGreaterThanOrEqual(relocated.minX, displayA.minX)
+        XCTAssertGreaterThanOrEqual(relocated.minY, displayA.minY)
+        XCTAssertLessThanOrEqual(relocated.maxX, displayA.maxX)
+        XCTAssertLessThanOrEqual(relocated.maxY, displayA.maxY)
     }
 
     func testFollowPreferredViewportResizesPanelAndPreservesTopEdgeWhenPossible() {
@@ -236,6 +315,24 @@ final class PanelFrameStoreTests: XCTestCase {
         let expected = NSRect(x: 210, y: 120, width: 640, height: 760)
         store.saveFrame(expected)
         XCTAssertEqual(store.loadFrame(), expected)
+    }
+
+    func testSavedBDisplayFrameSurvivesStoreReloadAndPresentationWithMouseOnA() throws {
+        let displayA = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let displayB = NSRect(x: 1440, y: 0, width: 1920, height: 1080)
+        let expected = NSRect(x: 1700, y: 100, width: 688, height: 844)
+        PanelFrameStore(defaults: defaults, key: "frame").saveFrame(expected)
+
+        let restored = try XCTUnwrap(
+            PanelFrameStore(defaults: defaults, key: "frame").loadFrame()
+        )
+        let presented = ScreenPositioning.relocatedFrame(
+            restored,
+            visibleFrames: [displayA, displayB],
+            fallbackVisibleFrame: displayA
+        )
+
+        XCTAssertEqual(presented, expected)
     }
 
     func testInvalidSerializedFrameIsRejected() {
