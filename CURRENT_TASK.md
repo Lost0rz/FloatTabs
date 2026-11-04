@@ -3,7 +3,7 @@
 **TASK_ID:** `FT-PANEL-CROSS-DISPLAY-001`  
 **TASK_CLASS:** `CORRECTIVE`  
 **TITLE:** Respect user-positioned display across hide/reopen; bound explicit previous-app reactivation  
-**STATE:** `AUTHORIZED / CORRECTIVE 005 IMPLEMENTED AND LOCALLY VERIFIED / START HEAD 53be4d8151b6b2bf68ab03b97acf869b390c0ace / REMOTE DELIVERY PENDING / PRIOR HUMAN ACCEPTANCE FAIL / RETEST PENDING / PR #195 UNCHANGED`
+**STATE:** `CORRECTIVE 005 CODE COMMIT A39B87A PUSHED TO EXISTING PR #196 / LOCAL AND EXACT-SOURCE CI+QA PASS / HUMAN RETEST PENDING / PRIOR HUMAN ACCEPTANCE FAIL / PR #195 UNCHANGED`
 **BRANCH:** `codex/panel-cross-display-position-001`  
 **BASE OBSERVATION:** `main@2a52800f770266f7c901eb612a0b319ddca142df`
 
@@ -150,9 +150,10 @@ After affected XCTest, arm64 Debug/Release, and diff audit pass, commit and push
 
 - `ExternalShellTests`, `ScreenPositioningTests`, and `FullscreenRestoreCompletionTests`: **144 passed, 0 failed** on the local Apple Silicon arm64 Mac. Result bundle: `/tmp/FT-PANEL-CROSS-DISPLAY-001-FOCUS-OWNERSHIP-005-03.xcresult`.
 - Explicit macOS arm64 Debug and Release builds: **PASS**. Release app executable architecture: `arm64` only.
-- `git diff --check`: **PASS**. No full canonical XCTest run was performed; its existing baseline gate remains deferred pending PR #195's separate acceptance and merge.
-- PR #196 start-head checks on `53be4d8151b6b2bf68ab03b97acf869b390c0ace`: arm64 CI **PASS**, QA DMG workflow **PASS**. Corrective 005 has not yet been pushed, so literal corrective-head checks are pending.
-- Local QA DMG for corrective 005 has not yet been built. Human UI acceptance is **PENDING** for both user-owned scenarios; the prior build's reported result remains **FAIL**. Runtime root cause remains **UNKNOWN**.
+- `git diff --check`: **PASS**. Corrective 005's Gate 4 literal-source macOS workflow also ran the full branch XCTest suite; it passed 1,173 tests with 4 skipped and 0 failed, so the prior full-suite deferral does not block this corrective's delivery.
+- PR #196 code commit `a39b87a91be60f70c40cf8b600f5b3b7725f6568` is pushed to the existing branch. Literal-source macOS CI run [41813678039](https://github.com/Lost0rz/FloatTabs/actions/runs/41813678039) passed Debug, Release, arm64 verification, and **1,173 tests / 4 skipped / 0 failed**. Literal-source QA DMG workflow [41813678313](https://github.com/Lost0rz/FloatTabs/actions/runs/41813678313) passed.
+- Local QA artifact: `/Users/ox_miles/Downloads/FloatTabs-Focus-Ownership-QA-20261104-1800/FloatTabs-0.5.8.dmg`; SHA-256 `845a2c21d8b94340b8c4c1317707aa20a4dbb34a91345a39398c0aae0ffdee34`. Its provenance records the exact product source commit, arm64 architecture, ad-hoc signing, and non-notarized QA status.
+- The previous full-suite deferral applied to the earlier corrective stage; Gate 4 for corrective 005 explicitly authorized and completed the literal-head full macOS workflow. PR #196 remains OPEN / DRAFT; no merge or release occurred. Human UI acceptance is **PENDING** for both user-owned scenarios; the prior build's reported result remains **FAIL**. Runtime root cause remains **UNKNOWN**. PR #195 remains unchanged.
 
 ## STOP
 

@@ -7,9 +7,9 @@
 
 ## Active scope
 
-**ACTIVE TASK: `FT-PANEL-CROSS-DISPLAY-001` — CORRECTIVE 005 LOCALLY VERIFIED; EXISTING PR #196 REMOTE DELIVERY PENDING. START HEAD `53be4d8`; its arm64 CI and QA DMG workflow pass. Prior human A→B hide acceptance remains FAIL; corrected-build retest PENDING. PR #195 remains separate and unchanged.**
+**ACTIVE TASK: `FT-PANEL-CROSS-DISPLAY-001` — CORRECTIVE 005 CODE COMMIT `a39b87a` PUSHED TO EXISTING PR #196. Exact-source macOS CI and QA DMG workflows PASS; local arm64 QA DMG is verified. Prior human A→B hide acceptance remains FAIL; corrected-build scenarios A and B remain PENDING. PR #195 remains separate and unchanged.**
 
-Corrective 005 is implemented and locally verified on the existing PR #196 checkout. The hide decision is computed before either window is ordered out; explicit deactivation and previous-app activation require FloatTabs to own the foreground, and pinned cross-display or unknown-display hides skip both. Display classification compares the presentation's initial Shell display with the final Shell frame against connected displays, so reopening on B starts a fresh B-to-B comparison. Focused ExternalShell, ScreenPositioning, and fullscreen restoration tests pass 144/144; arm64 Debug/Release builds and `git diff --check` pass. Corrective 005 remains uncommitted and undelivered pending final ref checks and review. Start-head CI and QA DMG checks on `53be4d8151b6b2bf68ab03b97acf869b390c0ace` pass; literal corrective-head CI/QA and a new local provenance-bound QA DMG remain pending. Do not merge/release, modify PR #195, or claim human acceptance. The prior manual result remains FAIL; corrected-build scenarios A and B remain PENDING, and runtime cause remains UNKNOWN.
+Corrective 005 is committed and pushed to the existing PR #196 branch as `a39b87a91be60f70c40cf8b600f5b3b7725f6568`. The hide decision is computed before either window is ordered out; explicit deactivation and previous-app activation require FloatTabs to own the foreground, and pinned cross-display or unknown-display hides skip both. Display classification compares the presentation's initial Shell display with the final Shell frame against connected displays, so reopening on B starts a fresh B-to-B comparison. Focused ExternalShell, ScreenPositioning, and fullscreen restoration tests pass 144/144; local arm64 Debug/Release builds and `git diff --check` pass. Literal-source macOS CI passed Debug/Release, arm64 verification, 1,173 tests with 4 skipped and 0 failures; the literal-source QA DMG workflow also passed. A local, provenance-bound arm64 QA DMG is verified at `/Users/ox_miles/Downloads/FloatTabs-Focus-Ownership-QA-20261104-1800/FloatTabs-0.5.8.dmg`. Keep PR #196 Draft; do not merge/release, modify PR #195, or claim human acceptance. The prior manual result remains FAIL; corrected-build scenarios A and B remain PENDING, and runtime cause remains UNKNOWN.
 
 User report: open FloatTabs on display A, manually drag its shell/Web host to display B, dismiss without clicking B's desktop, and observe unexpected movement/return toward A (either the window on subsequent presentation or the frontmost app/Space on dismissal). The product decision is to respect the last user-positioned connected display and avoid explicit cross-display previous-app reactivation. macOS deactivation can independently select another frontmost app; this is not fully controllable and must not be masked by synthetic Finder activation or fake clicks.
 
@@ -34,15 +34,15 @@ Main at this task start contains merged WP1; the historical WP1-closeout status 
 WINDOW_POSITION_ROOT_CAUSE=KNOWN_SOURCE_PATH
 CROSS_DISPLAY_FOCUS_CAUSALITY=PARTIAL_NOT_RUNTIME_PROVEN
 TASK_AUTHORIZED=YES
-PRODUCT_SOURCE_MUTATION=LOCAL_UNCOMMITTED
+PRODUCT_SOURCE_MUTATION=DELIVERED_CODE_COMMIT_A39B87A
 DIAGNOSTIC_COMPATIBILITY_TEST=PASS_1_OF_1_INCLUDED_IN_FOCUSED_RUN
-FOCUSED_TESTS=PASS_166_OF_166
-CANONICAL_XCTEST=NOT_RERUN_AFTER_NARROW_DIAGNOSTIC_CORRECTIVE
+FOCUSED_TESTS=PASS_144_OF_144_CORRECTIVE_005
+CANONICAL_XCTEST=PASS_1173_EXECUTED_4_SKIPPED_0_FAILED_ON_A39B87A
 BASELINE_XCTEST=FAIL_1144_PASS_13_FAIL_OF_1157_AT_2A52800F
 BASELINE_SHARED_FAILURES=13_OF_13
 INTRODUCED_FAILURE=WebAttentionCrossFeatureTests.testCompletedPresentationTraceIsClearedBeforeIndependentDismissTrace_FIXED_FOCUSED_TEST_PASS
-CANONICAL_CI_BLOCKER=DEFERRED_PENDING_PR_195_ACCEPTANCE_AND_MERGE; THEN_REFRESH_MAIN_AND_RUN_CURRENT_OFFICIAL_GATE
-STOP=WAITING_FOR_PR_195_NORMAL_ACCEPTANCE_AND_MERGE_BEFORE_CANONICAL_GATE
+CANONICAL_CI_BLOCKER=NONE_FOR_CORRECTIVE_005; FULL_LITERAL_SOURCE_WORKFLOW_PASS
+STOP=WAITING_FOR_USER_HUMAN_UI_RETEST_SCENARIOS_A_AND_B
 HOTKEY_CORRECTIVE_004=IMPLEMENTED; FOCUSED_TESTS_DEBUG_RELEASE_DIFF_AND_NEW_QA_DMG_PASS
 HOTKEY_VISIBLE_PRESS=HIDE_REGARDLESS_OF_PIN_OR_KEY_STATE
 HOTKEY_HIDDEN_PRESS=SHOW_AND_RUN_EXISTING_FOCUS_HANDSHAKE
@@ -51,27 +51,30 @@ HOTKEY_CROSS_DISPLAY_FOCUS_POLICY=PRESERVE_EXISTING
 HOTKEY_QA_DMG=/Users/ox_miles/Downloads/FloatTabs-Hotkey-QA-20261104-1652/FloatTabs-0.5.8.dmg; ARM64_ADHOC_VERIFIED_NOT_NOTARIZED
 HOTKEY_HUMAN_UI_ACCEPTANCE=PENDING
 DEBUG_RELEASE_BUILDS=PASS_ARM64_DEBUG_AND_RELEASE
-CI=START_HEAD_53BE4D8_PASS; CORRECTIVE_005_LITERAL_HEAD_PENDING
-QA_DMG=PASS_LOCAL_ARM64_ADHOC_SIGNED_NOT_NOTARIZED
+CI=PASS_LITERAL_SOURCE_A39B87A; 1173_TESTS_4_SKIPPED_0_FAILED
+QA_DMG=PASS_LOCAL_ARM64_ADHOC_NOT_NOTARIZED; PASS_LITERAL_SOURCE_WORKFLOW
 HUMAN_UI_ACCEPTANCE=PRIOR_FOCUS_BUILD_FAILED; CORRECTIVE_004_AND_005_RETEST_PENDING
 LATEST_HUMAN_UI_ACCEPTANCE=FAIL_PRIOR_BUILD; CORRECTIVE_005_RETEST_PENDING
 NEW_TASK_MERGE_READY=NO
 PR_195_HUMAN_UI_ACCEPTANCE=PENDING
 PINNED_CROSS_DISPLAY_HIDE_CAUSE=NOT_ISOLATED; ORDER_OUT_AND_DEACTIVATE_SEQUENCE_CONFIRMED
-PINNED_HIDE_FOCUS_CORRECTIVE_005=IMPLEMENTED_LOCALLY; TWO_DISPLAY_RUNTIME_UNVERIFIED
+PINNED_HIDE_FOCUS_CORRECTIVE_005=DELIVERED_AS_A39B87A; TWO_DISPLAY_RUNTIME_UNVERIFIED
 LOCAL_FOCUSED_TESTS_AND_BUILDS=PASS_144_TESTS_DEBUG_RELEASE_ARM64; CORRECTIVE_005
-LOCAL_QA_DMG=/Users/ox_miles/Downloads/FloatTabs-Hotkey-QA-20261104-1652/FloatTabs-0.5.8.dmg
-BUILD_PROVENANCE=/Users/ox_miles/Downloads/FloatTabs-Hotkey-QA-20261104-1652/BUILD_PROVENANCE.md
-REMOTE_DELIVERY=START_HEAD_53be4d8_MATCHES_REMOTE_PR_196; START_HEAD_ARM64_CI_AND_QA_DMG_PASS; CORRECTIVE_005_NOT_YET_DELIVERED
-FOCUS_OWNERSHIP_CORRECTIVE_005=IMPLEMENTED_AND_LOCALLY_VERIFIED; REMOTE_DELIVERY_PENDING
-HIDE_DIAGNOSTIC_GAP=NO_PRE_HIDE_FOREGROUND_PID_OR_PER_ORDEROUT_STATE_SNAPSHOTS
+LOCAL_QA_DMG=/Users/ox_miles/Downloads/FloatTabs-Focus-Ownership-QA-20261104-1800/FloatTabs-0.5.8.dmg
+BUILD_PROVENANCE=/Users/ox_miles/Downloads/FloatTabs-Focus-Ownership-QA-20261104-1800/BUILD_PROVENANCE.md
+REMOTE_DELIVERY=CODE_COMMIT_A39B87A_PUSHED_TO_EXISTING_PR_196; EXACT_SOURCE_CI_AND_QA_PASS; NO_MERGE_OR_RELEASE
+FOCUS_OWNERSHIP_CORRECTIVE_005=IMPLEMENTED_AND_DELIVERED; TWO_DISPLAY_RUNTIME_UNVERIFIED
+HIDE_DIAGNOSTIC_GAP=RESOLVED_WITH_STAGE_SNAPSHOTS; ORDEROUT_CAUSALITY_NOT_INFERRED
 HUMAN_UI_ACCEPTANCE_CORRECTIVE_005=PENDING_USER_RETEST_SCENARIO_A_AND_B
-PR_196=OPEN_DRAFT_MERGEABLE_AT_53be4d8151b6b2bf68ab03b97acf869b390c0ace
+PR_196=OPEN_DRAFT_MERGEABLE; CODE_HEAD_A39B87A
 PR_195=OPEN_DRAFT_UNCHANGED; SEPARATE_CHECKOUT_HAS_PREEXISTING_DIRTY_UNIQUE_WORK
 CORRECTIVE_005_FOCUSED_TESTS=PASS_144_OF_144_ARM64
 CORRECTIVE_005_DEBUG_RELEASE=PASS_ARM64; RELEASE_BINARY_ARM64_ONLY
 CORRECTIVE_005_DIFF_CHECK=PASS
-CORRECTIVE_005_LOCAL_QA_DMG=PENDING
+CORRECTIVE_005_MACOS_CI=PASS_1173_TESTS_4_SKIPPED_0_FAILED; RUN_41813678039
+CORRECTIVE_005_QA_DMG_WORKFLOW=PASS; RUN_41813678313
+CORRECTIVE_005_LOCAL_QA_DMG=/Users/ox_miles/Downloads/FloatTabs-Focus-Ownership-QA-20261104-1800/FloatTabs-0.5.8.dmg
+CORRECTIVE_005_LOCAL_QA_DMG_SHA256=845a2c21d8b94340b8c4c1317707aa20a4dbb34a91345a39398c0aae0ffdee34
 ```
 
 Authority: `AGENTS.md`, `CURRENT_TASK.md`; documentation routes via `docs/README.md` and `docs/architecture/DOMAIN_MAP.md`. Product WebKit/runtime lifecycle, Browser Profiles and site/session data remain outside this task.
