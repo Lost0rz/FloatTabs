@@ -176,6 +176,47 @@ enum ScreenPositioning {
         return CGDirectDisplayID(number.uint32Value)
     }
 
+    static func connectedDisplayFrames(
+        screens: [NSScreen] = NSScreen.screens
+    ) -> [(displayID: CGDirectDisplayID, frame: NSRect)] {
+        screens.compactMap { screen in
+            guard let displayID = displayID(for: screen) else { return nil }
+            return (displayID: displayID, frame: screen.frame)
+        }
+    }
+
+    static func displayID(
+        forWindowFrame frame: NSRect,
+        screens: [NSScreen] = NSScreen.screens
+    ) -> CGDirectDisplayID? {
+        displayID(
+            forWindowFrame: frame,
+            displayFrames: connectedDisplayFrames(screens: screens)
+        )
+    }
+
+    static func displayID(
+        forWindowFrame frame: NSRect,
+        displayFrames: [(displayID: CGDirectDisplayID, frame: NSRect)]
+    ) -> CGDirectDisplayID? {
+        var bestDisplayID: CGDirectDisplayID?
+        var bestArea: CGFloat = 0
+        var bestAreaIsAmbiguous = false
+
+        for display in displayFrames {
+            let area = intersectionArea(frame, display.frame)
+            if area > bestArea {
+                bestArea = area
+                bestDisplayID = display.displayID
+                bestAreaIsAmbiguous = false
+            } else if area > 0, area == bestArea {
+                bestAreaIsAmbiguous = true
+            }
+        }
+
+        return bestAreaIsAmbiguous ? nil : bestDisplayID
+    }
+
     static func isSameKnownDisplay(
         _ lhs: CGDirectDisplayID?,
         _ rhs: CGDirectDisplayID?

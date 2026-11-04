@@ -74,6 +74,35 @@ final class ScreenPositioningTests: XCTestCase {
         )
     }
 
+    func testWindowFrameUsesTheConnectedDisplayWithTheLargestIntersection() {
+        let displayFrames: [(displayID: CGDirectDisplayID, frame: NSRect)] = [
+            (displayID: 1, frame: NSRect(x: 0, y: 0, width: 100, height: 100)),
+            (displayID: 2, frame: NSRect(x: 100, y: 0, width: 100, height: 100))
+        ]
+
+        XCTAssertEqual(
+            ScreenPositioning.displayID(
+                forWindowFrame: NSRect(x: 110, y: 10, width: 50, height: 50),
+                displayFrames: displayFrames
+            ),
+            2
+        )
+        XCTAssertNil(
+            ScreenPositioning.displayID(
+                forWindowFrame: NSRect(x: 50, y: 0, width: 100, height: 100),
+                displayFrames: displayFrames
+            ),
+            "a Shell equally spanning displays has unknown display ownership"
+        )
+        XCTAssertNil(
+            ScreenPositioning.displayID(
+                forWindowFrame: NSRect(x: 250, y: 250, width: 50, height: 50),
+                displayFrames: displayFrames
+            ),
+            "a Shell frame outside connected displays has unknown display ownership"
+        )
+    }
+
     func testCenteredFrameUsesRequestedSizeWhenItFits() {
         let visible = NSRect(x: 0, y: 0, width: 1440, height: 1000)
 

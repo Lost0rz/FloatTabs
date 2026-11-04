@@ -3,7 +3,7 @@
 **TASK_ID:** `FT-PANEL-CROSS-DISPLAY-001`  
 **TASK_CLASS:** `CORRECTIVE`  
 **TITLE:** Respect user-positioned display across hide/reopen; bound explicit previous-app reactivation  
-**STATE:** `AUTHORIZED / PINNED HIDE-FOCUS CORRECTIVE RETAINED / HOTKEY CORRECTIVE 004 IMPLEMENTED / 166 FOCUSED TESTS PASS / ARM64 DEBUG+RELEASE PASS / NEW LOCAL QA DMG READY / CODE COMMIT 566cdfb PUSHED TO PR #196 / REMOTE CHECKS RUNNING / HUMAN UI ACCEPTANCE PENDING / CANONICAL GATE DEFERRED PENDING PR #195`
+**STATE:** `AUTHORIZED / CORRECTIVE 005 IMPLEMENTED AND LOCALLY VERIFIED / START HEAD 53be4d8151b6b2bf68ab03b97acf869b390c0ace / REMOTE DELIVERY PENDING / PRIOR HUMAN ACCEPTANCE FAIL / RETEST PENDING / PR #195 UNCHANGED`
 **BRANCH:** `codex/panel-cross-display-position-001`  
 **BASE OBSERVATION:** `main@2a52800f770266f7c901eb612a0b319ddca142df`
 
@@ -122,6 +122,37 @@ The user subsequently requested that the related task changes be pushed so the r
 - Code/test/control commit `566cdfb7c73642ef3d9942ab642459476510ad75` (`fix: preserve panel display and toggle shortcut visibility`) was created and pushed to the existing branch.
 - Push verification confirmed the remote branch and PR #196 head both resolved to that SHA. PR #196 remains OPEN / DRAFT / MERGEABLE; the repository reported `Build & Test (Apple Silicon arm64)` and `build-dmg` running on the pushed revision.
 - PR #195 remains OPEN / DRAFT at `a9f07ca02df10d2ea3d0292d1afa5669d115da42` and was not modified. No merge or release occurred. Human UI acceptance remains PENDING.
+
+## User-authorized Cross-Display Focus Ownership corrective 005 — 2026-11-04
+
+The user reports that manual acceptance failed on the preceding build: with FloatTabs opened on A, pinned, moved to B, then hidden without activating another B application, macOS returned to A. This is the latest human result (`FAIL`); no machine test or earlier build changes that result. The failure path remains causally unisolated.
+
+Gate 0 refresh on this continuation:
+
+- Local branch and PR #196 head are `codex/panel-cross-display-position-001` at `53be4d8151b6b2bf68ab03b97acf869b390c0ace`; worktree is clean before corrective edits. The remote branch matches.
+- PR #196 is OPEN / DRAFT / MERGEABLE against `main@2a52800f770266f7c901eb612a0b319ddca142df`. `Build & Test (Apple Silicon arm64)` and `build-dmg` both completed successfully on this exact head.
+- PR #195 remains OPEN / DRAFT at `a9f07ca02df10d2ea3d0292d1afa5669d115da42`. Its separate checkout contains pre-existing unique dirty work and must remain untouched.
+- Existing hide diagnostics record a focus decision only after both order-out calls. They do not record the foreground PID and Shell/Source key/display states before hide or after each order-out, so they cannot identify whether the system's focus choice followed an explicit application action or window hiding.
+
+This continuation stays within `FT-PANEL-CROSS-DISPLAY-001` and PR #196. Preserve the existing position, fullscreen, hotkey, and hide-focus corrections. The bounded correction is:
+
+- Snapshot FloatTabs active state, `NSWorkspace` frontmost PID, Shell/Source Key Window state, Pinned state, and Shell/Source display observations before hiding.
+- Permit explicit app deactivation or previous-app activation only when FloatTabs still owns the foreground as required by the decision and display evidence is sufficient. A hidden app must not reactivate its stale captured app or deactivate itself. A saved previous-app context must not override a currently selected foreground app.
+- Track the initial Shell display for each presentation, its actual current display from the Shell frame, explicit cross-display movement, and connected-display membership. Unknown display evidence is not same-display evidence. Reopening on B and hiding again without moving starts a fresh B→B comparison.
+- Calculate the focus decision before either window is ordered out. Keep `PanelController` the sole focus-policy writer; preserve task cancellation, window synchronization, fullscreen/session-lock protections, and auto-hide focus ownership.
+- Use existing Diagnostics first, then add only the five bounded hide-stage snapshots needed to correlate foreground, key-window, display, decision, and Space-change observations. Do not infer causality from event proximity. If all explicit focus requests are skipped and macOS still chooses A, stop changing release policy.
+- Add focused regression coverage in `ExternalShellTests.swift` and, where needed, `ScreenPositioningTests.swift` for cross-display, reopened-on-B/no-move, other-app-foreground, same-display, ordinary hide, hidden-window key state, one-press hotkey, and fullscreen protection.
+- Do not change WebView lifecycle, Browser Profiles, cookies, sessions, persistence formats, private APIs, synthetic clicks, or unrelated tests/files.
+
+After affected XCTest, arm64 Debug/Release, and diff audit pass, commit and push the corrective to this existing PR #196 branch, verify the literal remote head, and run its required macOS CI and QA DMG workflow. Keep PR #196 Draft and do not merge or release. Human UI acceptance remains PENDING until the user separately retests Scenario A (no other-app activation on B) and Scenario B (activate another B app before hide); the prior reported result remains FAIL until then.
+
+### Corrective 005 local machine outcome — 2026-11-04
+
+- `ExternalShellTests`, `ScreenPositioningTests`, and `FullscreenRestoreCompletionTests`: **144 passed, 0 failed** on the local Apple Silicon arm64 Mac. Result bundle: `/tmp/FT-PANEL-CROSS-DISPLAY-001-FOCUS-OWNERSHIP-005-03.xcresult`.
+- Explicit macOS arm64 Debug and Release builds: **PASS**. Release app executable architecture: `arm64` only.
+- `git diff --check`: **PASS**. No full canonical XCTest run was performed; its existing baseline gate remains deferred pending PR #195's separate acceptance and merge.
+- PR #196 start-head checks on `53be4d8151b6b2bf68ab03b97acf869b390c0ace`: arm64 CI **PASS**, QA DMG workflow **PASS**. Corrective 005 has not yet been pushed, so literal corrective-head checks are pending.
+- Local QA DMG for corrective 005 has not yet been built. Human UI acceptance is **PENDING** for both user-owned scenarios; the prior build's reported result remains **FAIL**. Runtime root cause remains **UNKNOWN**.
 
 ## STOP
 

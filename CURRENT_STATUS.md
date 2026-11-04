@@ -7,13 +7,13 @@
 
 ## Active scope
 
-**ACTIVE TASK: `FT-PANEL-CROSS-DISPLAY-001` — PINNED HIDE-FOCUS CORRECTIVE RETAINED; HOTKEY VISIBILITY-TOGGLE CORRECTIVE 004 IMPLEMENTED. FOCUSED TESTS, DEBUG/RELEASE ARM64, AND NEW LOCAL QA DMG PASS; HUMAN ACCEPTANCE PENDING; CANONICAL GATE DEFERRED PENDING PR #195.**
+**ACTIVE TASK: `FT-PANEL-CROSS-DISPLAY-001` — CORRECTIVE 005 LOCALLY VERIFIED; EXISTING PR #196 REMOTE DELIVERY PENDING. START HEAD `53be4d8`; its arm64 CI and QA DMG workflow pass. Prior human A→B hide acceptance remains FAIL; corrected-build retest PENDING. PR #195 remains separate and unchanged.**
 
-The user authorized the next bounded corrective on the existing PR #196 worktree. Preserve the completed cross-display position/hide-focus work. Change `PanelController.toggleOrPresentFloatTabs()` so one global-shortcut press hides any visible shell regardless of Pinned or Key Window state; when hidden, show and run the existing presentation/WebView Focus Handshake. Update `shouldHideForGlobalShortcut()` and its `ExternalShellTests.swift` assertions to use visibility only. Keep fullscreen/session-locked guards and the existing cross-display focus-release policy. Run affected focused tests, Debug/Release arm64 builds, and diff checks; after all pass, produce a new local QA DMG with fresh provenance. The local-only delivery boundary was superseded by the user's explicit authorization to commit and push this task to the existing PR #196 branch for remote verification. Code commit `566cdfb7c73642ef3d9942ab642459476510ad75` is pushed; remote PR checks are running. Do not merge/release, modify PR #195, create a task/branch/worktree, or claim human acceptance; it remains PENDING.
+Corrective 005 is implemented and locally verified on the existing PR #196 checkout. The hide decision is computed before either window is ordered out; explicit deactivation and previous-app activation require FloatTabs to own the foreground, and pinned cross-display or unknown-display hides skip both. Display classification compares the presentation's initial Shell display with the final Shell frame against connected displays, so reopening on B starts a fresh B-to-B comparison. Focused ExternalShell, ScreenPositioning, and fullscreen restoration tests pass 144/144; arm64 Debug/Release builds and `git diff --check` pass. Corrective 005 remains uncommitted and undelivered pending final ref checks and review. Start-head CI and QA DMG checks on `53be4d8151b6b2bf68ab03b97acf869b390c0ace` pass; literal corrective-head CI/QA and a new local provenance-bound QA DMG remain pending. Do not merge/release, modify PR #195, or claim human acceptance. The prior manual result remains FAIL; corrected-build scenarios A and B remain PENDING, and runtime cause remains UNKNOWN.
 
 User report: open FloatTabs on display A, manually drag its shell/Web host to display B, dismiss without clicking B's desktop, and observe unexpected movement/return toward A (either the window on subsequent presentation or the frontmost app/Space on dismissal). The product decision is to respect the last user-positioned connected display and avoid explicit cross-display previous-app reactivation. macOS deactivation can independently select another frontmost app; this is not fully controllable and must not be masked by synthetic Finder activation or fake clicks.
 
-Latest user acceptance for the prior local build: **FAIL**. In the Pinned A→B→direct-hide scenario, macOS returned frontmost focus or the visible Space to A. The report does not isolate whether `orderOut()` or `NSApp.deactivate()` caused that selection. This user-authorized continuation adds a bounded hide/focus corrective: for a Pinned panel moved across displays during the visible presentation, hide both owned windows without explicitly deactivating FloatTabs or reactivating the captured previous app; verify neither hidden window remains key and stale presentation focus work cannot reclaim focus. Same-display and auto-hide behavior remain regression gates. The corrective is now present locally; its cross-display release behavior still awaits the user's two-display retest.
+Latest user acceptance for the prior local build: **FAIL**. In the Pinned A→B→direct-hide scenario, macOS returned frontmost focus or the visible Space to A. The report does not isolate whether `orderOut()` or `NSApp.deactivate()` caused that selection. Corrective 005 retains the earlier position, hotkey, fullscreen, and hide-focus changes while fixing foreground ownership and per-presentation Shell display classification. Machine PASS results do not change this human result; the corrected build requires separate user retests for both foreground scenarios.
 
 Baseline source audit before the local corrective, at PR #195 head `a9f07ca02df10d2ea3d0292d1afa5669d115da42` (the bullets below describe the pre-corrective implementation):
 - `PanelController.showFloatTabs` calls `positionPanelForCurrentScreens` at each show.
@@ -51,18 +51,27 @@ HOTKEY_CROSS_DISPLAY_FOCUS_POLICY=PRESERVE_EXISTING
 HOTKEY_QA_DMG=/Users/ox_miles/Downloads/FloatTabs-Hotkey-QA-20261104-1652/FloatTabs-0.5.8.dmg; ARM64_ADHOC_VERIFIED_NOT_NOTARIZED
 HOTKEY_HUMAN_UI_ACCEPTANCE=PENDING
 DEBUG_RELEASE_BUILDS=PASS_ARM64_DEBUG_AND_RELEASE
-CI=DEFERRED
+CI=START_HEAD_53BE4D8_PASS; CORRECTIVE_005_LITERAL_HEAD_PENDING
 QA_DMG=PASS_LOCAL_ARM64_ADHOC_SIGNED_NOT_NOTARIZED
-HUMAN_UI_ACCEPTANCE=PRIOR_FOCUS_BUILD_FAILED; HOTKEY_CORRECTIVE_004_BUILD_PENDING_USER_TEST
-LATEST_HUMAN_UI_ACCEPTANCE=PRIOR_FOCUS_BUILD_FAILED; HOTKEY_CORRECTIVE_004_HUMAN_RESULT_PENDING
+HUMAN_UI_ACCEPTANCE=PRIOR_FOCUS_BUILD_FAILED; CORRECTIVE_004_AND_005_RETEST_PENDING
+LATEST_HUMAN_UI_ACCEPTANCE=FAIL_PRIOR_BUILD; CORRECTIVE_005_RETEST_PENDING
 NEW_TASK_MERGE_READY=NO
 PR_195_HUMAN_UI_ACCEPTANCE=PENDING
 PINNED_CROSS_DISPLAY_HIDE_CAUSE=NOT_ISOLATED; ORDER_OUT_AND_DEACTIVATE_SEQUENCE_CONFIRMED
-PINNED_HIDE_FOCUS_CORRECTIVE=IMPLEMENTED_LOCALLY; TWO_DISPLAY_RUNTIME_UNVERIFIED
-LOCAL_FOCUSED_TESTS_AND_BUILDS=PASS_166_TESTS_DEBUG_RELEASE_ARM64; HOTKEY_CORRECTIVE_004
+PINNED_HIDE_FOCUS_CORRECTIVE_005=IMPLEMENTED_LOCALLY; TWO_DISPLAY_RUNTIME_UNVERIFIED
+LOCAL_FOCUSED_TESTS_AND_BUILDS=PASS_144_TESTS_DEBUG_RELEASE_ARM64; CORRECTIVE_005
 LOCAL_QA_DMG=/Users/ox_miles/Downloads/FloatTabs-Hotkey-QA-20261104-1652/FloatTabs-0.5.8.dmg
 BUILD_PROVENANCE=/Users/ox_miles/Downloads/FloatTabs-Hotkey-QA-20261104-1652/BUILD_PROVENANCE.md
-REMOTE_DELIVERY=CODE_COMMIT_566cdfb_PUSHED_TO_EXISTING_PR_196_BRANCH; PR_CHECKS_RUNNING; NO_MERGE_OR_RELEASE
+REMOTE_DELIVERY=START_HEAD_53be4d8_MATCHES_REMOTE_PR_196; START_HEAD_ARM64_CI_AND_QA_DMG_PASS; CORRECTIVE_005_NOT_YET_DELIVERED
+FOCUS_OWNERSHIP_CORRECTIVE_005=IMPLEMENTED_AND_LOCALLY_VERIFIED; REMOTE_DELIVERY_PENDING
+HIDE_DIAGNOSTIC_GAP=NO_PRE_HIDE_FOREGROUND_PID_OR_PER_ORDEROUT_STATE_SNAPSHOTS
+HUMAN_UI_ACCEPTANCE_CORRECTIVE_005=PENDING_USER_RETEST_SCENARIO_A_AND_B
+PR_196=OPEN_DRAFT_MERGEABLE_AT_53be4d8151b6b2bf68ab03b97acf869b390c0ace
+PR_195=OPEN_DRAFT_UNCHANGED; SEPARATE_CHECKOUT_HAS_PREEXISTING_DIRTY_UNIQUE_WORK
+CORRECTIVE_005_FOCUSED_TESTS=PASS_144_OF_144_ARM64
+CORRECTIVE_005_DEBUG_RELEASE=PASS_ARM64; RELEASE_BINARY_ARM64_ONLY
+CORRECTIVE_005_DIFF_CHECK=PASS
+CORRECTIVE_005_LOCAL_QA_DMG=PENDING
 ```
 
 Authority: `AGENTS.md`, `CURRENT_TASK.md`; documentation routes via `docs/README.md` and `docs/architecture/DOMAIN_MAP.md`. Product WebKit/runtime lifecycle, Browser Profiles and site/session data remain outside this task.
