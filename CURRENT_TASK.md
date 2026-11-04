@@ -3,7 +3,7 @@
 **TASK_ID:** `FT-PANEL-CROSS-DISPLAY-001`  
 **TASK_CLASS:** `CORRECTIVE`  
 **TITLE:** Respect user-positioned display across hide/reopen; bound explicit previous-app reactivation  
-**STATE:** `AUTHORIZED / PINNED HIDE-FOCUS CORRECTIVE RETAINED / HOTKEY CORRECTIVE 004 IMPLEMENTED / 166 FOCUSED TESTS PASS / ARM64 DEBUG+RELEASE PASS / NEW LOCAL QA DMG READY / REMOTE REVIEW COMMIT+PUSH AUTHORIZED / HUMAN UI ACCEPTANCE PENDING / CANONICAL GATE DEFERRED PENDING PR #195`
+**STATE:** `AUTHORIZED / PINNED HIDE-FOCUS CORRECTIVE RETAINED / HOTKEY CORRECTIVE 004 IMPLEMENTED / 166 FOCUSED TESTS PASS / ARM64 DEBUG+RELEASE PASS / NEW LOCAL QA DMG READY / CODE COMMIT 566cdfb PUSHED TO PR #196 / REMOTE CHECKS RUNNING / HUMAN UI ACCEPTANCE PENDING / CANONICAL GATE DEFERRED PENDING PR #195`
 **BRANCH:** `codex/panel-cross-display-position-001`  
 **BASE OBSERVATION:** `main@2a52800f770266f7c901eb612a0b319ddca142df`
 
@@ -116,6 +116,12 @@ The user subsequently requested that the related task changes be pushed so the r
 - Pre-push baseline was local HEAD = `origin/codex/panel-cross-display-position-001` = PR #196 head `a42df8b46d6d9116151efce80d540fc4da732488`; no staged or untracked work was present.
 - Push this task commit to that existing branch for remote review/checks. Do not create or change branches/PRs, touch PR #195, merge, or release.
 - The push may trigger the repository's normal PR workflows; do not rewrite workflow policy or skip any result. Preserve the canonical full-suite deferral and prior exact-base failures as documented above. Keep human UI acceptance PENDING.
+
+### Remote-review delivery outcome
+
+- Code/test/control commit `566cdfb7c73642ef3d9942ab642459476510ad75` (`fix: preserve panel display and toggle shortcut visibility`) was created and pushed to the existing branch.
+- Push verification confirmed the remote branch and PR #196 head both resolved to that SHA. PR #196 remains OPEN / DRAFT / MERGEABLE; the repository reported `Build & Test (Apple Silicon arm64)` and `build-dmg` running on the pushed revision.
+- PR #195 remains OPEN / DRAFT at `a9f07ca02df10d2ea3d0292d1afa5669d115da42` and was not modified. No merge or release occurred. Human UI acceptance remains PENDING.
 
 ## STOP
 
