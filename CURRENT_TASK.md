@@ -3,7 +3,7 @@
 **Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
 **Card ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001-CHATGPT-URL-RESTORE-002`  
 **Title:** ChatGPT hibernated-runtime fresh-URL restore — bounded mechanism corrective  
-**Status:** **AUTHORIZED / LOCAL TESTS AND ARM64 BUILDS PASS / SAFE DETACHED DELIVERY IN PROGRESS**
+**Status:** **AUTHORIZED / PATCH COMMITTED AND PUSHED / EXACT-HEAD CI AND QA PENDING**
 **Task class:** `RESTORE-MECHANISM CORRECTIVE`  
 **Baseline observed:** `main@2a52800f770266f7c901eb612a0b319ddca142df`  
 **Existing branch:** `codex/adaptive-lifecycle-wp2-policy`  
@@ -21,9 +21,9 @@ The prior WP2 policy implementation, machine/CI evidence and short-run user smok
 
 ## Current execution attempt
 
-The four-file local implementation remains uncommitted. Focused affected suites passed (477/477). The official workflow's fresh-process Partition A passed 1,104/1,104 and Partition B passed 62/62; the partitions had no duplicate test identifiers and their union matched all 1,166 current test cases. The earlier monolithic run's 13 failures were reproduced on the unmodified baseline and are retained as `MONOLITHIC_XCTEST=KNOWN_BASELINE_FAILURE`. Locked package resolution left `Package.resolved` unchanged; Debug and Release arm64 builds passed and the Release binary is arm64-only. Exact-head CI and QA DMG have not run. `ROOT_CAUSE=UNKNOWN`; the 13-failure cluster is baseline-reproducible. PR #195 remains unchanged and Draft.
+The verified four-file implementation and control update were committed as `7ccdda8f188f097f52389600ce605cc90338a6cc` and pushed to the authorized branch. GitHub confirms PR #195 has that exact head and remains Draft. Focused affected suites passed (477/477). The official workflow's fresh-process Partition A passed 1,104/1,104 and Partition B passed 62/62; the partitions had no duplicate test identifiers and their union matched all 1,166 current test cases. The earlier monolithic run's 13 failures were reproduced on the unmodified baseline and are retained as `MONOLITHIC_XCTEST=KNOWN_BASELINE_FAILURE`. Locked package resolution left `Package.resolved` unchanged; Debug and Release arm64 builds passed and the Release binary is arm64-only. Exact-head CI and QA DMG remain pending. `ROOT_CAUSE=UNKNOWN`; the 13-failure cluster is baseline-reproducible.
 
-The authorized branch `codex/adaptive-lifecycle-wp2-policy` remains checked out in another existing worktree at ancestor `d02b1a24718fe7aaa569dd7c49713bba4c39c1ac`; its local changes to `FloatTabs.xcodeproj/project.pbxproj`, three WebKit-heavy test files, and untracked fixture helper are preserved in place. The current restore worktree is detached at remote PR head `ade9914a4f7bd2e089ee22d32054641af9c33c5a`. Read-only checks found no active Codex task, terminal cwd, Git lock or relevant writer for the other worktree. Its changed paths do not overlap the four restore delivery paths, and the remote PR head remains unchanged. The continuation card therefore authorizes committing from this detached worktree and fast-forward pushing only to the existing PR branch.
+The authorized branch `codex/adaptive-lifecycle-wp2-policy` remains checked out in another existing worktree at ancestor `d02b1a24718fe7aaa569dd7c49713bba4c39c1ac`; its local changes to `FloatTabs.xcodeproj/project.pbxproj`, three WebKit-heavy test files, and untracked fixture helper remain preserved in place. The restore worktree remains detached at delivered commit `7ccdda8f188f097f52389600ce605cc90338a6cc`. Read-only checks found no active Codex task, terminal cwd, Git lock or relevant writer for the other worktree. Its changed paths do not overlap the four restore delivery paths. The commit was pushed as a fast-forward, and GitHub PR #195 now has that exact head.
 
 ## Frozen product decision
 
