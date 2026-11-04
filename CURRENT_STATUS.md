@@ -1,137 +1,40 @@
 # FloatTabs Current Status
 
-**Status date:** `2026-11-02`  
+**Observed date:** 2026-11-04  
 **Repository:** `Lost0rz/FloatTabs`  
-**Default branch:** `main`
+**Branch:** `codex/panel-cross-display-position-001`  
+**Observed base:** `main@2a52800f770266f7c901eb612a0b319ddca142df` (provenance, not an immutable equality lock)
 
-## Mode
+## Active scope
 
-**MODE: ADAPTIVE LIFECYCLE + RESTORE PERFORMANCE — WP1 COMPLETE / MERGE CLOSEOUT**
+**ACTIVE TASK: `FT-PANEL-CROSS-DISPLAY-001` — WINDOW POSITION / FOCUS CORRECTIVE; LOCAL IMPLEMENTATION PENDING.**
 
-Current task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` — **WP1 COMPLETE / HUMAN ACCEPTED / PR #194 MERGE-READY SUBJECT TO FINAL CONTROL-HEAD CHECKS**.
+User report: open FloatTabs on display A, manually drag its shell/Web host to display B, dismiss without clicking B's desktop, and observe unexpected movement/return toward A (either the window on subsequent presentation or the frontmost app/Space on dismissal). The product decision is to respect the last user-positioned connected display and avoid explicit cross-display previous-app reactivation. macOS deactivation can independently select another frontmost app; this is not fully controllable and must not be masked by synthetic Finder activation or fake clicks.
 
-Task branch:
+Verified source audit at PR #195 head `a9f07ca02df10d2ea3d0292d1afa5669d115da42` (window source path matches this base for the inspected behavior):
+- `PanelController.showFloatTabs` calls `positionPanelForCurrentScreens` at each show.
+- For `hasPositionedPanel`, `positionPanelForCurrentScreens` calls `ScreenPositioning.relocatedFrame` with **only** `[targetScreen.visibleFrame]`, where `ScreenPositioning.targetScreen` is chosen from `NSEvent.mouseLocation`. It therefore intentionally relocates a B-positioned window to A when the mouse is on A.
+- `PanelFrameStore` already saves full panel geometry. `persistPanelFrame` runs at hide/termination; no new persistence store is needed.
+- `hideFloatTabs` records a previous app, deactivates FloatTabs and may activate that app after a display-ID equality check. The previous display ID comes from `NSScreen.main`, not reliably from the actual previous app window; cross-screen focus/Space effect is *plausible but not proven* as a runtime root cause.
+- The physical WKWebView source host is a second window whose frame follows the shell through `FullscreenSourceHostController.synchronizeFrame`. Positioning must change only through existing shell/Panel ownership.
 
-`codex/adaptive-lifecycle-restore-001`
+## Concurrent, intentionally unchanged delivery
 
-PR:
+PR #195 `codex/adaptive-lifecycle-wp2-policy` remains **OPEN / DRAFT / UNMERGED** at `a9f07ca02df10d2ea3d0292d1afa5669d115da42`; its ChatGPT URL cold-restore change passed 1,166 formal A+B tests, arm64 build, exact-head CI and QA DMG, but **human acceptance is still PENDING**. Do not rewrite #195, claim user acceptance, or merge it as a side effect of this new independent Panel task.
 
-`#194 — design: adaptive lifecycle and restore performance`
+Main at this task start contains merged WP1; the historical WP1-closeout status embedded in main before this control transition is stale and superseded by verified merge evidence. This branch's control transition authorizes only the new Panel task. If #195 merges while this task is open, refresh/reconcile the branch against current main before final merge checks without discarding either task's unique work.
 
-Execution baseline:
-
-`main@7e179aaf4dbf0c538c7c2221101fc74d16e49b98`
-
-WP1 semantic implementation head:
-
-`e187f83fd2c4198d3e2baa64ef5074037c87c410`
-
-Pre-closeout final branch head with green machine gates:
-
-`1a77fae92c53708e2c6c373301c825187fdb1de4`
-
-## Repository / delivery state
+## Design/verification status
 
 ```text
-PUBLIC_RELEASE=v0.5.8
-PUBLIC_BUILD=26
-TASK=FT-ADAPTIVE-LIFECYCLE-RESTORE-001
-WP1_CANONICAL_COLD_PRESENTATION_GATE=COMPLETE
-WP1_EXACT_RUNTIME_READINESS=COMPLETE
-WP1_MACHINE_GATE=PASS
-WP1_INDEPENDENT_AUDIT=PASS
-WP1_HUMAN_UI_ACCEPTANCE=PASS
-WP1=COMPLETE
-PR_194=OPEN_UNMERGED_CLOSEOUT
-WP2_POLICY_MUTATION=NOT_STARTED
-WP3_SCHEDULING_MUTATION=NOT_STARTED
-WP4_INTEGRATION_MUTATION=NOT_STARTED
-PRIOR_CI_FAILURE_ROOT_CAUSE=UNKNOWN
-WEBKIT_FIRST_PIXEL=UNMEASURED
-AGGREGATE_GIB_BUDGET=DEFERRED_PLATFORM_BLOCKED
-PRIVATE_WEBKIT_SPI=FORBIDDEN
+WINDOW_POSITION_ROOT_CAUSE=KNOWN_SOURCE_PATH
+CROSS_DISPLAY_FOCUS_CAUSALITY=PARTIAL_NOT_RUNTIME_PROVEN
+TASK_AUTHORIZED=YES
+PRODUCT_SOURCE_MUTATION=NOT_STARTED
+MACHINE_VERIFICATION=NOT_RUN
+HUMAN_UI_ACCEPTANCE=PENDING
+NEW_TASK_MERGE_READY=NO
+PR_195_HUMAN_UI_ACCEPTANCE=PENDING
 ```
 
-Current durable WP1 contract:
-
-`docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`
-
-V1 remains historical/superseded.
-
-## WP1 final evidence
-
-WP1 Corrective-002 established exact-Runtime presentation readiness (`loading / ready / failed`) owned by `PanelController`, preserving the native `WebPanelContainerView` Restoring surface and resident-ready fast path.
-
-Machine and independent evidence:
-
-```text
-focused affected suites = PASS (381 passed / 4 skipped / 0 failed)
-full XCTest = PASS (1153 passed / 4 skipped / 0 failed)
-Debug arm64 = PASS
-Release arm64 = PASS
-native arm64 verification = PASS
-package lock = unchanged
-implementation-head macOS CI = PASS (run 41464559708 / job 125341924174)
-implementation-head QA DMG = PASS (run 41464559462)
-control-head macOS CI at 1a77fae = PASS (run 41466335384 / job 125348105768)
-control-head QA DMG at 1a77fae = PASS (run 41466335512)
-fresh independent exact-diff / ownership / data-safety audit = PASS
-```
-
-User-owned real-Mac acceptance on the exact WP1 build is **PASS**. The uploaded acceptance log `FloatTabs-WP1-Human-20261102-231725.jsonl` records:
-
-- `23` `panel.materialization.deferred` events;
-- `23` `panel.restoring_surface.window_visible` events;
-- `23` `panel.materialization.attached` events;
-- `0` `panel.materialization.readiness_failed` events;
-- notification cold routing entering the canonical restoring/materialization path;
-- rapid switching exercising cancellation/re-entry without a reported WP1 blank/stale/focus defect.
-
-The user reports the WP1 presentation/focus/notification behavior as acceptable and explicitly requested WP1 closeout.
-
-## Separate lifecycle-policy evidence for WP2
-
-The same human run confirms a **separate lifecycle-policy problem**, not a WP1 presentation failure.
-
-During a three-Runtime frequent-switch window, the log records nine `slot_lifecycle.runtime_budget` reconciliations in roughly 50 seconds with:
-
-```text
-managed_resident_count = 3
-target = 2
-eviction_count = 1
-reason = reconcile
-```
-
-Each reconciliation can immediately hibernate an Automatic Runtime and cause the next revisit to cold-restore. This proves the current normal-policy fixed resident count can create Runtime thrash for a legitimate multi-Slot working set.
-
-Durable product direction for the next lifecycle-policy work:
-
-- normal healthy-state lifecycle must **not** use a fixed resident-count cap as the reclaim trigger;
-- user-pinned / `Keep Loaded` Slots are a strong retention request and do not participate in automatic exit;
-- non-pinned `Automatic` Slots follow staged inactivity / pressure-driven automatic lifecycle rules;
-- time/state/pressure determine eligibility and reclaim; the number of currently resident Tabs is not itself a normal reclaim reason;
-- Browser Profile/session/configuration data safety and WP1 cold-presentation correctness remain regression boundaries.
-
-This evidence belongs to the next WP2 design/authorization. WP2 implementation has not started on PR #194.
-
-## Preserved boundaries
-
-- `SlotLifecycleCoordinator` remains the sole lifecycle/reclaim policy writer.
-- `WebViewPool` remains Runtime mechanism and identity owner.
-- `PanelController` remains presentation/materialization/readiness owner.
-- `WebAttentionCoordinator` remains generation/Attention protection authority.
-- Browser Profile/cookies/session/configuration are never cleared as lifecycle recovery.
-- notification exact-Slot/privacy semantics remain unchanged.
-- no private WebKit SPI, helper killing, reload/reset/restart workaround, or fake per-Slot/aggregate RAM attribution is authorized.
-
-## Next gate
-
-```text
-WP1 = COMPLETE
-→ finish PR #194 closeout on an exact control head
-→ merge #194 only after the final control-head checks are green
-→ create a clean post-merge WP2 lifecycle-policy task/branch/PR
-→ freeze WP2 staged lifecycle contract before product mutation
-```
-
-Do not add WP2 implementation to PR #194.
+Authority: `AGENTS.md`, `CURRENT_TASK.md`; documentation routes via `docs/README.md` and `docs/architecture/DOMAIN_MAP.md`. Product WebKit/runtime lifecycle, Browser Profiles and site/session data remain outside this task.
