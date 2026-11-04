@@ -835,6 +835,89 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(restored)
     }
 
+    func testChatGPTHibernateRestoresSavedConversationURLWithoutInteractionState() throws {
+        let sharedProfileID = UUID()
+        let sharedStore = WKWebsiteDataStore.nonPersistent()
+        let conversationURL = URL(string: "https://chatgpt.com/c/abc123?model=gpt-5&view=full")!
+        let siblingConversationURL = URL(string: "https://chatgpt.com/c/xyz789?model=gpt-5")!
+        var loadedRequests: [URLRequest] = []
+        var interactionStateCaptureCount = 0
+        var interactionStateApplyCount = 0
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { id in
+                XCTAssertEqual(id, sharedProfileID)
+                return sharedStore
+            }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) },
+            interactionStateProvider: { _ in
+                interactionStateCaptureCount += 1
+                return NSObject()
+            },
+            interactionStateApplier: { _, _ in interactionStateApplyCount += 1 },
+            browserProfileDataStoreProvider: provider,
+            diagnostics: diagnostics
+        )
+        var profile = makeProfile(
+            name: "Assistant",
+            browserProfileID: sharedProfileID,
+            homeURL: URL(string: "https://chatgpt.com/")!
+        )
+        profile.currentURL = conversationURL
+        var siblingProfile = makeProfile(
+            name: "ChatGPT",
+            browserProfileID: sharedProfileID,
+            homeURL: URL(string: "https://chatgpt.com/")!
+        )
+        siblingProfile.currentURL = siblingConversationURL
+
+        let original = try pool.webView(for: profile)
+        let sibling = try pool.webView(for: siblingProfile)
+        let originalIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        let siblingIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: siblingProfile.id))
+        XCTAssertEqual(loadedRequests.compactMap(\.url), [conversationURL, siblingConversationURL])
+
+        pool.hibernate(slotID: profile.id)
+
+        XCTAssertEqual(interactionStateCaptureCount, 0)
+        XCTAssertEqual(
+            writer.events.first { $0.event == "web_runtime.hibernate.completed" }?
+                .fields["interaction_state_present"],
+            .bool(false)
+        )
+        XCTAssertTrue(pool.existingWebView(for: siblingProfile.id) === sibling)
+
+        let restored = try pool.webView(for: profile)
+
+        XCTAssertFalse(restored === original)
+        XCTAssertTrue(pool.existingWebView(for: siblingProfile.id) === sibling)
+        XCTAssertEqual(loadedRequests.compactMap(\.url), [
+            conversationURL,
+            siblingConversationURL,
+            conversationURL
+        ])
+        XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
+        XCTAssertEqual(interactionStateApplyCount, 0)
+        XCTAssertTrue(restored.configuration.websiteDataStore === sharedStore)
+        XCTAssertEqual(pool.browserProfileIdentity(for: profile.id), .custom(sharedProfileID))
+        XCTAssertEqual(pool.browserProfileIdentity(for: siblingProfile.id), .custom(sharedProfileID))
+        let restoredIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        XCTAssertGreaterThan(restoredIdentity.runtimeGeneration, originalIdentity.runtimeGeneration)
+        XCTAssertNotEqual(restoredIdentity.webViewInstanceID, originalIdentity.webViewInstanceID)
+        XCTAssertNotEqual(restoredIdentity.webViewInstanceID, siblingIdentity.webViewInstanceID)
+
+        let warm = try pool.webView(for: profile)
+
+        XCTAssertTrue(warm === restored)
+        XCTAssertEqual(loadedRequests.count, 3, "warm Runtime reuse must not start another navigation")
+        XCTAssertTrue(pool.existingWebView(for: siblingProfile.id) === sibling)
+    }
+
     func testDestructiveReleaseClearsPendingHibernateState() throws {
         let state = NSObject()
         var restored = false

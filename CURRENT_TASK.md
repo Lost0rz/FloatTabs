@@ -3,7 +3,7 @@
 **Task ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`  
 **Card ID:** `FT-ADAPTIVE-LIFECYCLE-RESTORE-001-CHATGPT-URL-RESTORE-002`  
 **Title:** ChatGPT hibernated-runtime fresh-URL restore — bounded mechanism corrective  
-**Status:** **AUTHORIZED / LOCAL IMPLEMENTATION PENDING**  
+**Status:** **AUTHORIZED / LOCAL TESTS AND ARM64 BUILDS PASS / SAFE DETACHED DELIVERY IN PROGRESS**
 **Task class:** `RESTORE-MECHANISM CORRECTIVE`  
 **Baseline observed:** `main@2a52800f770266f7c901eb612a0b319ddca142df`  
 **Existing branch:** `codex/adaptive-lifecycle-wp2-policy`  
@@ -18,6 +18,12 @@ This is a separate bounded restoration slice **within the same overarching Adapt
 The prior WP2 policy implementation, machine/CI evidence and short-run user smoke stay recorded, but its normal-use field-observation/final-closeout decision is **paused/superseded as the immediate execution stage**. Previous observations do not constitute acceptance of this new restore behavior. PR #195 remains Draft, not merge/release ready.
 
 `docs/architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md` still governs the unchanged WP2 lifecycle policy. `docs/architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md` remains the WP1 presentation/readiness regression authority. This card expressly authorizes the narrow new ChatGPT restore mechanism without revising V7's WP2-only policy scope.
+
+## Current execution attempt
+
+The four-file local implementation remains uncommitted. Focused affected suites passed (477/477). The official workflow's fresh-process Partition A passed 1,104/1,104 and Partition B passed 62/62; the partitions had no duplicate test identifiers and their union matched all 1,166 current test cases. The earlier monolithic run's 13 failures were reproduced on the unmodified baseline and are retained as `MONOLITHIC_XCTEST=KNOWN_BASELINE_FAILURE`. Locked package resolution left `Package.resolved` unchanged; Debug and Release arm64 builds passed and the Release binary is arm64-only. Exact-head CI and QA DMG have not run. `ROOT_CAUSE=UNKNOWN`; the 13-failure cluster is baseline-reproducible. PR #195 remains unchanged and Draft.
+
+The authorized branch `codex/adaptive-lifecycle-wp2-policy` remains checked out in another existing worktree at ancestor `d02b1a24718fe7aaa569dd7c49713bba4c39c1ac`; its local changes to `FloatTabs.xcodeproj/project.pbxproj`, three WebKit-heavy test files, and untracked fixture helper are preserved in place. The current restore worktree is detached at remote PR head `ade9914a4f7bd2e089ee22d32054641af9c33c5a`. Read-only checks found no active Codex task, terminal cwd, Git lock or relevant writer for the other worktree. Its changed paths do not overlap the four restore delivery paths, and the remote PR head remains unchanged. The continuation card therefore authorizes committing from this detached worktree and fast-forward pushing only to the existing PR branch.
 
 ## Frozen product decision
 
@@ -43,9 +49,9 @@ No mutation to `SlotLifecycleCoordinator`, `PanelController`, `WebViewFactory`, 
 1. **Preflight**: obtain fresh `origin/main`, current PR head, control files, existing task branch and local checkout/worktree cleanliness/ownership; confirm no competing unique work or conflicting task authority. STOP on unsafe overlap.
 2. **Implement smallest conditional**: no new lifecycle writer and no unneeded additional navigation. Preserve existing error/diagnostic semantics and correct Runtime identity.
 3. **Focused tests**: prove ChatGPT hibernate -> fresh URL load exactly once (including deep conversation URL), no interaction-state apply, no stale snapshot retained; same-instance warm reuse, other-site restoration, explicit release behavior, custom Browser Profile and sibling isolation remain correct; run affected WebViewPool/WP1/lifecycle coverage.
-4. **Consolidated machine closeout**: full XCTest, Debug/Release arm64, architecture/package-lock checks and exact-head required self-hosted CI + QA DMG where applicable; no new performance benchmark or prolonged pre-change experiment is required.
+4. **Consolidated machine closeout**: use the official workflow's two required fresh-process XCTest partitions (A plus B) as the canonical full-suite gate; both must pass and together cover every test exactly once. Preserve the prior monolithic 13-failure result as a known baseline failure because it reproduces on unmodified code. Complete Debug/Release arm64, architecture/package-lock checks and exact-head required self-hosted CI + QA DMG after safe delivery; no new performance benchmark or prolonged pre-change experiment is required.
 5. **Review and user experience**: bounded exact-diff data-safety review, then user-owned real Mac spot acceptance (warm switch, cold exact conversation reopen, other-site unaffected, login intact). `HUMAN_UI_ACCEPTANCE=PENDING` until explicit user verdict.
-6. **Delivery**: commit/push only the authorized PR branch, verify remote ref after push; preserve PR as **Draft / unmerged** and never publish a release automatically.
+6. **Delivery**: after read-only ownership, overlap, and ref checks, commit/push only the authorized PR branch when no concurrent writer exists and the push is a fast-forward; verify the remote ref after push. A branch checked out in another worktree is not by itself a stop when its unique work is preserved and no active writer or unresolved overlap exists. Preserve PR as **Draft / unmerged** and never publish a release automatically.
 
 ## STOP
 

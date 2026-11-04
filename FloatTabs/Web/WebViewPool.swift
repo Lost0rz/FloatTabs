@@ -291,10 +291,19 @@ final class WebViewPool {
         }
 
         let navigationURL = profile.currentURL ?? profile.homeURL
-        let restoreSnapshot = compatibleRestoreSnapshot(
-            for: profile,
-            navigationURL: navigationURL
-        )
+        let restoreSnapshot: WebRuntimeRestoreSnapshot?
+        if ChatGPTSitePolicy.isSupportedChatGPTURL(navigationURL) {
+            // ChatGPT owns loading older conversation content. A fresh Runtime
+            // should navigate directly to the saved conversation URL instead of
+            // replaying an opaque WebKit interaction snapshot.
+            restoreSnapshots.removeValue(forKey: profile.id)
+            restoreSnapshot = nil
+        } else {
+            restoreSnapshot = compatibleRestoreSnapshot(
+                for: profile,
+                navigationURL: navigationURL
+            )
+        }
         return try createWebView(
             for: profile,
             navigationURL: navigationURL,
@@ -553,7 +562,12 @@ final class WebViewPool {
     func hibernate(slotID: UUID) {
         guard let webView = webViews[slotID] else { return }
 
-        if let snapshot = captureRestoreSnapshot(slotID: slotID, webView: webView) {
+        let currentURL = restoreURL(slotID: slotID, webView: webView)
+        if currentURL.map(ChatGPTSitePolicy.isSupportedChatGPTURL) == true {
+            // Avoid retaining an interactionState snapshot for a ChatGPT page;
+            // its saved URL is the restore source for a cold Runtime.
+            restoreSnapshots.removeValue(forKey: slotID)
+        } else if let snapshot = captureRestoreSnapshot(slotID: slotID, webView: webView) {
             restoreSnapshots[slotID] = snapshot
         } else {
             restoreSnapshots.removeValue(forKey: slotID)
