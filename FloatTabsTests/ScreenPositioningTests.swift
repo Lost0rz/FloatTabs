@@ -139,6 +139,27 @@ final class ScreenPositioningTests: XCTestCase {
         XCTAssertTrue(target === expected)
     }
 
+    func testPointerLocationSelectsEitherSyntheticDisplay() {
+        let displayA = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let displayB = NSRect(x: 1440, y: 0, width: 1920, height: 1080)
+        let screenFrames = [displayA, displayB]
+
+        XCTAssertEqual(
+            ScreenPositioning.targetScreenIndex(
+                mouseLocation: NSPoint(x: displayA.midX, y: displayA.midY),
+                screenFrames: screenFrames
+            ),
+            0
+        )
+        XCTAssertEqual(
+            ScreenPositioning.targetScreenIndex(
+                mouseLocation: NSPoint(x: displayB.midX, y: displayB.midY),
+                screenFrames: screenFrames
+            ),
+            1
+        )
+    }
+
     func testClampedFrameKeepsPanelInsideVisibleFrameAndMinimumSize() {
         let visible = NSRect(x: 100, y: 50, width: 800, height: 600)
         let offscreen = NSRect(x: 850, y: -100, width: 250, height: 200)

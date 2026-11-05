@@ -2,7 +2,7 @@
 
 **TASK_ID:** `FT-PANEL-CROSS-DISPLAY-SUMMON-001`
 **TASK_CLASS:** BOUNDED PRODUCT CORRECTIVE — PANEL / MULTI-DISPLAY SUMMON
-**STATE:** IMPLEMENTED / LOCAL_MACHINE_GATES_PASS / REMOTE_CI_QA_AND_ACCEPTANCE_PENDING
+**STATE:** IMPLEMENTED / LOCAL_MACHINE_GATES_PASS / FINAL_REMOTE_CI_QA_AUDIT_AND_ACCEPTANCE_PENDING
 **BRANCH:** `codex/ft-panel-cross-display-summon-001`
 **BASELINE:** `main@d64c9ec62660e9a855056c08e013a71a58db821b`
 **PR:** #200 OPEN / DRAFT; do not merge until independent exact-diff audit, explicit human UI acceptance and exact-head host gates.
@@ -19,7 +19,7 @@ This is a new engineering purpose, independent of the ongoing Draft lifecycle PR
 - `FloatTabs/Panel/PanelController.swift::positionPanelForCurrentScreens()` correctly resolves the target by `ScreenPositioning.targetScreen()`, but PR #196 changed the already-positioned Shell's `ScreenPositioning.relocatedFrame` input from `[targetScreen.visibleFrame]` to `screens.map(\.visibleFrame)`.
 - With A still connected, `bestVisibleFrame` selects A by intersection with the saved/current frame even if the pointer and new summon action are on B. This is a code-supported likely regression seam; no new real-Mac corrective was validated yet.
 - Reproduce with existing installed build and record exact installed app/build provenance if accessible. Do not infer installed HEAD solely from GitHub source.
-- Preflight found no running FloatTabs process, so installed-build provenance was unavailable. The source-level A→B/B→A regression test reproduced the placement defect before the correction.
+- Preflight found no running FloatTabs process, so installed-build provenance was unavailable. Deterministic geometry regressions reproduced A→B and B→A before correction; a controller-path restored A→B regression was also verified red when the original all-connected-screen placement was temporarily reinstated.
 
 ## Frozen expected behavior
 
@@ -58,11 +58,12 @@ Stop on unknown local unique-work ownership, conflicting branch/checkouts, failu
 ## Execution evidence — 2026-11-05
 
 - G0 passed: clean canonical checkout was reused; target branch and PR #200 matched the observed `798522034329fc54ca8f80fb1145e4ef103ba15c` head; no local writer occupied that branch. PR #195's dirty WP2 worktree and detached restore worktree remain untouched. PR #199 remains OPEN / DRAFT / unmerged, so FILE_CONTROL remains active.
-- G1 passed: both menu-bar and global-hotkey hidden-window paths reach `showFloatTabs()` and its explicit placement call. The new source-level A→B/B→A regression failed on the old all-connected-display behavior in both directions, then passed with the pointer target selected.
+- G1 passed: both menu-bar and global-hotkey hidden-window paths reach `showFloatTabs()` and its explicit placement call. Synthetic A/B pointer selection is tested through the selector used by `targetScreen`. Geometry A→B/B→A regressions fail on the old all-connected-display behavior. A controller-path restored A→B regression was verified red when the old relocation was temporarily reinstated.
 - G2 implemented in `PanelController.swift` and `ScreenPositioning.swift`; restored and already-positioned frames share the explicit-summon path. Fullscreen companion placement and passive topology clamping retain the connected-display behavior.
-- G3 local passed: focused `ScreenPositioningTests`, `ExternalShellTests`, and `WebFocusAdapterTests` passed 171/171; full arm64 XCTest passed 1,171, skipped 4, failed 0; Debug and Release arm64 builds passed. The Xcode host emitted a CoreSimulator version warning, but macOS test execution completed successfully.
-- Remote exact-head CI, provenance-matched QA DMG, and final PR diff review remain pending. No real dual-display test has been performed.
-- `INDEPENDENT_AUDIT=NOT_COMPLETE`; the implementation self-check is not independent. `HUMAN_UI_ACCEPTANCE=PENDING`.
+- G3 local passed on 2026-11-06: focused `ScreenPositioningTests`, `ExternalShellTests`, and `WebFocusAdapterTests` passed 175/175; the full arm64 XCTest passed 1,175, skipped 4, failed 0; final placement regressions passed 4/4; Debug and Release arm64 builds exited 0. The Xcode host emitted a CoreSimulator version mismatch warning, while macOS tests completed successfully.
+- Earlier remote CI and QA-DMG runs passed on the preceding implementation commit `7ad4d9fc7d218f5debd7bbf28bbc1a83cbe0bd85`. They do not cover the new controller-path tests and selector refactor; exact corrected-source reruns and a provenance-matched QA DMG are pending.
+- G4 independent exact-diff audit passed: separate code-review agent reviewed `d64c9ec62660e9a855056c08e013a71a58db821b..7ad4d9fc7d218f5debd7bbf28bbc1a83cbe0bd85` plus the current worktree diff. It confirmed the full path set, controller regression coverage, preserved PR #196 focus and Source Host behavior, fullscreen/topology separation, and no lifecycle, product-data, or new window-state writer changes. The reviewer did not rerun tests or verify host state.
+- No real dual-display test has been performed. `HUMAN_UI_ACCEPTANCE=PENDING`.
 
 ## Required return receipt
 

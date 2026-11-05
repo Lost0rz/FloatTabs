@@ -1,6 +1,6 @@
 # FloatTabs Current Status
 
-**Verified date:** 2026-11-05
+**Verified date:** 2026-11-06
 **Repository:** Lost0rz/FloatTabs
 **Control mode:** FILE_CONTROL
 **Current authorized task:** FT-PANEL-CROSS-DISPLAY-SUMMON-001
@@ -18,7 +18,7 @@ PR #196 (`FT-PANEL-CROSS-DISPLAY-001`) was verified MERGED/CLOSED; merge commit 
 
 User observed: after Shell was opened on display A then hidden, pointer moves to display B; global hotkey or menu-bar activation still opens on A, unless Shell is manually dragged to B. Reverse B->A should also work. This is a user-observed product regression, not a WebView keyboard-focus defect.
 
-The code cause is confirmed in `PanelController.positionPanelForCurrentScreens()`: the already-positioned Shell was relocated against all connected screens, so `ScreenPositioning.relocatedFrame` preferred the original frame's overlapping display instead of the pointer target. A new deterministic A→B/B→A test failed in both directions against that behavior. No FloatTabs process was running during preflight, so installed-app build provenance and real two-display reproduction remain unavailable.
+The code cause is confirmed in `PanelController.positionPanelForCurrentScreens()`: the already-positioned Shell was relocated against all connected screens, so `ScreenPositioning.relocatedFrame` preferred the original frame's overlapping display instead of the pointer target. Deterministic geometry regressions fail in both A→B and B→A against that behavior. A controller-path restored A→B regression also fails when the old all-connected-screen relocation is temporarily reinstated, and passes with the corrective in place. No FloatTabs process was running during preflight, so installed-app build provenance and real two-display reproduction remain unavailable.
 
 Product expected: hidden -> explicitly summon on mouse-containing connected display, while same-display placement and size, manual drag persistence, visible-window pointer moves (no auto-jump), hotkey toggle, menu bar action, Source Host, fullscreen, and prior PR #196 focus safety remain correct.
 
@@ -34,13 +34,13 @@ Authoritative details, scope, acceptance and STOP: `CURRENT_TASK.md` on this bra
 
 ```ini
 G0_LOCAL_WRITER_PREFLIGHT=PASS
-G1_MINIMAL_REGRESSION_REPRO=PASS (red/green A->B and B->A)
+G1_MINIMAL_REGRESSION_REPRO=PASS (red/green geometry A->B/B->A; controller-path restored A->B is red against original placement)
 G2_CORRECTIVE_IMPLEMENTATION=IMPLEMENTED
-G3_LOCAL_MACHINE_TESTS=PASS (focused 171/171; full XCTest 1171 passed, 4 skipped, 0 failed)
+G3_LOCAL_MACHINE_TESTS=PASS (focused 175/175; full XCTest 1175 passed, 4 skipped, 0 failed; final four placement regressions 4/4)
 G3_ARM64_BUILDS=PASS (Debug and Release)
-G3_REMOTE_CI=PENDING
-G3_QA_DMG=PENDING
-G4_INDEPENDENT_AUDIT=PENDING (self-check only so far)
+G3_REMOTE_CI=PENDING (must rerun on corrected source commit)
+G3_QA_DMG=PENDING (must match corrected source commit)
+G4_INDEPENDENT_AUDIT=PASS (separate code-review agent; exact diff from d64c9ec to 7ad4d9f plus current worktree changes)
 HUMAN_UI_ACCEPTANCE=PENDING
 PR_MERGE_READY=NO
 MERGE=NOT_MERGED

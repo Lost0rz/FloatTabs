@@ -438,6 +438,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
     private var debugInteractionSurfaceFactOverrides: [UUID: Bool] = [:]
+    var debugTargetVisibleFrameOverride: NSRect?
 #endif
 
     var isVisible: Bool {
@@ -2957,6 +2958,10 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     var debugIsShowingRestoringState: Bool {
         rootView.webPanelContainerView.isShowingRestoringState
+    }
+
+    var debugPanelFrame: NSRect {
+        panel.frame
     }
 
     var debugPresentedWebView: WKWebView? {
@@ -5990,6 +5995,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     ) {
         let screens = NSScreen.screens
         guard let targetScreen = ScreenPositioning.targetScreen(screens: screens) else { return }
+        let targetVisibleFrame: NSRect
+#if DEBUG
+        if reason == .explicitSummon, let debugTargetVisibleFrameOverride {
+            targetVisibleFrame = debugTargetVisibleFrameOverride
+        } else {
+            targetVisibleFrame = targetScreen.visibleFrame
+        }
+#else
+        targetVisibleFrame = targetScreen.visibleFrame
+#endif
 
         var targetFields: [String: RuntimeDiagnosticValue] = [
             "screen_count": .integer(Int64(screens.count)),
@@ -6015,19 +6030,19 @@ final class PanelController: NSObject, NSWindowDelegate {
             if reason == .explicitSummon {
                 targetFrame = ScreenPositioning.frameForExplicitSummon(
                     frame,
-                    on: targetScreen.visibleFrame
+                    on: targetVisibleFrame
                 )
             } else {
                 targetFrame = ScreenPositioning.relocatedFrame(
                     frame,
                     visibleFrames: screens.map(\.visibleFrame),
-                    fallbackVisibleFrame: targetScreen.visibleFrame
+                    fallbackVisibleFrame: targetVisibleFrame
                 )
             }
         } else {
             targetFrame = ScreenPositioning.centeredFrame(
                 size: PanelMetrics.defaultPanelSize,
-                in: targetScreen.visibleFrame
+                in: targetVisibleFrame
             )
         }
 

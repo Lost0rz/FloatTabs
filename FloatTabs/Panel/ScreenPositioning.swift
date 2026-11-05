@@ -230,9 +230,20 @@ enum ScreenPositioning {
         screens: [NSScreen] = NSScreen.screens,
         fallback: NSScreen? = NSScreen.main
     ) -> NSScreen? {
-        screens.first(where: { $0.frame.contains(mouseLocation) })
-            ?? fallback
-            ?? screens.first
+        if let index = targetScreenIndex(
+            mouseLocation: mouseLocation,
+            screenFrames: screens.map(\.frame)
+        ) {
+            return screens[index]
+        }
+        return fallback ?? screens.first
+    }
+
+    static func targetScreenIndex(
+        mouseLocation: NSPoint,
+        screenFrames: [NSRect]
+    ) -> Int? {
+        screenFrames.firstIndex(where: { $0.contains(mouseLocation) })
     }
 
     static func centeredFrame(size: NSSize, in visibleFrame: NSRect) -> NSRect {
