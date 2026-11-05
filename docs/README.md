@@ -6,8 +6,8 @@
 
 ```text
 AGENTS.md
-→ CURRENT_STATUS.md
-→ CURRENT_TASK.md
+→ FILE_CONTROL: CURRENT_TASK.md authorization + CURRENT_STATUS.md snapshot (until verified cutover)
+  OR ISSUE_CONTROL: selected approved GitHub Issue/spec revision (only after verified cutover)
 → this docs/README.md routing index
 → current task design/architecture contract explicitly linked by Authority
 → docs/architecture/README.md
@@ -17,29 +17,15 @@ AGENTS.md
 
 Historical documents remain evidence only unless current Authority explicitly restores them.
 
-## 2. Current active task
+## 2. Current task routing — pre-cutover migration (2026-11-05)
 
-Current mutation authority:
+**Do not infer that ISSUE_CONTROL is live from this proposed branch.** Until the migration PR is merged and verified on main, `AGENTS.md`, `CURRENT_TASK.md`, and `CURRENT_STATUS.md` retain the effective FILE_CONTROL rules.
 
-`FT-ADAPTIVE-LIFECYCLE-RESTORE-001`
-
-Current durable contract:
-
-[`architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md`](architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md)
-
-Current stage:
-
-```text
-WP0 restore evidence = reconciled / sufficient for WP1
-WP1 unified cold-restore presentation gate = AUTHORIZED
-WP2 adaptive healthy-state policy = BLOCKED
-WP3 background scheduling mutation = BLOCKED
-WP4 lifecycle integration mutation = BLOCKED
-```
-
-V1 is superseded and historical:
-
-[`architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md`](architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V1.md)
+- Governance migration task: `FT-GOV-ISSUE-CONTROL-MIGRATION-001`, proposal Issue [#197](https://github.com/Lost0rz/FloatTabs/issues/197), dedicated migration branch. Issue remains **UNAPPROVED / NON-EXECUTABLE**.
+- Continuing product task: `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`, proposal Issue [#198](https://github.com/Lost0rz/FloatTabs/issues/198), existing Draft PR [#195](https://github.com/Lost0rz/FloatTabs/pull/195). The **PR #195 branch's current task file**, not its older summary, is the pre-cutover product-task source. ChatGPT cold-restore human acceptance remains **PENDING**.
+- Panel/Focus PR #196 was merged at main `d64c9ec6`; its pending-merge root snapshots are historical.
+- Sections 3–11 below preserve prior WP1/lifecycle evidence and navigation; statements such as "WP1 current" or "WP2 blocked" reflect earlier stages and **must not override the fresh PR #195 branch task/source**.
+- After verified migration cutover, select the specific approved GitHub Issue/revision/digest for each executable task. An Issue draft, label, or progress comment alone does not authorize writes. Retire root CURRENT_TASK/STATUS only in the validated cutover PR; retain their history in Git.
 
 ## 3. Accepted current restore diagnosis
 
@@ -206,7 +192,7 @@ WP1 may change only how the exact nonresident target is presented after routing;
 
 When historical material disagrees with current source/tests or current Authority:
 
-1. follow `CURRENT_TASK.md` plus `FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md` for current work;
+1. use the task owner selected by the effective `AGENTS.md` mode: pre-cutover `CURRENT_TASK.md` on the authorized task branch; after verified cutover, the specific approved GitHub Issue revision; respect accepted bounded design contracts and fresh source;
 2. preserve Browser Profile/session/data-safety boundaries;
 3. preserve the delivered warning/critical pressure ladder unless current Authority explicitly changes it;
 4. preserve the Phase-8 attribution boundary against fake GiB budgets;
