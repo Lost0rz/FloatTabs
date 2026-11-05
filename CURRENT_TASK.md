@@ -2,7 +2,7 @@
 
 **TASK_ID:** `FT-PANEL-CROSS-DISPLAY-SUMMON-001`
 **TASK_CLASS:** BOUNDED PRODUCT CORRECTIVE — PANEL / MULTI-DISPLAY SUMMON
-**STATE:** REQUIRED_MACHINE_GATES_PASS / SUPPLEMENTAL_PR_QA_QUEUED / WAITING_FOR_HUMAN_UI_ACCEPTANCE
+**STATE:** REQUIRED_MACHINE_GATES_PASS / WAITING_FOR_HUMAN_UI_ACCEPTANCE
 **BRANCH:** `codex/ft-panel-cross-display-summon-001`
 **BASELINE:** `main@d64c9ec62660e9a855056c08e013a71a58db821b`
 **PR:** #200 OPEN / DRAFT; do not merge until independent exact-diff audit, explicit human UI acceptance and exact-head host gates.
@@ -63,7 +63,7 @@ Stop on unknown local unique-work ownership, conflicting branch/checkouts, failu
 - G3 local passed on 2026-11-06: focused `ScreenPositioningTests`, `ExternalShellTests`, and `WebFocusAdapterTests` passed 175/175; the full arm64 XCTest passed 1,175, skipped 4, failed 0; final placement regressions passed 4/4; Debug and Release arm64 builds exited 0. The Xcode host emitted a CoreSimulator version mismatch warning, while macOS tests completed successfully.
 - Corrected-source PR CI passed on implementation commit `954830b26bf8b2edfc4c9883061281bad325ed01` (run `42061946907`): Debug build, Release build, native Release architecture verification and full Unit tests all succeeded.
 - The artifact-retaining QA DMG workflow passed on the same implementation commit (run `42062362455`). Downloaded artifact checksums passed, `hdiutil verify` returned VALID, and the mounted app plist recorded `FloatTabsSourceRevision=954830b26bf8b2edfc4c9883061281bad325ed01`, `FloatTabsSourceTreeState=clean`, `FloatTabsSourceRevisionExact=true`, and `FloatTabsBuildChannel=Release`. DMG SHA-256: `26dbe65bb065efeaa4adb18c94fedb0fbd5680ed7ab9855e0ab4b879e6ae2223`.
-- The separate automatic PR `build-dmg` check (`42061948072`) remains queued; the artifact-retaining manual build and verification passed. PR #200 was OPEN / DRAFT / MERGEABLE at implementation head `954830b`.
+- The separate automatic PR `build-dmg` check (`42061948072`) remained queued on implementation head `954830b`, while the exact PR checks on the later control-only head `c8b6482` passed: macOS CI run `42063913835` and PR DMG run `42063913742`. The artifact-retaining manual build and verification passed on implementation head `954830b`. PR #200 remains OPEN / DRAFT; no merge or release is authorized.
 - G4 independent exact-diff audit passed: separate code-review agent reviewed `d64c9ec62660e9a855056c08e013a71a58db821b..7ad4d9fc7d218f5debd7bbf28bbc1a83cbe0bd85` plus the current worktree diff. It confirmed the full path set, controller regression coverage, preserved PR #196 focus and Source Host behavior, fullscreen/topology separation, and no lifecycle, product-data, or new window-state writer changes. The reviewer did not rerun tests or verify host state.
 - No real dual-display test has been performed. `HUMAN_UI_ACCEPTANCE=PENDING`; keep PR #200 Draft and do not merge or release.
 
