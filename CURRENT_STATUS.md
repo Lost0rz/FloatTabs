@@ -1,32 +1,46 @@
 # FloatTabs Current Status
 
-**Verified date:** 2026-11-04  
-**Repository:** Lost0rz/FloatTabs  
-**Task:** FT-PANEL-CROSS-DISPLAY-001  
-**Stage:** HUMAN_ACCEPTED / PR_196_FINAL_MERGE_GATE  
-**Release:** No new release authorized.
+**Verified date:** 2026-11-05
+**Repository:** Lost0rz/FloatTabs
+**Control mode:** FILE_CONTROL
+**Current authorized task:** FT-PANEL-CROSS-DISPLAY-SUMMON-001
+**Current stage:** BOUNDED_CORRECTIVE_AUTHORIZED / CONTROL_COMMIT_DELIVERED / LOCAL_PREFLIGHT_PENDING
+**Branch:** `codex/ft-panel-cross-display-summon-001`
+**Base main:** `d64c9ec62660e9a855056c08e013a71a58db821b`
+**Release:** NOT_AUTHORIZED
 
-## Human-accepted Panel / Focus correction
+## Verified previous task closeout
 
-User explicitly accepted corrective 005 on 2026-11-04. This supersedes the earlier failed cross-display QA result and the prior pending-human-acceptance snapshots. The user did not provide a separate test-by-test matrix, so do not invent individual A/B/C observations.
+PR #196 (`FT-PANEL-CROSS-DISPLAY-001`) was verified MERGED/CLOSED; merge commit `d64c9ec62660e9a855056c08e013a71a58db821b`, preserving previously human-accepted Panel/Focus corrective. Root main's former Task/Status captured PRE-MERGE gate and was stale after merge. This new material task branch's initial control-only commits reconcile that external host event; no new status-only PR has been created.
 
-The accepted work in PR #196 covers preserved Panel display placement, one-press global-hotkey visibility toggle, foreground-owned explicit focus release, previous-app restoration safeguards, and narrowly scoped hide-phase diagnostics. Product implementation commit: `a39b87a91be60f70c40cf8b600f5b3b7725f6568`.
+## Reported regression: explicit summons selects wrong display
 
-Evidence for that implementation head:
-- macOS arm64 CI: **PASS**, https://github.com/Lost0rz/FloatTabs/actions/runs/41813678039 — 1,173 tests passed, 4 skipped, 0 failed, Debug/Release passed.
-- QA DMG workflow: **PASS**, https://github.com/Lost0rz/FloatTabs/actions/runs/41813678313.
-- Local focused corrective checks: 144/144 PASS, arm64 Debug/Release PASS.
-- Provenance-bound manual QA DMG: `~/Downloads/FloatTabs-Focus-Ownership-QA-20261104-1800/FloatTabs-0.5.8.dmg` (ad-hoc, not a public release).
-- `HUMAN_UI_ACCEPTANCE=PASS` (explicit user verdict).
-- `SYSTEM_CROSS_DISPLAY_FOCUS_ROOT_CAUSE=UNKNOWN`; accepted user-visible recovery is not a causal proof.
-- `NEW_PRODUCT_CORRECTIVE=NOT_AUTHORIZED`; further investigation requires a fresh observed incident.
+User observed: after Shell was opened on display A then hidden, pointer moves to display B; global hotkey or menu-bar activation still opens on A, unless Shell is manually dragged to B. Reverse B->A should also work. This is a user-observed product regression, not a WebView keyboard-focus defect.
 
-## Final merge gate
+Code read-only audit of main/PR #196 identifies a bounded likely cause in `PanelController.positionPanelForCurrentScreens()`: the passed `visibleFrames` for an already-positioned Shell was changed from mouse target's single visible frame to all connected screens; `ScreenPositioning.relocatedFrame` then prefers the original frame's overlapping display. The installed running app's exact build/source identity and a corrected QA run are not yet verified. No product code changed yet in this task.
 
-PR #196 remains the sole Panel-task delivery until merge; existing branch `codex/panel-cross-display-position-001`. A control-only follow-up may advance the branch without changing product implementation. Before merge, verify PR-ref / branch-ref alignment, actual final PR diff, mergeability, and required literal-HEAD CI/QA checks. Do not promote previously green implementation checks into newer host-identity PASS without verification.
+Product expected: hidden -> explicitly summon on mouse-containing connected display, while same-display placement and size, manual drag persistence, visible-window pointer moves (no auto-jump), hotkey toggle, menu bar action, Source Host, fullscreen, and prior PR #196 focus safety remain correct.
 
-PR #195 (`codex/adaptive-lifecycle-wp2-policy`) remains OPEN / DRAFT / UNMERGED at last verified `a9f07ca02df10d2ea3d0292d1afa5669d115da42`; its separate task, human acceptance, unique work, and lifecycle controls are not included in #196. This Panel closeout must not merge, abandon, or alter #195.
+Authoritative details, scope, acceptance and STOP: `CURRENT_TASK.md` on this branch. `AGENTS.md` unchanged; no changes to Browser Profiles, Cookies, Session, runtime lifecycle policy or persistence.
 
-## After merge
+## Separate work and isolation
 
-Close `FT-PANEL-CROSS-DISPLAY-001` in the main control plane after verifying `main` contains the merged implementation. No further Panel corrective or release is planned. Future intermittent anomalies should be evaluated through existing runtime logs with fresh evidence and a newly authorized task, not automatic speculative changes.
+- PR #195 OPEN/DRAFT/UNMERGED at last observed `a9f07ca02df10d2ea3d0292d1afa5669d115da42`, product ChatGPT hibernate restore. Its older dirty local worktree at `d02b1a24` with four tracked test/project changes and untracked WebKitFixtureTeardown.swift is UNIQUE EXPERIMENTAL WORK, preserved. The experimental teardown was marked SUPERSEDED_FOR_THIS_INCIDENT / NOT_FOR_MERGE and focused 62/62 local tests do not prove monolithic flake resolved. Do not touch it.
+- PR #199 OPEN/DRAFT/UNMERGED at last observed `b69c86c551fc5c7d3bb400c3bd2243678b1b5aae`: issue-control migration incomplete, neither Issue #197/#198 yet has verified independent SPEC_APPROVAL_V1. Its CI had monolithic WebKit XCTest baseline class failures. Main remains FILE_CONTROL until actual verified migration merge.
+- Existing #195 and #199 Task/Status/AGENTS proposals do not authorize this new Panel corrective and must not be carried into this branch as task controls. Later merges need explicit conflict reconciliation so no stale Task or FILE_CONTROL control mode is reintroduced.
+
+## Task gates
+
+```ini
+G0_LOCAL_WRITER_PREFLIGHT=PENDING
+G1_MINIMAL_REGRESSION_REPRO=PENDING
+G2_CORRECTIVE_IMPLEMENTATION=NOT_STARTED
+G3_MACHINE_TESTS_AND_QA=NOT_STARTED
+G4_INDEPENDENT_AUDIT=NOT_STARTED
+HUMAN_UI_ACCEPTANCE=PENDING
+PR_MERGE_READY=NO
+MERGE=NOT_MERGED
+RELEASE=NOT_AUTHORIZED
+```
+
+Proceed with safely isolated implementation only under current Task and existing Project Governance rules. Do not overwrite unknown local work or auto-clean worktrees. Produce truthful exact-head verification and human UI acceptance before any merge.
