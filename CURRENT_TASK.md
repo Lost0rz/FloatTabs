@@ -1,31 +1,59 @@
 # FloatTabs Current Task
 
-**TASK_ID:** FT-PANEL-CROSS-DISPLAY-001  
-**TASK_CLASS:** CORRECTIVE / FINAL CLOSEOUT  
-**STATE:** HUMAN_ACCEPTED / FINAL_MERGE_AUTHORIZED / REPOSITORY_GATES_PENDING  
-**BRANCH:** `codex/panel-cross-display-position-001`  
-**PR:** #196 — https://github.com/Lost0rz/FloatTabs/pull/196
+**TASK_ID:** `FT-PANEL-CROSS-DISPLAY-SUMMON-001`
+**TASK_CLASS:** BOUNDED PRODUCT CORRECTIVE — PANEL / MULTI-DISPLAY SUMMON
+**STATE:** AUTHORIZED / CONTROL_BASELINE_PREPARED / LOCAL_WRITER_PREFLIGHT_PENDING
+**BRANCH:** `codex/ft-panel-cross-display-summon-001`
+**BASELINE:** `main@d64c9ec62660e9a855056c08e013a71a58db821b`
+**PR:** New Draft PR for this task; do not merge until explicit human UI acceptance and exact-head host gates.
+**CONTROL_MODE:** FILE_CONTROL (unchanged).
 
-## Current authorization
+## Authority and preceding work
 
-The user explicitly confirmed human acceptance of corrective 005 and requested that PR #196 be updated, merged, and the current Panel corrective task closed on 2026-11-04. This is final repository delivery and closeout authorization only, not additional product-change authorization.
+User reported and explicitly authorized correcting this regression on 2026-11-05: FloatTabs opened previously on display A, then hidden, must reappear on the screen containing the mouse cursor (display B) when explicitly summoned by global shortcut or menu bar action. Reverse B->A also applies. PR #196, product commit a39b87a91be60f70c40cf8b600f5b3b7725f6568, is already merged on main at d64c9ec6 and human accepted its other Panel/Focus behavior. The previous main CURRENT_STATUS/CURRENT_TASK snapshot of PR #196 as unmerged was POST_MERGE_DRIFT and is reconciled here as the first control-only change of a genuinely new product corrective task. Do not reopen or revert #196 wholesale.
 
-Applicable authority: `AGENTS.md`, `CURRENT_STATUS.md`, this file, accepted current Panel/Focus contracts and production source/tests. Retain the code implementation `a39b87a91be60f70c40cf8b600f5b3b7725f6568` and its related corrective history in Git.
+This is a new engineering purpose, independent of the ongoing Draft lifecycle PR #195 and governance migration PR #199. Main remains FILE_CONTROL until verified ISSUE_CONTROL migration merge. A handoff card is transport, not a second authority.
 
-## Merge gate
+## Observed defect and code seam
 
-1. Reconfirm fresh `main`, branch, PR base/head, unique work, mergeability, exact changed-file scope, and no interference with PR #195.
-2. Accept the user's explicit `HUMAN_UI_ACCEPTANCE=PASS` for the implemented Panel corrective. Do not claim individual scenario details not reported.
-3. Verify required arm64 CI, QA DMG and any host-governed checks for the literal PR identity. Implementation-head macOS CI/QA passed on `a39b87a`; a newer control-only commit does not change product semantics but must still satisfy applicable GitHub-hosted gates before merging.
-4. Align the existing PR head to the final branch commit without force pushes or deleting unique work. If GitHub still reports an inconsistent/stale PR head, STOP instead of merging an older subset.
-5. When all gates pass, mark #196 Ready and merge using an allowed normal repository method. Do not merge #195 or release a public build.
-6. Verify fresh `origin/main` (GitHub ref) includes the complete #196 implementation and closeout controls. Reconcile main's terminal `CURRENT_STATUS.md` / `CURRENT_TASK.md` without spawning a new product task, PR, or worktree solely for closeout, subject to repository protection.
+- `FloatTabs/Panel/PanelController.swift::positionPanelForCurrentScreens()` correctly resolves the target by `ScreenPositioning.targetScreen()`, but PR #196 changed the already-positioned Shell's `ScreenPositioning.relocatedFrame` input from `[targetScreen.visibleFrame]` to `screens.map(\.visibleFrame)`.
+- With A still connected, `bestVisibleFrame` selects A by intersection with the saved/current frame even if the pointer and new summon action are on B. This is a code-supported likely regression seam; no new real-Mac corrective was validated yet.
+- Reproduce with existing installed build and record exact installed app/build provenance if accessible. Do not infer installed HEAD solely from GitHub source.
 
-## Outcome boundary
+## Frozen expected behavior
 
-- Human accepted product behavior; system-level cross-Space focus-selection root cause remains `UNKNOWN`.
-- No additional Panel feature/corrective work is authorized during closeout.
-- Future reproducible incidents: existing Diagnostics → evidence review → new task only if needed.
-- PR #195 remains a separate OPEN/DRAFT adaptive-lifecycle task, untouched.
+1. When Shell is hidden, explicit user summon via global hotkey or menu-bar action uses the current pointer-containing connected display for placement. A -> B and B -> A must both work. The presented Web surface gets normal owned native focus/readiness behavior.
+2. Same-display summon preserves the user-chosen frame origin and preferred viewport size to the extent allowed by that display's visible frame.
+3. Move pointer between displays while Shell is already visible: do not automatically move Shell. Dragging Shell manually still moves and persists normally. Preserve existing one-press visible->hide toggle semantics.
+4. First restoration of a saved frame, later already-positioned summons, display disconnect/reconnect, invalid/unknown mouse target fallback, fixed/per-WebApp viewport, fullscreen companion/Source Host synchronization must behave safely. If pointer target is unknown, choose a deterministic existing valid-screen fallback rather than relocating to an arbitrary invalid screen.
+5. No forced app reactivation loop, spurious previous-app activation, focus stealing on other displays, duplicate Window/Runtime ownership, or new WebView navigation/reload. Preserve other improvements of merged PR #196.
 
-**STOP:** any divergent branch/PR identity, unknown unique work, required CI failure, merge conflict, unexpected additional code change, or inability to verify main contains the intended PR head.
+## Authorized scope
+
+- `FloatTabs/Panel/PanelController.swift`: only explicit-summon placement and directly necessary call-site discrimination between summon vs passive topology repair; preserve focus, fullscreen and previous-application logic unless a directly evidenced adjacent bug requires a scope decision.
+- `FloatTabs/Panel/ScreenPositioning.swift`: only minimal geometry/pure helper when genuinely needed.
+- `FloatTabsTests/ScreenPositioningTests.swift`, `FloatTabsTests/ExternalShellTests.swift`: focused deterministic A/B screen-frame placement, first restored-frame and fallback tests and relevant Panel toggling regressions.
+- `CURRENT_TASK.md` / `CURRENT_STATUS.md`: current task evidence and state as materially needed.
+- Any additional code/test files require a reasoned scope reconciliation before mutation.
+
+OUT OF SCOPE: WebKit Runtime lifecycle/reclaim, PR #195 ChatGPT cold restore/experimental fixture teardown, PR #199 Issue Control migration, CI workflow policy, persisted Browser Profiles/Cookies/Session/site data, broad Focus/Window rewrite, new Settings UI, arbitrary cursor-follow-on-move behavior, release.
+
+## Gates / work packages
+
+**G0 — Worktree/authority.** Refresh main/branch/PR, reread AGENTS and this Task from the actual selected checkout, identify writer ownership, check all worktrees and unique/uncommitted work. Prefer safely reusing the clean canonical checkout for this new short corrective if verified. Do not overwrite or checkout across the dirty PR #195 worktree (four tracked modifications and untracked WebKitFixtureTeardown.swift), the detached restore worktree, or the Draft #199 governance branch. Stop if branch/ref diverges or an overlapping writer exists. The remote task branch has an initial control-only commit before code.
+
+**G1 — bounded audit/red-green.** Confirm actual event entry paths for both global hotkey and menu bar (avoid assuming identical entry without code proof), including when Shell is already visible vs hidden, panel/screen/Source Host frames, target fallback and fullscreen guards. Add a regression that fails on the original A->B/B->A hidden summon implementation while confirming preservation of same-screen placement and the current #196 focus safeguards. Do not use actual display-mutation hacks in deterministic unit tests.
+
+**G2 — smallest correction.** Make the explicit summon target pointer display authoritative without changing passive display-topology clamping/dragging. Prefer reusing existing `targetScreen` and `relocatedFrame` logic, with narrow branch split only where required. Preserve user size, saved origin on same display, normal focus handshake and source-host frame sync. No WebView reload/reset, persistence corruption or arbitrary new window movement.
+
+**G3 — machine verification.** Run focused ScreenPositioningTests + ExternalShellTests and relevant Panel/focus/source/fullscreen regressions (including current #196 cases). Confirm both Debug/Release arm64 build and exact-diff review; follow project current canonical XCTest/CI rules proportional to product change. Report actual exact-head CI results, separate known monolithic WebKit XCTest baseline failures from new regressions, do not silently waive required checks or rewrite CI to mask failures. QA DMG must be provenance-matched to the corrected source head.
+
+**G4 — fresh review and human acceptance.** Independent exact-diff safety review, then user-owned real dual-display QA: hide A, pointer B + hotkey and menu bar summon => B, reverse B->A, same-display no jump, mouse-only no move, drag/persistence, one-press hide/show, focus and fullscreen/screen disconnect if available. HUMAN_UI_ACCEPTANCE=PENDING until explicit user verdict. Do not mark Ready/merge/release without independently verified host gates, no conflicting PR state and explicit user merge decision.
+
+## Stop/safety
+
+Stop on unknown local unique-work ownership, conflicting branch/checkouts, failure to preserve prior #196 semantics, loss of focus/readiness, fullscreen/source window regression, changes to Browser Profile/session data, required test regression, inability to make both entry paths use the same correct target screen or unclear UI behavior requiring a new product decision. Do not use reset/stash/clean/force push or cleanup of unrelated worktrees as ordinary recovery.
+
+## Required return receipt
+
+Report `GOVERNANCE_ROUTE`, `SKILLS_USED`, branch and actual baseline/head, writer/worktree safety, changed files, evidence that old A->B/B->A behavior fails and new behavior passes, focused/arm64/canonical CI/QA DMG results, exact diff, data safety, remote commit/ref/PR state, independent audit provenance, `HUMAN_UI_ACCEPTANCE`, `CONTROL_ALIGNMENT`, merge and next safe action. No success labels without observed evidence.
