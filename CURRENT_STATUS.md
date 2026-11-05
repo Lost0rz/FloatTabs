@@ -6,6 +6,7 @@
 **Task:** FT-GOV-ISSUE-CONTROL-MIGRATION-001  
 **Stage:** PRE_CUTOVER_PREPARATION / CUTOVER_READY=NO  
 **Migration branch:** `codex/ft-issue-control-migration-001`  
+**Migration PR:** [#199](https://github.com/Lost0rz/FloatTabs/pull/199) — OPEN/DRAFT/UNMERGED  
 **Main observed:** `d64c9ec62660e9a855056c08e013a71a58db821b`  
 **Release:** None authorized.
 
