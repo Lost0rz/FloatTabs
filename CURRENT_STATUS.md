@@ -4,8 +4,9 @@
 **Repository:** Lost0rz/FloatTabs
 **Control mode:** FILE_CONTROL
 **Current authorized task:** FT-PANEL-CROSS-DISPLAY-SUMMON-001
-**Current stage:** BOUNDED_CORRECTIVE_AUTHORIZED / CONTROL_COMMIT_DELIVERED / LOCAL_PREFLIGHT_PENDING
+**Current stage:** IMPLEMENTED / LOCAL_MACHINE_GATES_PASS / REMOTE_CI_QA_AND_ACCEPTANCE_PENDING
 **Branch:** `codex/ft-panel-cross-display-summon-001`
+**PR:** #200 OPEN / DRAFT; starting PR head `798522034329fc54ca8f80fb1145e4ef103ba15c`
 **Base main:** `d64c9ec62660e9a855056c08e013a71a58db821b`
 **Release:** NOT_AUTHORIZED
 
@@ -17,7 +18,7 @@ PR #196 (`FT-PANEL-CROSS-DISPLAY-001`) was verified MERGED/CLOSED; merge commit 
 
 User observed: after Shell was opened on display A then hidden, pointer moves to display B; global hotkey or menu-bar activation still opens on A, unless Shell is manually dragged to B. Reverse B->A should also work. This is a user-observed product regression, not a WebView keyboard-focus defect.
 
-Code read-only audit of main/PR #196 identifies a bounded likely cause in `PanelController.positionPanelForCurrentScreens()`: the passed `visibleFrames` for an already-positioned Shell was changed from mouse target's single visible frame to all connected screens; `ScreenPositioning.relocatedFrame` then prefers the original frame's overlapping display. The installed running app's exact build/source identity and a corrected QA run are not yet verified. No product code changed yet in this task.
+The code cause is confirmed in `PanelController.positionPanelForCurrentScreens()`: the already-positioned Shell was relocated against all connected screens, so `ScreenPositioning.relocatedFrame` preferred the original frame's overlapping display instead of the pointer target. A new deterministic A→B/B→A test failed in both directions against that behavior. No FloatTabs process was running during preflight, so installed-app build provenance and real two-display reproduction remain unavailable.
 
 Product expected: hidden -> explicitly summon on mouse-containing connected display, while same-display placement and size, manual drag persistence, visible-window pointer moves (no auto-jump), hotkey toggle, menu bar action, Source Host, fullscreen, and prior PR #196 focus safety remain correct.
 
@@ -32,11 +33,14 @@ Authoritative details, scope, acceptance and STOP: `CURRENT_TASK.md` on this bra
 ## Task gates
 
 ```ini
-G0_LOCAL_WRITER_PREFLIGHT=PENDING
-G1_MINIMAL_REGRESSION_REPRO=PENDING
-G2_CORRECTIVE_IMPLEMENTATION=NOT_STARTED
-G3_MACHINE_TESTS_AND_QA=NOT_STARTED
-G4_INDEPENDENT_AUDIT=NOT_STARTED
+G0_LOCAL_WRITER_PREFLIGHT=PASS
+G1_MINIMAL_REGRESSION_REPRO=PASS (red/green A->B and B->A)
+G2_CORRECTIVE_IMPLEMENTATION=IMPLEMENTED
+G3_LOCAL_MACHINE_TESTS=PASS (focused 171/171; full XCTest 1171 passed, 4 skipped, 0 failed)
+G3_ARM64_BUILDS=PASS (Debug and Release)
+G3_REMOTE_CI=PENDING
+G3_QA_DMG=PENDING
+G4_INDEPENDENT_AUDIT=PENDING (self-check only so far)
 HUMAN_UI_ACCEPTANCE=PENDING
 PR_MERGE_READY=NO
 MERGE=NOT_MERGED

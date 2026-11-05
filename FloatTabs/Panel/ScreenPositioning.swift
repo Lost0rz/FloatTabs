@@ -317,6 +317,20 @@ enum ScreenPositioning {
         return result
     }
 
+    /// Places an explicitly summoned Panel on the display selected for that
+    /// presentation, while preserving its saved size and position when it is
+    /// already on the selected display.
+    static func frameForExplicitSummon(
+        _ frame: NSRect,
+        on targetVisibleFrame: NSRect
+    ) -> NSRect {
+        relocatedFrame(
+            frame,
+            visibleFrames: [targetVisibleFrame],
+            fallbackVisibleFrame: targetVisibleFrame
+        )
+    }
+
     /// When follow-preferred-size is enabled, Slot switching changes only the
     /// panel size while preserving its top edge and left edge as much as the
     /// active display allows. Disabled mode leaves the current frame untouched.

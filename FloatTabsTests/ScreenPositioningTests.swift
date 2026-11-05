@@ -226,6 +226,37 @@ final class ScreenPositioningTests: XCTestCase {
         XCTAssertEqual(secondPresentation, frameOnB)
     }
 
+    func testExplicitSummonUsesPointerDisplayInBothDirections() {
+        let displayA = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let displayB = NSRect(x: 1440, y: 0, width: 1920, height: 1080)
+        let frameOnA = NSRect(x: 200, y: 28, width: 688, height: 844)
+        let frameOnB = NSRect(x: 1700, y: 100, width: 688, height: 844)
+
+        let summonedOnB = ScreenPositioning.frameForExplicitSummon(
+            frameOnA,
+            on: displayB
+        )
+        let summonedOnA = ScreenPositioning.frameForExplicitSummon(
+            frameOnB,
+            on: displayA
+        )
+
+        XCTAssertTrue(summonedOnB.intersects(displayB), "A → B summon must follow the pointer display")
+        XCTAssertTrue(summonedOnA.intersects(displayA), "B → A summon must follow the pointer display")
+        XCTAssertEqual(summonedOnB.size, frameOnA.size)
+        XCTAssertEqual(summonedOnA.size, frameOnB.size)
+    }
+
+    func testExplicitSummonPreservesFrameOnPointerDisplay() {
+        let displayB = NSRect(x: 1440, y: 0, width: 1920, height: 1080)
+        let frameOnB = NSRect(x: 1700, y: 100, width: 688, height: 844)
+
+        XCTAssertEqual(
+            ScreenPositioning.frameForExplicitSummon(frameOnB, on: displayB),
+            frameOnB
+        )
+    }
+
     func testRelocationPreservesUserResizedDimensionsOnConnectedDisplay() {
         let displayA = NSRect(x: 0, y: 0, width: 1440, height: 900)
         let displayB = NSRect(x: 1440, y: 0, width: 1920, height: 1080)

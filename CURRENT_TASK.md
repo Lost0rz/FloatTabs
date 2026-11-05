@@ -2,10 +2,10 @@
 
 **TASK_ID:** `FT-PANEL-CROSS-DISPLAY-SUMMON-001`
 **TASK_CLASS:** BOUNDED PRODUCT CORRECTIVE — PANEL / MULTI-DISPLAY SUMMON
-**STATE:** AUTHORIZED / CONTROL_BASELINE_PREPARED / LOCAL_WRITER_PREFLIGHT_PENDING
+**STATE:** IMPLEMENTED / LOCAL_MACHINE_GATES_PASS / REMOTE_CI_QA_AND_ACCEPTANCE_PENDING
 **BRANCH:** `codex/ft-panel-cross-display-summon-001`
 **BASELINE:** `main@d64c9ec62660e9a855056c08e013a71a58db821b`
-**PR:** New Draft PR for this task; do not merge until explicit human UI acceptance and exact-head host gates.
+**PR:** #200 OPEN / DRAFT; do not merge until independent exact-diff audit, explicit human UI acceptance and exact-head host gates.
 **CONTROL_MODE:** FILE_CONTROL (unchanged).
 
 ## Authority and preceding work
@@ -19,6 +19,7 @@ This is a new engineering purpose, independent of the ongoing Draft lifecycle PR
 - `FloatTabs/Panel/PanelController.swift::positionPanelForCurrentScreens()` correctly resolves the target by `ScreenPositioning.targetScreen()`, but PR #196 changed the already-positioned Shell's `ScreenPositioning.relocatedFrame` input from `[targetScreen.visibleFrame]` to `screens.map(\.visibleFrame)`.
 - With A still connected, `bestVisibleFrame` selects A by intersection with the saved/current frame even if the pointer and new summon action are on B. This is a code-supported likely regression seam; no new real-Mac corrective was validated yet.
 - Reproduce with existing installed build and record exact installed app/build provenance if accessible. Do not infer installed HEAD solely from GitHub source.
+- Preflight found no running FloatTabs process, so installed-build provenance was unavailable. The source-level A→B/B→A regression test reproduced the placement defect before the correction.
 
 ## Frozen expected behavior
 
@@ -53,6 +54,15 @@ OUT OF SCOPE: WebKit Runtime lifecycle/reclaim, PR #195 ChatGPT cold restore/exp
 ## Stop/safety
 
 Stop on unknown local unique-work ownership, conflicting branch/checkouts, failure to preserve prior #196 semantics, loss of focus/readiness, fullscreen/source window regression, changes to Browser Profile/session data, required test regression, inability to make both entry paths use the same correct target screen or unclear UI behavior requiring a new product decision. Do not use reset/stash/clean/force push or cleanup of unrelated worktrees as ordinary recovery.
+
+## Execution evidence — 2026-11-05
+
+- G0 passed: clean canonical checkout was reused; target branch and PR #200 matched the observed `798522034329fc54ca8f80fb1145e4ef103ba15c` head; no local writer occupied that branch. PR #195's dirty WP2 worktree and detached restore worktree remain untouched. PR #199 remains OPEN / DRAFT / unmerged, so FILE_CONTROL remains active.
+- G1 passed: both menu-bar and global-hotkey hidden-window paths reach `showFloatTabs()` and its explicit placement call. The new source-level A→B/B→A regression failed on the old all-connected-display behavior in both directions, then passed with the pointer target selected.
+- G2 implemented in `PanelController.swift` and `ScreenPositioning.swift`; restored and already-positioned frames share the explicit-summon path. Fullscreen companion placement and passive topology clamping retain the connected-display behavior.
+- G3 local passed: focused `ScreenPositioningTests`, `ExternalShellTests`, and `WebFocusAdapterTests` passed 171/171; full arm64 XCTest passed 1,171, skipped 4, failed 0; Debug and Release arm64 builds passed. The Xcode host emitted a CoreSimulator version warning, but macOS test execution completed successfully.
+- Remote exact-head CI, provenance-matched QA DMG, and final PR diff review remain pending. No real dual-display test has been performed.
+- `INDEPENDENT_AUDIT=NOT_COMPLETE`; the implementation self-check is not independent. `HUMAN_UI_ACCEPTANCE=PENDING`.
 
 ## Required return receipt
 
