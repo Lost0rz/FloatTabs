@@ -1,31 +1,37 @@
 # FloatTabs Current Task
 
-**TASK_ID:** FT-PANEL-CROSS-DISPLAY-001  
-**TASK_CLASS:** CORRECTIVE / FINAL CLOSEOUT  
-**STATE:** HUMAN_ACCEPTED / FINAL_MERGE_AUTHORIZED / REPOSITORY_GATES_PENDING  
-**BRANCH:** `codex/panel-cross-display-position-001`  
-**PR:** #196 — https://github.com/Lost0rz/FloatTabs/pull/196
+**TASK_ID:** FT-GOV-ISSUE-CONTROL-MIGRATION-001  
+**TASK_CLASS:** GOVERNANCE / CONTROL-PLANE MIGRATION  
+**STATE:** PRE_CUTOVER_PREPARATION / CUTOVER_NOT_AUTHORIZED_YET  
+**BASELINE:** `main@d64c9ec62660e9a855056c08e013a71a58db821b` (PR #196 merged)  
+**MIGRATION_BRANCH:** `codex/ft-issue-control-migration-001`  
+**CONTROL_MODE:** FILE_CONTROL until verified migration PR merge.
 
-## Current authorization
+## Authorization and objective
 
-The user explicitly confirmed human acceptance of corrective 005 and requested that PR #196 be updated, merged, and the current Panel corrective task closed on 2026-11-04. This is final repository delivery and closeout authorization only, not additional product-change authorization.
+On 2026-11-05 the user requested FloatTabs adopt the newly installed Engineering Governance GitHub Issues workflow for Web ChatGPT ↔ local Codex Desktop handoff, with GitHub CLI providing local Issue synchronization. This new task supersedes the already-merged Panel #196 closeout as main's active FILE_CONTROL task. It does **not** authorize product/runtime changes, approval forgery, or merging the separate PR #195.
 
-Applicable authority: `AGENTS.md`, `CURRENT_STATUS.md`, this file, accepted current Panel/Focus contracts and production source/tests. Retain the code implementation `a39b87a91be60f70c40cf8b600f5b3b7725f6568` and its related corrective history in Git.
+Prepare one safe, reviewable repository migration from the current three-file FILE_CONTROL to explicit ISSUE_CONTROL, preserving all ongoing tasks and product data. The migration specification is governed by the installed Engineering Governance `project-governance/references/issue-control-migration.md`, `issue-control.md` and `issue-execution-contract.md`.
 
-## Merge gate
+## Required pre-cutover preparation
 
-1. Reconfirm fresh `main`, branch, PR base/head, unique work, mergeability, exact changed-file scope, and no interference with PR #195.
-2. Accept the user's explicit `HUMAN_UI_ACCEPTANCE=PASS` for the implemented Panel corrective. Do not claim individual scenario details not reported.
-3. Verify required arm64 CI, QA DMG and any host-governed checks for the literal PR identity. Implementation-head macOS CI/QA passed on `a39b87a`; a newer control-only commit does not change product semantics but must still satisfy applicable GitHub-hosted gates before merging.
-4. Align the existing PR head to the final branch commit without force pushes or deleting unique work. If GitHub still reports an inconsistent/stale PR head, STOP instead of merging an older subset.
-5. When all gates pass, mark #196 Ready and merge using an allowed normal repository method. Do not merge #195 or release a public build.
-6. Verify fresh `origin/main` (GitHub ref) includes the complete #196 implementation and closeout controls. Reconcile main's terminal `CURRENT_STATUS.md` / `CURRENT_TASK.md` without spawning a new product task, PR, or worktree solely for closeout, subject to repository protection.
+1. Confirm main and open PR/Issue state. PR #196 is merged at `d64c9ec6`; PR #195 is OPEN/DRAFT/UNMERGED and must stay untouched. Its own branch `CURRENT_TASK.md` governs the ChatGPT hibernated-runtime URL restore corrective; machine gates passed but human UI acceptance remains pending. Do not replace this current evidence with PR #195's older field-observation summary.
+2. Create an explicit migration planning Issue and a carry-forward Issue for `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` using the canonical 19-field `EXECUTION_SPEC_V1`. Initially **unapproved/non-executable**; no agent-generated approval comments.
+3. Draft repository changes for ISSUE_CONTROL routing, the trusted `ISSUE_APPROVERS` list, Issue template and documentation routing. Do not change the effective authority on main until verified merge.
+4. Verify local `gh` read/write using the selected Issue, capture a real test-comment identifier, and verify the authenticated GitHub actor. **Web connector success does not prove local CLI capability.**
+5. Validate the exact spec revision/digest with the installed official helper; obtain matching `SPEC_APPROVAL_V1` comment **posted by the actual authenticated project approver**, not by the executor or a bot impersonating the approver.
+6. Reconcile every still-executable task, including #195, and prove no overlap/unique-work harm. Only then prepare the migration PR for review/merge with a single explicit authority transition: `AGENTS.md: ISSUE_CONTROL` and legacy root `CURRENT_TASK.md`/`CURRENT_STATUS.md` retired. The actual cutover happens **only** upon verified merge to main, not when the draft branch or Issues appear.
+7. Post-cutover, verify main and the selected Issue approvals. Ensure later merging PR #195 cannot restore the retired FILE_CONTROL files; do not mutate #195 merely as migration preparation.
 
-## Outcome boundary
+## Work and ownership boundary
 
-- Human accepted product behavior; system-level cross-Space focus-selection root cause remains `UNKNOWN`.
-- No additional Panel feature/corrective work is authorized during closeout.
-- Future reproducible incidents: existing Diagnostics → evidence review → new task only if needed.
-- PR #195 remains a separate OPEN/DRAFT adaptive-lifecycle task, untouched.
+Allowed now: this migration branch's governance/control/documentation files, GitHub Issue drafts and one Draft migration PR. Preserve exact source and tests for WebKit, Window/Focus, Profile/session persistence, CI runner and the separate #195 task branch/worktrees. Use the smallest safely reusable checkout; no extra physical worktree required solely for documentation.
 
-**STOP:** any divergent branch/PR identity, unknown unique work, required CI failure, merge conflict, unexpected additional code change, or inability to verify main contains the intended PR head.
+**STOP:** unknown local writer/unique work, missing local `gh` proof, missing trusted digest-bound approval, a still-executable task without a complete Issue, unexpected CI/PR gate, or any attempt to treat unmerged draft files as active ISSUE_CONTROL. Keep migration PR Draft, FILE_CONTROL active, and report `CUTOVER_READY=NO` until each gate is demonstrably satisfied.
+
+## Verification / handoff
+
+- Focused read of GitHub ref, PR #195 current branch task, Issue spec bodies, official structural validator, and actual approval comment provenance.
+- No product CI necessary for preparation-only documentation changes; apply applicable host checks to the literal final migration PR head before merge.
+- Human product-UI acceptance is not required for this control-only migration, but remains **PENDING** for #195's separate product task.
+- Issue comment receipts must be verifiably posted, not inferred from local text. Include true `REMOTE_DELIVERY`, `CONTROL_ALIGNMENT`, `PR`, `CUTOVER_BASIS`, `LOCAL_GH_PREFLIGHT`, `SPEC_APPROVAL`, `NEXT_SAFE_ACTION` in final receipt.
