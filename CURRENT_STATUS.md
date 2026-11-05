@@ -1,32 +1,36 @@
 # FloatTabs Current Status
 
-**Verified date:** 2026-11-04  
+**Verified date:** 2026-11-05  
 **Repository:** Lost0rz/FloatTabs  
-**Task:** FT-PANEL-CROSS-DISPLAY-001  
-**Stage:** HUMAN_ACCEPTED / PR_196_FINAL_MERGE_GATE  
-**Release:** No new release authorized.
+**Effective main control mode:** FILE_CONTROL (not yet switched)  
+**Task:** FT-GOV-ISSUE-CONTROL-MIGRATION-001  
+**Stage:** PRE_CUTOVER_PREPARATION / CUTOVER_READY=NO  
+**Migration branch:** `codex/ft-issue-control-migration-001`  
+**Main observed:** `d64c9ec62660e9a855056c08e013a71a58db821b`  
+**Release:** None authorized.
 
-## Human-accepted Panel / Focus correction
+## New Issue collaboration system — preparation
 
-User explicitly accepted corrective 005 on 2026-11-04. This supersedes the earlier failed cross-display QA result and the prior pending-human-acceptance snapshots. The user did not provide a separate test-by-test matrix, so do not invent individual A/B/C observations.
+The user requested on 2026-11-05 that FloatTabs adopt Engineering Governance's GitHub Issue-based Web ChatGPT ↔ local Codex Desktop handoff, with GitHub CLI as local synchronization.
 
-The accepted work in PR #196 covers preserved Panel display placement, one-press global-hotkey visibility toggle, foreground-owned explicit focus release, previous-app restoration safeguards, and narrowly scoped hide-phase diagnostics. Product implementation commit: `a39b87a91be60f70c40cf8b600f5b3b7725f6568`.
+- Migration preparation Issue: **#197** — https://github.com/Lost0rz/FloatTabs/issues/197.
+- Carry-forward active product task: **#198** — https://github.com/Lost0rz/FloatTabs/issues/198, task ID `FT-ADAPTIVE-LIFECYCLE-RESTORE-001`.
+- Both are **UNAPPROVED / NON-EXECUTABLE** until exact `SPEC_APPROVAL_V1` by an authenticated project approver is verified.
+- `LOCAL_GH_READ_WRITE_PREFLIGHT=UNVERIFIED`: a successful Web GitHub connector operation does not establish the Mac's local `gh` capability.
+- `SPEC_REVISION_DIGEST_APPROVAL=UNVERIFIED`.
+- `LOCAL_WRITER_UNIQUE_WORK=UNKNOWN_FROM_WEB`: do not reset or clean worktrees.
+- `ISSUE_CONTROL_EFFECTIVE=NO`; until the migration PR is verified merged, `CURRENT_TASK.md` remains the current authorization on main.
+- Keep the migration PR Draft until CLI, approvals, task handoff, exact diff and host merge gates are proven. Do not delete legacy controls in preparation or claim cutover.
 
-Evidence for that implementation head:
-- macOS arm64 CI: **PASS**, https://github.com/Lost0rz/FloatTabs/actions/runs/41813678039 — 1,173 tests passed, 4 skipped, 0 failed, Debug/Release passed.
-- QA DMG workflow: **PASS**, https://github.com/Lost0rz/FloatTabs/actions/runs/41813678313.
-- Local focused corrective checks: 144/144 PASS, arm64 Debug/Release PASS.
-- Provenance-bound manual QA DMG: `~/Downloads/FloatTabs-Focus-Ownership-QA-20261104-1800/FloatTabs-0.5.8.dmg` (ad-hoc, not a public release).
-- `HUMAN_UI_ACCEPTANCE=PASS` (explicit user verdict).
-- `SYSTEM_CROSS_DISPLAY_FOCUS_ROOT_CAUSE=UNKNOWN`; accepted user-visible recovery is not a causal proof.
-- `NEW_PRODUCT_CORRECTIVE=NOT_AUTHORIZED`; further investigation requires a fresh observed incident.
+## Existing product task isolation
 
-## Final merge gate
+- **PR #196**: MERGED/CLOSED, merge commit `d64c9ec62660e9a855056c08e013a71a58db821b`, human accepted Panel/Focus correction. No release authorized by that closeout.
+- **PR #195**: OPEN/DRAFT/UNMERGED, branch `codex/adaptive-lifecycle-wp2-policy`, observed remote branch commit `a9f07ca02df10d2ea3d0292d1afa5669d115da42`. Preserve branch and all unique worktrees.
+- The #195 **branch control files**, rather than its older PR description, report the in-flight ChatGPT hibernated-runtime URL restore corrective. Focused tests, exact-head split XCTest, macOS arm64 CI and QA DMG passed on the recorded implementation gate. `HUMAN_UI_ACCEPTANCE=PENDING`, `PR_195_MERGE_READY=NO`.
+- The issue migration does not authorize merging #195, beginning WP3/WP4, modifying its branch/worktree, or changing Browser Profile/session/site data.
 
-PR #196 remains the sole Panel-task delivery until merge; existing branch `codex/panel-cross-display-position-001`. A control-only follow-up may advance the branch without changing product implementation. Before merge, verify PR-ref / branch-ref alignment, actual final PR diff, mergeability, and required literal-HEAD CI/QA checks. Do not promote previously green implementation checks into newer host-identity PASS without verification.
+## Cutover acceptance
 
-PR #195 (`codex/adaptive-lifecycle-wp2-policy`) remains OPEN / DRAFT / UNMERGED at last verified `a9f07ca02df10d2ea3d0292d1afa5669d115da42`; its separate task, human acceptance, unique work, and lifecycle controls are not included in #196. This Panel closeout must not merge, abandon, or alter #195.
+Require actual local `gh` issue JSON read/write with verified comment ID, official 19-field spec digest+approval verification for both still-executable issues, a trusted `ISSUE_APPROVERS` policy, one safe migration PR with `AGENTS.md: ISSUE_CONTROL` and root Task/Status retired simultaneously, no loss/reintroduction of #195 work, and verified merged commit on main. Until then, **FILE_CONTROL stays authoritative**.
 
-## After merge
-
-Close `FT-PANEL-CROSS-DISPLAY-001` in the main control plane after verifying `main` contains the merged implementation. No further Panel corrective or release is planned. Future intermittent anomalies should be evaluated through existing runtime logs with fresh evidence and a newly authorized task, not automatic speculative changes.
+Current migration authorization and STOP conditions: `CURRENT_TASK.md` on this preparation branch and the installed Engineering Governance project-governance migration contract.
