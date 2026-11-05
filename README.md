@@ -245,15 +245,16 @@ FloatTabs-<version>.dSYM.zip.sha256
 
 ## Documentation
 
-Current sources of truth:
+Engineering and document authority:
 
-- Project rules: [`AGENTS.md`](AGENTS.md)
-- Current verified state: [`CURRENT_STATUS.md`](CURRENT_STATUS.md)
-- Active task / observation authority: [`CURRENT_TASK.md`](CURRENT_TASK.md)
-- Product / usage: this README
-- Architecture navigation: [`docs/architecture/README.md`](docs/architecture/README.md) and [`docs/architecture/DOMAIN_MAP.md`](docs/architecture/DOMAIN_MAP.md)
-- Current shell / interaction contracts: [`docs/design/`](docs/design/)
-- Browser Profiles product contract: [`docs/product/FloatTabs_Browser_Profiles_Contract_V1.md`](docs/product/FloatTabs_Browser_Profiles_Contract_V1.md)
-- Current release record: [`docs/release/FloatTabs_v0.5.8.md`](docs/release/FloatTabs_v0.5.8.md)
+- Project rules and current **control mode**: [`AGENTS.md`](AGENTS.md).
+- Current task/progress: `CURRENT_TASK.md` and `CURRENT_STATUS.md` **only while main is in FILE_CONTROL**; after verified ISSUE_CONTROL cutover, use the specifically selected, digest-bound **approved GitHub Issue** and Issue receipts (not legacy root files).
+- Canonical documentation routing: [`docs/README.md`](docs/README.md).
+- Architecture contracts and source map: [`docs/architecture/README.md`](docs/architecture/README.md) and [`docs/architecture/DOMAIN_MAP.md`](docs/architecture/DOMAIN_MAP.md).
+- Current shell / interaction references: [`docs/design/`](docs/design/).
+- Browser Profiles bounded product reference: [`docs/product/FloatTabs_Browser_Profiles_Contract_V1.md`](docs/product/FloatTabs_Browser_Profiles_Contract_V1.md).
+- This version's release record: [`docs/release/FloatTabs_v0.5.8.md`](docs/release/FloatTabs_v0.5.8.md).
+
+GitHub Issue-based Web ↔ Codex collaboration is being prepared under [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197) and [Draft PR #199](https://github.com/Lost0rz/FloatTabs/pull/199). Until its **verified merge with approved execution handoff**, `main` remains in FILE_CONTROL. An Issue/comment is not an authorization by itself.
 
 Older stage, design and release files are retained as historical records. Historical documents do not override current production behavior or current accepted contracts.
