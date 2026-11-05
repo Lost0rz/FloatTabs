@@ -2,7 +2,7 @@
 
 **TASK_ID:** `FT-PANEL-CROSS-DISPLAY-SUMMON-001`
 **TASK_CLASS:** BOUNDED PRODUCT CORRECTIVE — PANEL / MULTI-DISPLAY SUMMON
-**STATE:** IMPLEMENTED / LOCAL_MACHINE_GATES_PASS / FINAL_REMOTE_CI_QA_AUDIT_AND_ACCEPTANCE_PENDING
+**STATE:** REQUIRED_MACHINE_GATES_PASS / SUPPLEMENTAL_PR_QA_QUEUED / WAITING_FOR_HUMAN_UI_ACCEPTANCE
 **BRANCH:** `codex/ft-panel-cross-display-summon-001`
 **BASELINE:** `main@d64c9ec62660e9a855056c08e013a71a58db821b`
 **PR:** #200 OPEN / DRAFT; do not merge until independent exact-diff audit, explicit human UI acceptance and exact-head host gates.
@@ -61,9 +61,11 @@ Stop on unknown local unique-work ownership, conflicting branch/checkouts, failu
 - G1 passed: both menu-bar and global-hotkey hidden-window paths reach `showFloatTabs()` and its explicit placement call. Synthetic A/B pointer selection is tested through the selector used by `targetScreen`. Geometry A→B/B→A regressions fail on the old all-connected-display behavior. A controller-path restored A→B regression was verified red when the old relocation was temporarily reinstated.
 - G2 implemented in `PanelController.swift` and `ScreenPositioning.swift`; restored and already-positioned frames share the explicit-summon path. Fullscreen companion placement and passive topology clamping retain the connected-display behavior.
 - G3 local passed on 2026-11-06: focused `ScreenPositioningTests`, `ExternalShellTests`, and `WebFocusAdapterTests` passed 175/175; the full arm64 XCTest passed 1,175, skipped 4, failed 0; final placement regressions passed 4/4; Debug and Release arm64 builds exited 0. The Xcode host emitted a CoreSimulator version mismatch warning, while macOS tests completed successfully.
-- Earlier remote CI and QA-DMG runs passed on the preceding implementation commit `7ad4d9fc7d218f5debd7bbf28bbc1a83cbe0bd85`. They do not cover the new controller-path tests and selector refactor; exact corrected-source reruns and a provenance-matched QA DMG are pending.
+- Corrected-source PR CI passed on implementation commit `954830b26bf8b2edfc4c9883061281bad325ed01` (run `42061946907`): Debug build, Release build, native Release architecture verification and full Unit tests all succeeded.
+- The artifact-retaining QA DMG workflow passed on the same implementation commit (run `42062362455`). Downloaded artifact checksums passed, `hdiutil verify` returned VALID, and the mounted app plist recorded `FloatTabsSourceRevision=954830b26bf8b2edfc4c9883061281bad325ed01`, `FloatTabsSourceTreeState=clean`, `FloatTabsSourceRevisionExact=true`, and `FloatTabsBuildChannel=Release`. DMG SHA-256: `26dbe65bb065efeaa4adb18c94fedb0fbd5680ed7ab9855e0ab4b879e6ae2223`.
+- The separate automatic PR `build-dmg` check (`42061948072`) remains queued; the artifact-retaining manual build and verification passed. PR #200 was OPEN / DRAFT / MERGEABLE at implementation head `954830b`.
 - G4 independent exact-diff audit passed: separate code-review agent reviewed `d64c9ec62660e9a855056c08e013a71a58db821b..7ad4d9fc7d218f5debd7bbf28bbc1a83cbe0bd85` plus the current worktree diff. It confirmed the full path set, controller regression coverage, preserved PR #196 focus and Source Host behavior, fullscreen/topology separation, and no lifecycle, product-data, or new window-state writer changes. The reviewer did not rerun tests or verify host state.
-- No real dual-display test has been performed. `HUMAN_UI_ACCEPTANCE=PENDING`.
+- No real dual-display test has been performed. `HUMAN_UI_ACCEPTANCE=PENDING`; keep PR #200 Draft and do not merge or release.
 
 ## Required return receipt
 

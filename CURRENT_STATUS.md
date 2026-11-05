@@ -4,9 +4,10 @@
 **Repository:** Lost0rz/FloatTabs
 **Control mode:** FILE_CONTROL
 **Current authorized task:** FT-PANEL-CROSS-DISPLAY-SUMMON-001
-**Current stage:** IMPLEMENTED / LOCAL_MACHINE_GATES_PASS / REMOTE_CI_QA_AND_ACCEPTANCE_PENDING
+**Current stage:** IMPLEMENTED / REQUIRED_MACHINE_GATES_PASS / SUPPLEMENTAL_PR_QA_QUEUED / HUMAN_UI_ACCEPTANCE_PENDING
 **Branch:** `codex/ft-panel-cross-display-summon-001`
-**PR:** #200 OPEN / DRAFT; starting PR head `798522034329fc54ca8f80fb1145e4ef103ba15c`
+**PR:** #200 OPEN / DRAFT / MERGEABLE at delivery head `954830b26bf8b2edfc4c9883061281bad325ed01`; starting PR head `798522034329fc54ca8f80fb1145e4ef103ba15c`
+**Delivery / Semantic HEAD:** `954830b26bf8b2edfc4c9883061281bad325ed01`
 **Base main:** `d64c9ec62660e9a855056c08e013a71a58db821b`
 **Release:** NOT_AUTHORIZED
 
@@ -38,8 +39,9 @@ G1_MINIMAL_REGRESSION_REPRO=PASS (red/green geometry A->B/B->A; controller-path 
 G2_CORRECTIVE_IMPLEMENTATION=IMPLEMENTED
 G3_LOCAL_MACHINE_TESTS=PASS (focused 175/175; full XCTest 1175 passed, 4 skipped, 0 failed; final four placement regressions 4/4)
 G3_ARM64_BUILDS=PASS (Debug and Release)
-G3_REMOTE_CI=PENDING (must rerun on corrected source commit)
-G3_QA_DMG=PENDING (must match corrected source commit)
+G3_REMOTE_CI=PASS (macOS CI run 42061946907 on 954830b)
+G3_QA_DMG=PASS (manual QA run 42062362455; exact source provenance and image checks verified)
+PR_AUTO_QA_CHECK=QUEUED (PR run 42061948072; manual artifact-retaining build passed)
 G4_INDEPENDENT_AUDIT=PASS (separate code-review agent; exact diff from d64c9ec to 7ad4d9f plus current worktree changes)
 HUMAN_UI_ACCEPTANCE=PENDING
 PR_MERGE_READY=NO
