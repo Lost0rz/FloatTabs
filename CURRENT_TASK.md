@@ -23,6 +23,13 @@ Prepare one safe, reviewable repository migration from the current three-file FI
 6. Reconcile every still-executable task, including #195, and prove no overlap/unique-work harm. Only then prepare the migration PR for review/merge with a single explicit authority transition: `AGENTS.md: ISSUE_CONTROL` and legacy root `CURRENT_TASK.md`/`CURRENT_STATUS.md` retired. The actual cutover happens **only** upon verified merge to main, not when the draft branch or Issues appear.
 7. Post-cutover, verify main and the selected Issue approvals. Ensure later merging PR #195 cannot restore the retired FILE_CONTROL files; do not mutate #195 merely as migration preparation.
 
+## Verified pre-cutover progress (2026-11-05)
+
+- **WP01 COMPLETE:** Installed Engineering Governance v0.8.1 official `issue-spec-check.py digest` returned `STRUCTURE_PASS_APPROVAL_PENDING` for #197 revision 1 SHA256 `48e547e9b8e045c1b422d36066e045d05fb9d18a9d8d1471bb4c35d636d44c8c` and #198 revision 1 SHA256 `41458ae8ea9f0a5c9b66615d819ccb79b5c5b6422fcbdefcf3e565cf14547bd2`. Local `gh` authenticated as `Lost0rz` and posted/fetched [CLI test comment #6659119976](https://github.com/Lost0rz/FloatTabs/issues/197#issuecomment-6659119976).
+- **Remote routing/document reconciliation prepared:** this same Draft PR updates `AGENTS.md` with literal `CONTROL_MODE: FILE_CONTROL` and proposed `ISSUE_APPROVERS: Lost0rz`; it refreshes `docs/README.md`, `docs/architecture/README.md`, `docs/architecture/DOMAIN_MAP.md` and stale directory/readme authority references. Historical evidence is retained. The effective main mode is still FILE_CONTROL.
+- **WP02 BLOCKED:** Trusted `SPEC_APPROVAL_V1` comments for both exact digests are absent. An agent must not author an approval through the connected `Lost0rz` credential. The independent PR #195 local branch has four modified tracked files and one untracked fixture, seven commits behind remote; its writer/unique-work disposition remains unverified. Do not stash, reset, delete, checkout-overwrite or merge it.
+- **CUTOVER_READY=NO:** do not set `AGENTS.md: ISSUE_CONTROL` and retire root Task/Status until all required approvals/ownership/host gates are verified. The final switch and the file retirements must be one exact controlled PR transaction.
+
 ## Work and ownership boundary
 
 Allowed now: this migration branch's governance/control/documentation files, GitHub Issue drafts and one Draft migration PR. Preserve exact source and tests for WebKit, Window/Focus, Profile/session persistence, CI runner and the separate #195 task branch/worktrees. Use the smallest safely reusable checkout; no extra physical worktree required solely for documentation.
