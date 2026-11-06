@@ -4,7 +4,7 @@ Read `../README.md` first. This directory contains a mixture of accepted feature
 
 ## Current-use rule
 
-No file in this directory is global task authority. The effective `main` `AGENTS.md` selects FILE_CONTROL (`CURRENT_TASK.md`) or, after verified cutover, a specific approved GitHub Issue/revision. Current production source/tests control implementation truth. Newer cross-cutting architecture/design contracts override older feature-contract statements where scopes overlap.
+No file in this directory is global task authority. The effective `main` `AGENTS.md` selects either historical FILE_CONTROL (`CURRENT_TASK.md`) or ISSUE_CONTROL (one selected exact-approved GitHub Issue/revision); an unmerged migration branch does not change the mode. Current production source/tests control implementation truth. Newer cross-cutting architecture/design contracts override older feature-contract statements where scopes overlap.
 
 ## Bounded accepted feature references
 

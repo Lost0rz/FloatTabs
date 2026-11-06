@@ -15,15 +15,17 @@ AGENTS.md (main): CONTROL_MODE + durable safety + ISSUE_APPROVERS
 
 An Issue body is a task contract, not canonical code or design truth. An Issue comment is progress evidence, not implicit authorization. A handoff card does not add scope. The official Engineering Governance `project-governance` capability governs the migration and approval process. Older Task/Status files remain authority **only while main is in FILE_CONTROL**; after verified ISSUE_CONTROL cutover, they are retired rather than duplicated.
 
-## Current transition — dated snapshot (2026-11-05)
+## Migration transition history (snapshot dated 2026-11-05)
+
+The observations below describe the pre-approval state on November 5, not the current Issue approval status. On November 6, authenticated `Lost0rz` approved Issue #197 revision 1 (comment 6675731614) and Issue #198 revision 1 (comment 6675755704), both with matching canonical digests. The effective mode is still controlled by the `AGENTS.md` on merged `main`; see live PR/Issue/CI records for current state.
 
 - [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197): governance migration (pre-cutover planning, original `TASK_ID=FT-GOV-ISSUE-CONTROL-MIGRATION-001`).
 - [Issue #198](https://github.com/Lost0rz/FloatTabs/issues/198): carry-forward of active `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` product task.
 - [Draft PR #199](https://github.com/Lost0rz/FloatTabs/pull/199): **the only governance migration PR**. Its branch contents do not activate ISSUE_CONTROL.
 - [Draft PR #195](https://github.com/Lost0rz/FloatTabs/pull/195): independent adaptive-lifecycle/cold-restore corrective. Its head-aligned Task evidence describes human UI acceptance **PENDING** at this observation; preserve the dirty local checkout and unique work.
 - PR #196 was already merged at `d64c9ec6`. Its older pending-merge snapshot must not control a new task.
-- Official Issue digests and local `gh` read/write were reported PASS in [#197 CLI receipt](https://github.com/Lost0rz/FloatTabs/issues/197#issuecomment-6659119976); **neither Issue has a verified trusted `SPEC_APPROVAL_V1`**. Exact digests must always be retrieved fresh before approving/executing.
-- Outstanding gates: confirm the local PR #195 worktree's writer/unique-work disposition; receive two independently authenticated exact-spec approvals; stage and verify one atomic `AGENTS.md` mode switch + Task/Status retirement; pass applicable host gates; verify merge on main.
+- As of this November 5 snapshot, official digests and local `gh` roundtrip were PASS, but human spec approval was still pending. Both revisions were subsequently approved on November 6; refresh the live bodies, digests and authenticated comments before executing.
+- Remaining cutover gates after the November 6 approvals: preserve #195's independent local unique work, verify the atomic `AGENTS.md` mode switch + Task/Status retirement and current host checks, and verify the actual merge to `main`. Product UI acceptance for #195 remains separate.
 
 **This dated snapshot can go stale.** For the current task/state always read live Issue, PR, commit and applicable authority; do not treat the historical observations here as HEAD locks.
 

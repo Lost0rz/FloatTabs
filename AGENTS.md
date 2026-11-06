@@ -8,14 +8,14 @@ Do not expand governance, telemetry, or generic frameworks ahead of actual produ
 
 ## Control plane
 
-CONTROL_MODE: FILE_CONTROL
+CONTROL_MODE: ISSUE_CONTROL
 ISSUE_APPROVERS: Lost0rz
 
-The mode above is deliberately **FILE_CONTROL** during the migration PR. It may change to `CONTROL_MODE: ISSUE_CONTROL` **only in the verified, approved cutover transaction** that also retires root `CURRENT_TASK.md` and `CURRENT_STATUS.md`. Draft PR text, a plugin installation, a GitHub Issue, and CLI read/write success do not switch mode. Only the authoritative merged `main` version of this file chooses the mode.
+The mode declared here is authoritative **only when this file is verified on `main`**. An unmerged branch, draft PR, installed plugin, GitHub Issue or CLI success does not switch the effective mode. The cutover transaction also retires root `CURRENT_TASK.md` and `CURRENT_STATUS.md`; the historical FILE_CONTROL versions remain in Git history.
 
 Canonical owners by mode:
 
-| Owner | FILE_CONTROL (currently effective on main) | ISSUE_CONTROL (after verified cutover) |
+| Owner | FILE_CONTROL (historical mode) | ISSUE_CONTROL (after verified merge) |
 | --- | --- | --- |
 | `AGENTS.md` | Durable rules, mode and approver policy | Same |
 | Current task authorization | `CURRENT_TASK.md` on the authorized task ref | Explicitly selected, authenticated and **approved** `EXECUTION_SPEC_V1` GitHub Issue revision |
@@ -29,7 +29,7 @@ Before state-changing work, resolve the **main-selected** mode, refresh task-rel
 
 Chat history, Memory, handoff cards, audit replies, historical reports, old PRs, and archived documents are supporting evidence only. An agent-handoff card transmits authority references, not a second contract. Never use a GitHub Issue comment or progress label to expand an approved spec.
 
-**Migration boundary:** [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197), [carry-forward #198](https://github.com/Lost0rz/FloatTabs/issues/198) and [Draft PR #199](https://github.com/Lost0rz/FloatTabs/pull/199) are pre-cutover evidence, not present approval. Cutover requires local CLI proof, both matching human approval comments, safe still-active task/worktree reconciliation, a single exact mode-switch/removal PR diff, host gates and a verified merge. Do not modify or overwrite PR #195's independent local work.
+**Migration provenance:** [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197) and [carry-forward #198](https://github.com/Lost0rz/FloatTabs/issues/198) contain digest-bound approvals; [PR #199](https://github.com/Lost0rz/FloatTabs/pull/199) is the control-mode transition carrier. Actual cutover requires verified merge into `main`, approved Issue identities, host checks and safe preservation of independent product work. Never overwrite PR #195's local unique files or infer human product acceptance from Issue approval.
 
 When consulting repository documentation beyond the three control files, read `docs/README.md` before relying on old architecture/product/design/validation/plan files. A historical document does not regain current Authority because its body says `FROZEN`, `LOCKED`, `canonical`, `accepted`, `implemented`, `current`, or `CONSTRUCTION_GATE_READY`.
 

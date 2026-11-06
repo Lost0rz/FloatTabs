@@ -33,7 +33,7 @@ user-observed runtime/restore problem
 → single owning domain/writer and risk-proportional verification
 ```
 
-In November 2026, the active carry-forward lifecycle/restore work is [Issue #198](https://github.com/Lost0rz/FloatTabs/issues/198) linked to independent [Draft PR #195](https://github.com/Lost0rz/FloatTabs/pull/195). This is a dated navigation hint; live repository evidence and human UI acceptance decide current readiness. The Issue remains non-executable until approved after cutover.
+In November 2026, the active carry-forward lifecycle/restore work is [Issue #198](https://github.com/Lost0rz/FloatTabs/issues/198) linked to independent [Draft PR #195](https://github.com/Lost0rz/FloatTabs/pull/195). This is a dated navigation hint; live repository evidence and human UI acceptance decide current readiness. Issue #198 revision 1 received authenticated approval on 2026-11-06. Its product execution remains gated on verified `main` ISSUE_CONTROL cutover, current source/writer boundaries and independent human UI acceptance.
 
 ## Canonical runtime and restore flow
 

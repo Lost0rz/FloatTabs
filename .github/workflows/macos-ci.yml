@@ -4,33 +4,112 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'FloatTabs/**'
-      - 'FloatTabsTests/**'
-      - 'FloatTabs.xcodeproj/**'
-      - '.github/workflows/macos-ci.yml'
-      - 'AGENTS.md'
-      - 'CURRENT_STATUS.md'
-      - 'CURRENT_TASK.md'
-      - 'tools/release/**'
   pull_request:
     branches:
       - main
-    paths:
-      - 'FloatTabs/**'
-      - 'FloatTabsTests/**'
-      - 'FloatTabs.xcodeproj/**'
-      - '.github/workflows/macos-ci.yml'
-      - 'AGENTS.md'
-      - 'CURRENT_STATUS.md'
-      - 'CURRENT_TASK.md'
-      - 'tools/release/**'
   workflow_dispatch:
 
+concurrency:
+  group: macos-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
-  build-and-test:
-    name: Build & Test (Apple Silicon arm64)
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+  scope-gate:
+    name: CI Scope Gate
+    runs-on: ubuntu-latest
+    outputs:
+      run_product_tests: ${{ steps.classify.outputs.run_product_tests }}
+      run_workflow_validation: ${{ steps.classify.outputs.run_workflow_validation }}
+      scope: ${{ steps.classify.outputs.scope }}
+      workflow_files: ${{ steps.classify.outputs.workflow_files }}
+      workflow_files_available: ${{ steps.classify.outputs.workflow_files_available }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Classify changed paths
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci/classify_macos_ci_scope.py
+
+  workflow-validation:
+    name: Workflow Configuration Validation
+    needs: scope-gate
+    if: needs.scope-gate.outputs.run_workflow_validation == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install pinned actionlint
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl --fail --silent --show-error --location \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            --output "$archive"
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  '"$archive" | sha256sum --check --status
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+
+      - name: Lint changed workflow files
+        env:
+          ACTIONLINT: ${{ runner.temp }}/actionlint
+          WORKFLOW_FILES_JSON: ${{ needs.scope-gate.outputs.workflow_files }}
+          WORKFLOW_FILES_AVAILABLE: ${{ needs.scope-gate.outputs.workflow_files_available }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path, PurePosixPath
+
+          if os.environ["WORKFLOW_FILES_AVAILABLE"] != "true":
+              sys.exit("Changed workflow manifest is unavailable; refusing to report configuration validation as passed.")
+
+          try:
+              paths = json.loads(os.environ["WORKFLOW_FILES_JSON"])
+          except json.JSONDecodeError as error:
+              sys.exit(f"Changed workflow manifest is invalid: {error}")
+          if not isinstance(paths, list) or any(not isinstance(path, str) for path in paths):
+              sys.exit("Changed workflow manifest must be a list of paths.")
+
+          targets = []
+          for path in paths:
+              parts = PurePosixPath(path).parts
+              if (
+                  len(parts) < 3
+                  or parts[:2] != (".github", "workflows")
+                  or ".." in parts
+                  or PurePosixPath(path).suffix.lower() not in {".yml", ".yaml"}
+              ):
+                  sys.exit(f"Refusing an out-of-scope actionlint path: {path}")
+              if Path(path).is_file():
+                  targets.append(path)
+
+          if not targets:
+              print("No changed workflow YAML files remain in the checked-out tree; actionlint skipped.")
+          else:
+              subprocess.run([os.environ["ACTIONLINT"], *targets], check=True)
+          PY
+
+      - name: Test CI scope classifier
+        run: python3 -m unittest discover -s tools/ci/tests -v
+
+  product-tests:
+    name: Product Build & Test (Apple Silicon arm64)
+    needs: scope-gate
+    if: >-
+      needs.scope-gate.outputs.run_product_tests == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, macOS, ARM64, mac-mini-ci]
     steps:
       - uses: actions/checkout@v5
@@ -142,3 +221,57 @@ jobs:
           path: |
             ${{ runner.temp }}/xcodebuild-test.log
             ${{ runner.temp }}/FloatTabsTests.xcresult
+
+  required-check:
+    name: Build & Test (Apple Silicon arm64)
+    needs: [scope-gate, workflow-validation, product-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report required-check outcome
+        env:
+          SCOPE_RESULT: ${{ needs.scope-gate.result }}
+          SCOPE: ${{ needs.scope-gate.outputs.scope }}
+          RUN_PRODUCT_TESTS: ${{ needs.scope-gate.outputs.run_product_tests }}
+          RUN_WORKFLOW_VALIDATION: ${{ needs.scope-gate.outputs.run_workflow_validation }}
+          WORKFLOW_FILES_AVAILABLE: ${{ needs.scope-gate.outputs.workflow_files_available }}
+          WORKFLOW_VALIDATION_RESULT: ${{ needs.workflow-validation.result }}
+          PRODUCT_TESTS_RESULT: ${{ needs.product-tests.result }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "SCOPE_GATE_FAIL (scope=${SCOPE:-unavailable})"
+            exit 1
+          fi
+
+          if [[ "$RUN_WORKFLOW_VALIDATION" == "true" && "$WORKFLOW_VALIDATION_RESULT" != "success" ]]; then
+            echo "WORKFLOW_CONFIG_FAIL (result=$WORKFLOW_VALIDATION_RESULT, manifest_available=$WORKFLOW_FILES_AVAILABLE)"
+            exit 1
+          fi
+
+          if [[ "$RUN_PRODUCT_TESTS" == "true" ]]; then
+            if [[ "$EVENT_NAME" == "pull_request" && "$PR_HEAD_REPOSITORY" != "$BASE_REPOSITORY" ]]; then
+              echo "PRODUCT_TESTS_FAIL (fork PR blocked from self-hosted runner)"
+              exit 1
+            fi
+            if [[ "$PRODUCT_TESTS_RESULT" != "success" ]]; then
+              echo "PRODUCT_TESTS_FAIL (result=$PRODUCT_TESTS_RESULT)"
+              exit 1
+            fi
+            echo "PRODUCT_TESTS_PASS (scope=$SCOPE)"
+            exit 0
+          fi
+
+          if [[ "$PRODUCT_TESTS_RESULT" != "skipped" ]]; then
+            echo "SCOPE_GATE_FAIL (unexpected product job result=$PRODUCT_TESTS_RESULT)"
+            exit 1
+          fi
+          if [[ "$RUN_WORKFLOW_VALIDATION" == "true" ]]; then
+            echo "WORKFLOW_CONFIG_PASS"
+          fi
+          echo "SCOPE_GATE_PASS / PRODUCT_TESTS_SKIPPED (scope=$SCOPE)"

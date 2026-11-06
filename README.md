@@ -255,6 +255,6 @@ Engineering and document authority:
 - Browser Profiles bounded product reference: [`docs/product/FloatTabs_Browser_Profiles_Contract_V1.md`](docs/product/FloatTabs_Browser_Profiles_Contract_V1.md).
 - This version's release record: [`docs/release/FloatTabs_v0.5.8.md`](docs/release/FloatTabs_v0.5.8.md).
 
-GitHub Issue-based Web ↔ Codex collaboration is being prepared under [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197) and [Draft PR #199](https://github.com/Lost0rz/FloatTabs/pull/199). Until its **verified merge with approved execution handoff**, `main` remains in FILE_CONTROL. An Issue/comment is not an authorization by itself.
+GitHub Issue-based Web ↔ Codex collaboration uses a selected exact-approved `EXECUTION_SPEC_V1` Issue for task authority. Migration provenance: [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197) and [PR #199](https://github.com/Lost0rz/FloatTabs/pull/199). The effective `main` `AGENTS.md` determines the live control mode; Issue creation, comments without matching approval and unmerged PRs do not independently change authority.
 
 Older stage, design and release files are retained as historical records. Historical documents do not override current production behavior or current accepted contracts.
