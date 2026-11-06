@@ -25,6 +25,8 @@ jobs:
       run_product_tests: ${{ steps.classify.outputs.run_product_tests }}
       run_workflow_validation: ${{ steps.classify.outputs.run_workflow_validation }}
       scope: ${{ steps.classify.outputs.scope }}
+      workflow_files: ${{ steps.classify.outputs.workflow_files }}
+      workflow_files_available: ${{ steps.classify.outputs.workflow_files_available }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -56,7 +58,48 @@ jobs:
             --output "$archive"
           echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  '"$archive" | sha256sum --check --status
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
-          "$RUNNER_TEMP/actionlint" .github/workflows/macos-ci.yml .github/workflows/qa-dmg.yml
+
+      - name: Lint changed workflow files
+        env:
+          ACTIONLINT: ${{ runner.temp }}/actionlint
+          WORKFLOW_FILES_JSON: ${{ needs.scope-gate.outputs.workflow_files }}
+          WORKFLOW_FILES_AVAILABLE: ${{ needs.scope-gate.outputs.workflow_files_available }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path, PurePosixPath
+
+          if os.environ["WORKFLOW_FILES_AVAILABLE"] != "true":
+              sys.exit("Changed workflow manifest is unavailable; refusing to report configuration validation as passed.")
+
+          try:
+              paths = json.loads(os.environ["WORKFLOW_FILES_JSON"])
+          except json.JSONDecodeError as error:
+              sys.exit(f"Changed workflow manifest is invalid: {error}")
+          if not isinstance(paths, list) or any(not isinstance(path, str) for path in paths):
+              sys.exit("Changed workflow manifest must be a list of paths.")
+
+          targets = []
+          for path in paths:
+              parts = PurePosixPath(path).parts
+              if (
+                  len(parts) < 3
+                  or parts[:2] != (".github", "workflows")
+                  or ".." in parts
+                  or PurePosixPath(path).suffix.lower() not in {".yml", ".yaml"}
+              ):
+                  sys.exit(f"Refusing an out-of-scope actionlint path: {path}")
+              if Path(path).is_file():
+                  targets.append(path)
+
+          if not targets:
+              print("No changed workflow YAML files remain in the checked-out tree; actionlint skipped.")
+          else:
+              subprocess.run([os.environ["ACTIONLINT"], *targets], check=True)
+          PY
 
       - name: Test CI scope classifier
         run: python3 -m unittest discover -s tools/ci/tests -v
@@ -191,6 +234,7 @@ jobs:
           SCOPE: ${{ needs.scope-gate.outputs.scope }}
           RUN_PRODUCT_TESTS: ${{ needs.scope-gate.outputs.run_product_tests }}
           RUN_WORKFLOW_VALIDATION: ${{ needs.scope-gate.outputs.run_workflow_validation }}
+          WORKFLOW_FILES_AVAILABLE: ${{ needs.scope-gate.outputs.workflow_files_available }}
           WORKFLOW_VALIDATION_RESULT: ${{ needs.workflow-validation.result }}
           PRODUCT_TESTS_RESULT: ${{ needs.product-tests.result }}
           EVENT_NAME: ${{ github.event_name }}
@@ -206,7 +250,7 @@ jobs:
           fi
 
           if [[ "$RUN_WORKFLOW_VALIDATION" == "true" && "$WORKFLOW_VALIDATION_RESULT" != "success" ]]; then
-            echo "WORKFLOW_CONFIG_FAIL (result=$WORKFLOW_VALIDATION_RESULT)"
+            echo "WORKFLOW_CONFIG_FAIL (result=$WORKFLOW_VALIDATION_RESULT, manifest_available=$WORKFLOW_FILES_AVAILABLE)"
             exit 1
           fi
 

@@ -4,11 +4,15 @@ Verified date: 2026-11-06
 Repository: Lost0rz/FloatTabs
 Control mode: FILE_CONTROL
 Current authorized task: FT-CI-TRIGGER-BOUNDARY-001
-Current stage: DRAFT PR OPEN / VALIDATION PASS / WAITING FOR INDEPENDENT WEB AUDIT
+Current stage: DRAFT PR OPEN / FOCUSED AUDIT CORRECTIVE ACTIVE
 Branch: codex/ft-ci-trigger-boundary-001
 Base main: d64c9ec62660e9a855056c08e013a71a58db821b
 PR: #201 — OPEN / DRAFT; validated workflow implementation head `b2331024eab3735fee44b156301c45c05947c66f`
 Release: NOT_AUTHORIZED
+
+## Latest independent audit boundary
+
+On 2026-11-06, the independent review of PR #201 (`issuecomment-6673609115`) returned STOP for three focused findings: rename classification omitted `previous_filename`; malformed or missing Compare manifests could be treated as empty; and actionlint did not target arbitrary changed workflow files. The user authorized this corrective within the existing FT-CI-TRIGGER-BOUNDARY-001 task, original branch, and PR. The correction must retain the current Required Check and self-hosted runner security boundary, use only focused Python/workflow validation, and stop for independent re-review after exact-head checks. No product XCTest/build is authorized for this corrective.
 
 ## Task authority and handoff
 

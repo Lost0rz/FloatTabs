@@ -39,6 +39,16 @@ Do not change product source, XCTest assertions, PR #195's test partition strate
 8. QA DMG PR builds are limited to eligible product changes and the selected review boundary; manual dispatch remains available.
 9. Preserve real test failure diagnostics and reporting.
 
+## Independent-audit corrective addendum — 2026-11-06
+
+The user continued this same task after the independent audit on PR #201 (`issuecomment-6673609115`). Correct the following within this PR and branch:
+
+1. Both pull-request and push changed-file sources must include `filename` and `previous_filename` so product-path renames cannot be classified as documentation-only.
+2. Missing, malformed, empty, or otherwise invalid Compare file manifests/status must be treated as unavailable scope and enter fail-safe product verification. Workflow validation must fail closed if its changed-workflow manifest is unavailable.
+3. Actionlint must target changed workflow YAML files that still exist in the checked-out tree. It must not scan unrelated untouched workflows. Keep a contract regression for this target selection.
+
+Add focused mocked classifier and workflow-contract regression tests. Verify only the two Python test modules, Python syntax, `git diff --check`, and actionlint for the workflow files changed by this task. Do not run XCTest, Debug/Release builds, or a full product verification loop. Push the same PR once for exact-head GitHub checks, record their actual scope/result, and stop at independent re-review; do not merge.
+
 ## Verification and delivery
 
 Focused checks passed on 2026-11-06: actionlint v1.7.12 on the two owned workflows, Python syntax compilation, `git diff --check`, and 16 scope/workflow-contract tests. PR run `42135136999` passed Scope Gate, workflow validation, and the required aggregator at implementation commit `b2331024eab3735fee44b156301c45c05947c66f`; product tests were correctly skipped. The initial PR-open run `42134839759` failed only because actionlint included an unrelated existing `publish-release.yml` warning; validation was narrowed and rerun once. Required-check name and branch protection were read live. One control-only receipt update may be pushed to align this task's PR/status facts; because PR classification uses the full diff, expect only the lightweight workflow configuration check to repeat, with product tests skipped. After that check, stop for independent web audit. No product tests or additional corrective loops are authorized.

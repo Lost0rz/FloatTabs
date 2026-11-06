@@ -37,9 +37,25 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("runs-on: [self-hosted, macOS, ARM64, mac-mini-ci]", MACOS_CI)
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", MACOS_CI)
 
-    def test_configuration_validation_is_limited_to_the_owned_workflows(self):
+    def test_actionlint_targets_only_changed_existing_workflow_yaml(self):
         self.assertIn(
-            '"$RUNNER_TEMP/actionlint" .github/workflows/macos-ci.yml .github/workflows/qa-dmg.yml',
+            "workflow_files: ${{ steps.classify.outputs.workflow_files }}",
+            MACOS_CI,
+        )
+        self.assertIn(
+            "workflow_files_available: ${{ steps.classify.outputs.workflow_files_available }}",
+            MACOS_CI,
+        )
+        self.assertIn(
+            "WORKFLOW_FILES_JSON: ${{ needs.scope-gate.outputs.workflow_files }}",
+            MACOS_CI,
+        )
+        self.assertIn("Path(path).is_file()", MACOS_CI)
+        self.assertIn('subprocess.run([os.environ["ACTIONLINT"], *targets], check=True)', MACOS_CI)
+        self.assertIn('if os.environ["WORKFLOW_FILES_AVAILABLE"] != "true":', MACOS_CI)
+        self.assertNotIn('actionlint" .github/workflows/*.yml', MACOS_CI)
+        self.assertNotIn(
+            'actionlint" .github/workflows/macos-ci.yml .github/workflows/qa-dmg.yml',
             MACOS_CI,
         )
 

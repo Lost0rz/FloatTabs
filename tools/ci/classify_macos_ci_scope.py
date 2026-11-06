@@ -50,6 +50,48 @@ CONTROL_FILES = {
 CONTROL_SUFFIXES = (".md", ".mdx", ".rst")
 MAX_COMPARE_FILES = 300
 MAX_PULL_REQUEST_FILES = 3000
+VALID_COMPARE_STATUSES = {"ahead", "behind", "identical", "diverged"}
+
+
+def _file_paths(files: Any) -> list[str] | None:
+    """Validate a GitHub changed-file manifest and include both rename paths."""
+    if not isinstance(files, list):
+        return None
+
+    paths: list[str] = []
+    for item in files:
+        if not isinstance(item, dict):
+            return None
+        filename = item.get("filename")
+        if not isinstance(filename, str) or not filename.strip():
+            return None
+        paths.append(filename)
+
+        if "previous_filename" in item:
+            previous_filename = item["previous_filename"]
+            if not isinstance(previous_filename, str) or not previous_filename.strip():
+                return None
+            paths.append(previous_filename)
+
+    return paths
+
+
+def _workflow_file_candidates(paths: list[str]) -> list[str]:
+    """Select workflow YAML paths from a changed-file list for scoped actionlint."""
+    candidates = set()
+    for raw_path in paths:
+        path = raw_path.replace("\\", "/")
+        while path.startswith("./"):
+            path = path[2:]
+        parts = PurePosixPath(path).parts
+        if (
+            len(parts) >= 3
+            and parts[:2] == (".github", "workflows")
+            and ".." not in parts
+            and PurePosixPath(path).suffix.lower() in {".yml", ".yaml"}
+        ):
+            candidates.add(path)
+    return sorted(candidates)
 
 
 def classify_paths(paths: list[str]) -> dict[str, Any]:
@@ -107,6 +149,8 @@ def classify_paths(paths: list[str]) -> dict[str, Any]:
         "run_workflow_validation": run_workflow_validation,
         "scope": scope,
         "reason": reason,
+        "workflow_files": _workflow_file_candidates(paths),
+        "workflow_files_available": True,
     }
 
 
@@ -118,6 +162,8 @@ def event_decision(event_name: str, paths: list[str]) -> dict[str, Any]:
             "run_workflow_validation": False,
             "scope": "manual-full",
             "reason": "manual-full-verification",
+            "workflow_files": [],
+            "workflow_files_available": True,
         }
     return classify_paths(paths)
 
@@ -148,7 +194,10 @@ def _pull_request_paths(number: int) -> tuple[list[str], bool]:
     while page <= MAX_PULL_REQUEST_FILES // 100:
         query = urllib.parse.urlencode({"per_page": 100, "page": page})
         files = _api_json(f"pulls/{number}/files?{query}")
-        paths.extend(item["filename"] for item in files)
+        batch_paths = _file_paths(files)
+        if batch_paths is None:
+            return paths, True
+        paths.extend(batch_paths)
         if len(files) < 100:
             return paths, False
         page += 1
@@ -163,10 +212,15 @@ def _push_paths(before: str, after: str) -> tuple[list[str], bool]:
     comparison = urllib.parse.quote(f"{before}...{after}", safe=".")
     query = urllib.parse.urlencode({"per_page": 100})
     result = _api_json(f"compare/{comparison}?{query}")
-    files = result.get("files") or []
-    paths = [item["filename"] for item in files]
+    status = result.get("status") if isinstance(result, dict) else None
+    if not isinstance(status, str) or status not in VALID_COMPARE_STATUSES:
+        return [], True
+    files = result.get("files")
+    paths = _file_paths(files)
+    if paths is None or not files:
+        return [], True
     # GitHub's compare response caps changed files at 300; fail safe at the cap.
-    return paths, len(paths) >= MAX_COMPARE_FILES
+    return paths, len(files) >= MAX_COMPARE_FILES
 
 
 def changed_paths(event: dict[str, Any], event_name: str) -> tuple[list[str], bool]:
@@ -184,6 +238,8 @@ def _write_outputs(decision: dict[str, Any]) -> None:
         f"run_product_tests={str(decision['run_product_tests']).lower()}",
         f"run_workflow_validation={str(decision['run_workflow_validation']).lower()}",
         f"scope={decision['scope']}",
+        "workflow_files=" + json.dumps(decision.get("workflow_files", []), separators=(",", ":")),
+        "workflow_files_available=" + str(decision.get("workflow_files_available", True)).lower(),
     ]
     if output_path:
         with open(output_path, "a", encoding="utf-8") as output:
@@ -208,6 +264,8 @@ def main() -> int:
                 "run_workflow_validation": True,
                 "scope": "fail-safe-full",
                 "reason": "change-list-unavailable-or-truncated",
+                "workflow_files": [],
+                "workflow_files_available": False,
             }
         else:
             decision = event_decision(event_name, paths)
@@ -218,6 +276,8 @@ def main() -> int:
             "run_workflow_validation": True,
             "scope": "fail-safe-full",
             "reason": f"scope-api-fallback-{type(error).__name__}",
+            "workflow_files": [],
+            "workflow_files_available": False,
         }
 
     _write_outputs(decision)
