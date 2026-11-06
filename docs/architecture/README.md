@@ -9,6 +9,7 @@ Read [documentation authority](../README.md) and the effective `main` [AGENTS.md
 - [Phase 8 Measurement Feasibility Report](FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md): production cannot deterministically attribute WebContent/GPU aggregate footprint through the supported ordinary public API. Never substitute Runtime count as an exact RAM budget.
 - [Native Completion Notification Reliability and Rich Preview](FloatTabs_Native_Completion_Notification_Reliability_Rich_Preview_Contract_V1.md): delivered exact-Slot notification/unread/privacy regression boundary.
 - [Runtime Lifecycle Memory Contract V6](FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md): bounded historical cross-cutting rationale, only where not superseded by the accepted restore/rescope evidence.
+- [Automatic Recent 120s Policy Delta V1](FloatTabs_Automatic_Recent_120s_Delta_V1.md): Issue #203's approved prospective amendment to Policy V7's initial 30-second Recent boundary; the 600-second Long Idle threshold and other policy semantics are preserved.
 
 Other V1–V5, stage-numbered plans and historical phase reports remain evidence, **not** a new implementation mandate.
 

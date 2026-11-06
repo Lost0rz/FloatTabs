@@ -1895,7 +1895,7 @@ final class WebViewPoolTests: XCTestCase {
     }
 
     func testResourceLifecycleDefaultsMatchAutomaticContract() throws {
-        XCTAssertEqual(SlotLifecycleCoordinator.defaultRecentStageDuration, 30)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultRecentStageDuration, 120)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultLongIdleThreshold, 600)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay, 0)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultPressureStepDelay, 0.5)

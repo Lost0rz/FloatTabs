@@ -814,16 +814,16 @@ final class WebAttentionLifecycleTests: XCTestCase {
     func testAutomaticStageBoundariesKeepIdleResidentThenReclaimAtLongIdle() throws {
         XCTAssertEqual(
             AutomaticLifecycleStage.resolve(
-                inactiveDuration: 29,
-                recentStageDuration: 30,
+                inactiveDuration: 119,
+                recentStageDuration: 120,
                 longIdleThreshold: 600
             ),
             .recent
         )
         XCTAssertEqual(
             AutomaticLifecycleStage.resolve(
-                inactiveDuration: 30,
-                recentStageDuration: 30,
+                inactiveDuration: 120,
+                recentStageDuration: 120,
                 longIdleThreshold: 600
             ),
             .idle
@@ -831,7 +831,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertEqual(
             AutomaticLifecycleStage.resolve(
                 inactiveDuration: 599,
-                recentStageDuration: 30,
+                recentStageDuration: 120,
                 longIdleThreshold: 600
             ),
             .idle
@@ -839,7 +839,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertEqual(
             AutomaticLifecycleStage.resolve(
                 inactiveDuration: 600,
-                recentStageDuration: 30,
+                recentStageDuration: 120,
                 longIdleThreshold: 600
             ),
             .longIdle
@@ -853,7 +853,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let scheduler = ManualLifecycleScheduler(now: 100)
         let lifecycle = makeLifecycle(
             pool: pool,
-            recentStageDuration: 30,
+            recentStageDuration: 120,
             longIdleThreshold: 600,
             monotonicUptime: { scheduler.now },
             scheduleDelayedWork: { delay, workItem in
@@ -866,15 +866,15 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertEqual(lifecycle.debugInactiveStage(slotID: profile.id), .recent)
         XCTAssertTrue(pool.contains(slotID: profile.id))
 
-        scheduler.advance(to: 129.999)
+        scheduler.advance(to: 219)
         XCTAssertEqual(lifecycle.debugInactiveStage(slotID: profile.id), .recent)
         XCTAssertTrue(pool.contains(slotID: profile.id))
 
-        scheduler.advance(to: 130)
+        scheduler.advance(to: 220)
         XCTAssertEqual(lifecycle.debugInactiveStage(slotID: profile.id), .idle)
         XCTAssertTrue(pool.contains(slotID: profile.id))
 
-        scheduler.advance(to: 699.999)
+        scheduler.advance(to: 699)
         XCTAssertEqual(lifecycle.debugInactiveStage(slotID: profile.id), .idle)
         XCTAssertTrue(pool.contains(slotID: profile.id))
 
@@ -888,6 +888,64 @@ final class WebAttentionLifecycleTests: XCTestCase {
         )
     }
 
+    func testDiagnosticSnapshotTracksObservedMemoryPressureAndMonotonicAge() throws {
+        var uptime = 50.0
+        let lifecycle = makeLifecycle(
+            pool: makePool(),
+            monotonicUptime: { uptime }
+        )
+        let slotID = UUID()
+
+        var fields = lifecycle.diagnosticSnapshotFields(for: slotID)
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation"], .string("unobserved"))
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation_uptime"], .null)
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation_age_seconds"], .null)
+
+        uptime = 100
+        lifecycle.handleMemoryPressure(.warning)
+        fields = lifecycle.diagnosticSnapshotFields(for: slotID)
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation"], .string("warning"))
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation_uptime"], .double(100))
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation_age_seconds"], .double(0))
+
+        uptime = 102.5
+        fields = lifecycle.diagnosticSnapshotFields(for: slotID)
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation"], .string("warning"))
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation_uptime"], .double(100))
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation_age_seconds"], .double(2.5))
+
+        uptime = 105
+        lifecycle.handleMemoryPressure(.critical)
+        fields = lifecycle.diagnosticSnapshotFields(for: slotID)
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation"], .string("critical"))
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation_uptime"], .double(105))
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation_age_seconds"], .double(0))
+
+        uptime = 110
+        lifecycle.handleMemoryPressureNormalized()
+        fields = lifecycle.diagnosticSnapshotFields(for: slotID)
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation"], .string("normal"))
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation_uptime"], .double(110))
+
+        uptime = 114.5
+        fields = lifecycle.diagnosticSnapshotFields(for: slotID)
+        XCTAssertEqual(fields["lifecycle_memory_pressure_observation_age_seconds"], .double(4.5))
+
+        let encodedFields = try JSONEncoder().encode(fields)
+        let decodedFields = try JSONDecoder().decode(
+            [String: RuntimeDiagnosticValue].self,
+            from: encodedFields
+        )
+        XCTAssertEqual(
+            decodedFields["lifecycle_memory_pressure_observation"],
+            .string("normal")
+        )
+        XCTAssertEqual(
+            decodedFields["lifecycle_memory_pressure_observation_age_seconds"],
+            .double(4.5)
+        )
+    }
+
     func testReactivationInvalidatesScheduledStageBoundary() throws {
         let pool = makePool()
         let profile = makeProfile(name: "ReactivatedBeforeBoundary", policy: .warm)
@@ -895,7 +953,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let scheduler = ManualLifecycleScheduler(now: 100)
         let lifecycle = makeLifecycle(
             pool: pool,
-            recentStageDuration: 30,
+            recentStageDuration: 120,
             longIdleThreshold: 600,
             monotonicUptime: { scheduler.now },
             scheduleDelayedWork: { delay, workItem in
@@ -923,7 +981,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         _ = try pool.webView(for: profile)
         let lifecycle = makeLifecycle(
             pool: pool,
-            recentStageDuration: 60,
+            recentStageDuration: 120,
             longIdleThreshold: 600,
             pressureStepDelay: 600
         )
