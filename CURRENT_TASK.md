@@ -2,7 +2,7 @@
 
 **TASK_ID:** FT-CI-TRIGGER-BOUNDARY-001
 **TASK_CLASS:** CORRECTIVE
-**STATE:** TARGETED_VALIDATION_FOLLOW_UP
+**STATE:** WAITING_FOR_INDEPENDENT_WEB_AUDIT
 **CONTROL_MODE:** FILE_CONTROL
 **BRANCH:** `codex/ft-ci-trigger-boundary-001`
 **BASE:** `main` at `d64c9ec62660e9a855056c08e013a71a58db821b`
@@ -41,7 +41,7 @@ Do not change product source, XCTest assertions, PR #195's test partition strate
 
 ## Verification and delivery
 
-Focused local checks passed on 2026-11-06, including actionlint v1.7.12, Python syntax compilation, and the scope/contract test matrix. The first real PR-open run passed scope classification and correctly skipped product tests, but exposed that actionlint scanned an unrelated existing workflow warning. The bounded follow-up now validates only the two workflows owned by this task. Required-check name and branch protection were read live. Do not run the product XCTest suite locally or dispatch unnecessary full tests; perform only the necessary correction run and final delivery-state verification, and report every actual Actions run and scope.
+Focused checks passed on 2026-11-06: actionlint v1.7.12 on the two owned workflows, Python syntax compilation, `git diff --check`, and 16 scope/workflow-contract tests. PR run `42135136999` passed Scope Gate, workflow validation, and the required aggregator at implementation commit `b2331024eab3735fee44b156301c45c05947c66f`; product tests were correctly skipped. The initial PR-open run `42134839759` failed only because actionlint included an unrelated existing `publish-release.yml` warning; validation was narrowed and rerun once. Required-check name and branch protection were read live. One control-only receipt update may be pushed to align this task's PR/status facts; because PR classification uses the full diff, expect only the lightweight workflow configuration check to repeat, with product tests skipped. After that check, stop for independent web audit. No product tests or additional corrective loops are authorized.
 
 Create one independent branch and one Draft PR, leave it unmerged, attach the PR to this task, and stop after exact-head delivery verification. Do not mark Ready, merge, release, or start another full-test loop. Keep prior WebKit test failure evidence separate from this governance/CI correction.
 

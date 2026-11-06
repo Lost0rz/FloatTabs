@@ -4,10 +4,10 @@ Verified date: 2026-11-06
 Repository: Lost0rz/FloatTabs
 Control mode: FILE_CONTROL
 Current authorized task: FT-CI-TRIGGER-BOUNDARY-001
-Current stage: DRAFT PR OPEN / TARGETED CONFIG VALIDATION FOLLOW-UP
+Current stage: DRAFT PR OPEN / VALIDATION PASS / WAITING FOR INDEPENDENT WEB AUDIT
 Branch: codex/ft-ci-trigger-boundary-001
 Base main: d64c9ec62660e9a855056c08e013a71a58db821b
-PR: #201 — OPEN / DRAFT; latest verified head `5547c2b71853ce51897b56fe23de100509b24d49`
+PR: #201 — OPEN / DRAFT; validated workflow implementation head `b2331024eab3735fee44b156301c45c05947c66f`
 Release: NOT_AUTHORIZED
 
 ## Task authority and handoff
@@ -39,12 +39,13 @@ PR #195 retains all product source, product tests, its XCTest partition strategy
 ## Focused verification
 
 - actionlint v1.7.12 passed against both workflows; the official Darwin and Linux release archive checksums were verified, including the Linux digest pinned by the workflow.
-- 15 classifier and workflow-contract tests passed before the follow-up edit, covering control/status, AGENTS, ordinary documentation, Swift source, XCTest, workflow configuration, manual full dispatch, unknown paths, mixed paths, required-check entrypoint, runner boundary, and QA DMG draft behavior. One contract test was added for the narrowed actionlint file list and is pending rerun.
+- 16 classifier and workflow-contract tests passed, covering control/status, AGENTS, ordinary documentation, Swift source, XCTest, workflow configuration, manual full dispatch, unknown paths, mixed paths, required-check entrypoint, runner boundary, QA DMG draft behavior, and the scoped actionlint file list.
 - Python syntax compilation and `git diff --check` passed.
 - Required context and strict protection were re-read live; the required job name remains `Build & Test (Apple Silicon arm64)`.
 - PR-open macOS CI run `42134839759`: Scope Gate passed with `workflow-config`; product tests were skipped. Workflow validation failed because actionlint included the unrelated existing `publish-release.yml` shellcheck warning (`SC2129`). The required aggregator reported config failure; QA DMG run `42134839703` skipped its build job for this Draft PR. No Apple Silicon runner or product XCTest was used.
-- Follow-up narrows actionlint to the two workflows owned by this task; one corrective PR run is pending. Product XCTest has not been run locally.
+- Corrective PR-synchronize macOS CI run `42135136999` at implementation commit `b2331024eab3735fee44b156301c45c05947c66f`: `workflow-config` Scope Gate, actionlint on the two owned workflow files, 16 helper/contract tests, and required aggregator all passed. Product Build & Test was skipped; no Apple Silicon runner or XCTest was used.
+- Manual full dispatch remains available. No product XCTest has been run locally.
 
 ## Current execution
 
-No product source or XCTest assertion changes are in scope. No existing PR/worktree is being edited. The independent worktree was created at the exact current main base and contains only this task's control, workflow, and CI classifier changes. The focused implementation changes will be grouped in one commit, pushed only to this task branch, and delivered in one Draft PR for independent web audit.
+No product source or XCTest assertion changes are in scope. No existing PR/worktree is being edited. The independent worktree was created at the exact current main base and contains only this task's control, workflow, and CI classifier changes. The initial implementation is commit `5547c2b`; one bounded actionlint-scope correction is commit `b233102`. A final control-only receipt update will record the live PR and validation outcome; it must not trigger product tests.
