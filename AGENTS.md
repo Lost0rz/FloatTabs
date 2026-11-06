@@ -8,19 +8,30 @@ Do not expand governance, telemetry, or generic frameworks ahead of actual produ
 
 ## Control plane
 
-Repository authority uses:
+CONTROL_MODE: ISSUE_CONTROL
+ISSUE_APPROVERS: Lost0rz
 
-- `AGENTS.md` — durable project rules and authority boundaries;
-- `CURRENT_STATUS.md` — verified current-state snapshot;
-- `CURRENT_TASK.md` — the only active task authorization;
-- `docs/README.md` — documentation authority/status routing index;
-- `docs/architecture/DOMAIN_MAP.md` — derived navigation map, not product truth or task authority.
+The mode declared here is authoritative **only when this file is verified on `main`**. An unmerged branch, draft PR, installed plugin, GitHub Issue or CLI success does not switch the effective mode. The cutover transaction also retires root `CURRENT_TASK.md` and `CURRENT_STATUS.md`; the historical FILE_CONTROL versions remain in Git history.
 
-Chat history, Memory, handoff cards, audit replies, historical reports, old PRs, and archived documents are supporting evidence only.
+Canonical owners by mode:
 
-Before state-changing work, read the three control files, refresh the task-relevant repository evidence, and confirm the requested work is authorized by `CURRENT_TASK.md`.
+| Owner | FILE_CONTROL (historical mode) | ISSUE_CONTROL (after verified merge) |
+| --- | --- | --- |
+| `AGENTS.md` | Durable rules, mode and approver policy | Same |
+| Current task authorization | `CURRENT_TASK.md` on the authorized task ref | Explicitly selected, authenticated and **approved** `EXECUTION_SPEC_V1` GitHub Issue revision |
+| Current progress/evidence | `CURRENT_STATUS.md` verified snapshot | Bounded Issue comments/receipts; PR/CI/GitHub host as live status truth |
+| Documentation | `docs/README.md` and accepted contracts | Same |
+| Source navigation | `docs/architecture/DOMAIN_MAP.md` | Same |
 
-When consulting repository documentation beyond the three control files, read `docs/README.md` before relying on old architecture/product/design/validation/plan files. A historical document does not regain current Authority because its body says `FROZEN`, `LOCKED`, `canonical`, `accepted`, `implemented`, `current`, or `CONSTRUCTION_GATE_READY`.
+`ISSUE_APPROVERS` designates eligible GitHub actors; it is **not approval**. Each execution Issue must separately have an authentic `SPEC_APPROVAL_V1` comment from an authorized human approver matching repository, Issue number, `TASK_ID`, `SPEC_REVISION` and canonical `SPEC_SHA256`. An agent must not submit its own approval through a connected account or infer authorization from labels, Issue authorship or chat. Check the comment's verified author ID and revocations with the installed official helper. A successful structural digest without approval is non-executable.
+
+Before state-changing work, resolve the **main-selected** mode, refresh task-relevant Git/PR/CI evidence, check workspace/writer ownership and the corresponding authorization owner. In FILE_CONTROL, read `CURRENT_TASK.md` and `CURRENT_STATUS.md`; in ISSUE_CONTROL, fetch the selected Issue and its exact approval via authenticated `gh`/connector, and do **not** treat legacy Task/Status files as current authority.
+
+Chat history, Memory, handoff cards, audit replies, historical reports, old PRs, and archived documents are supporting evidence only. An agent-handoff card transmits authority references, not a second contract. Never use a GitHub Issue comment or progress label to expand an approved spec.
+
+**Migration provenance:** [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197) and [carry-forward #198](https://github.com/Lost0rz/FloatTabs/issues/198) contain digest-bound approvals; [PR #199](https://github.com/Lost0rz/FloatTabs/pull/199) is the control-mode transition carrier. Actual cutover requires verified merge into `main`, approved Issue identities, host checks and safe preservation of independent product work. Never overwrite PR #195's local unique files or infer human product acceptance from Issue approval.
+
+When consulting repository documentation beyond the mode-selected authority sources, read `docs/README.md` before relying on old architecture/product/design/validation/plan files. A historical document does not regain current Authority because its body says `FROZEN`, `LOCKED`, `canonical`, `accepted`, `implemented`, `current`, or `CONSTRUCTION_GATE_READY`.
 
 If the user says “continue” and the active task is still accurate, continue it. Do not generate a second execution contract.
 
@@ -33,7 +44,7 @@ Distinguish:
 - **Repository HEAD** — literal current commit;
 - **Delivery / Semantic HEAD** — implementation identity being verified.
 
-A commit changing only `CURRENT_STATUS.md` / `CURRENT_TASK.md` is `CONTROL_ONLY_DRIFT`. It does not by itself invalidate product implementation evidence or require a new task/PR/test cycle.
+Under historical FILE_CONTROL, a commit changing only `CURRENT_STATUS.md` / `CURRENT_TASK.md` is `CONTROL_ONLY_DRIFT`; it does not invalidate unchanged product implementation evidence. In ISSUE_CONTROL, progress belongs in the approved Issue's receipt comments, not recreated root control files.
 
 Do not treat every historical recorded SHA as a permanent equality lock. Fresh Git/GitHub refs are authoritative for current branch/PR identity.
 
@@ -88,12 +99,12 @@ Use `incident-doctor` only when a real runtime failure blocks progress and exist
 
 Before state-changing execution:
 
-1. read `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`;
-2. refresh task-relevant refs/evidence;
-3. verify current task scope and relevant workspace/branch/PR identity;
-4. stop on material authority ambiguity or unknown overlapping unique work.
+1. read authoritative `main` `AGENTS.md` to determine the **one** effective control mode;
+2. in FILE_CONTROL, read the selected task ref's `CURRENT_TASK.md` and verified `CURRENT_STATUS.md`; in ISSUE_CONTROL, fetch the **exact selected Issue**, current revision/digest and authentic trusted approval comment;
+3. refresh task-relevant source/ref/PR/CI evidence and writer/worktree state;
+4. stop for missing authorization, conflicts, unsafe overlap or unknown unique work.
 
-A truly new task must first be authorized in `CURRENT_TASK.md`.
+A truly new task must be authorized in the mode-selected owner **before** mutation. Several approved disjoint Issues may coexist; this is not a global single-active-task mutex.
 
 ### Phase / design execution gate
 
@@ -101,21 +112,21 @@ For a multi-phase architecture or other high-risk program governed by an accepte
 
 Before each implementation phase:
 
-1. reread the active contract plus `CURRENT_STATUS.md` / `CURRENT_TASK.md`;
+1. reread the active contract plus the authority owner selected by the effective control mode;
 2. perform a focused read-only audit of the exact production owners, call paths, lifecycle/retain boundaries, existing tests, and fresh repository evidence relevant to that phase;
 3. freeze the phase's concrete scope, expected files/symbols, verification matrix, acceptance criteria, and STOP conditions in repository Authority when they materially change the task;
 4. only then issue a concise execution card for the local executor;
 5. keep the execution card bounded and avoid duplicating the full repository contract.
 
-After implementation, run the phase-local machine verification required by the active program contract before merge/closeout. A chat plan or execution card never overrides the accepted repository contract or `CURRENT_TASK.md`.
+After implementation, run the phase-local machine verification required by the active program contract before merge/closeout. A chat plan or execution card never overrides an accepted repository contract or the mode-selected execution authority.
 
-For the active Runtime Lifecycle / Memory program, the current contract uses an architecture-first sequence: merge each structurally correct phase after its frozen machine gate and required CI, then continue to the next dependent phase. Do not block every intermediate phase on repeated formal independent audit or human UI/runtime acceptance when the current program contract explicitly defers those gates to one unified final pass.
+When a currently authorized phase contract provides an architecture-first sequence, follow its frozen local and CI gates and explicit human acceptance timing. Do not promote superseded phase plans into current permission or universal test cadence.
 
 Use phase-local verification. A structural phase should prove the ownership/lifecycle primitive, data safety, regressions and machine-observable behavior needed for that phase. Do not make later policy/tuning-scale benchmarks blocking merely because they are measurable; defer them to the phase that actually uses those measurements unless the current accepted contract says the earlier decision depends on them.
 
 ### During
 
-Do not expand the task for adjacent issues. Record material non-blocking items as Follow-ups in `CURRENT_STATUS.md`; they become executable only through a future task authorization.
+Do not expand the task for adjacent issues. In FILE_CONTROL record bounded material Follow-ups in `CURRENT_STATUS.md`; in ISSUE_CONTROL use Issue comments or a separately approved Issue as appropriate. Follow-ups never become executable without mode-selected authorization.
 
 If implementation introduces or changes canonical ownership, writers, shared behavior, module boundaries, or a materially new responsibility, re-check the code-structure boundary before continuing.
 
@@ -123,9 +134,9 @@ If implementation introduces or changes canonical ownership, writers, shared beh
 
 Every terminal task must run a Control Alignment Gate before successful handoff:
 
-- obtain fresh outcome evidence;
-- reread STATUS and TASK;
-- update only control facts whose owned semantics materially changed;
+- obtain fresh outcome and host evidence;
+- in FILE_CONTROL reread STATUS/TASK and change only materially stale owned facts;
+- in ISSUE_CONTROL verify the selected approved Issue identity and update bounded Issue receipts/comments when needed; **do not recreate STATUS/TASK or open a control-only PR for progress**;
 - close or explicitly retain task-relevant workspace/PR lifecycle state.
 
 A task is not fully closed merely because its PR merged.
@@ -178,7 +189,7 @@ Use focused tests first. Increase verification for changes involving:
 
 Real macOS interaction/runtime changes require relevant runtime acceptance before the owning program or release is finally accepted; static review alone is insufficient. A current accepted multi-phase contract may deliberately defer that human runtime/UI acceptance across intermediate architecture phases so the user tests the final integrated architecture once rather than repeatedly testing temporary intermediate states.
 
-For the active Runtime Lifecycle / Memory program, timing-sensitive real-product interaction acceptance is program-final unless a phase contract explicitly requires earlier evidence for a safety or architecture decision. Local AI/Computer Use may assist debugging or evidence collection when explicitly needed, but should not impersonate the final human acceptance operator or block construction solely because an AI-driven UI smoke is awkward to reproduce.
+A current accepted multi-phase product contract may defer timing-sensitive real-product interaction acceptance to its integrated final gate. Local AI-driven evidence never substitutes for an explicitly required human UI acceptance verdict.
 
 When the user explicitly chooses a reference-derived default for a performance policy, empirical tuning benchmarks may be deferred to a later tuning pass. That deferral does **not** waive code correctness, data-safety boundaries, or repository-required CI unless the user separately changes those gates. Record the chosen default as a product assumption rather than as measured truth.
 
@@ -206,13 +217,14 @@ Do not delete/reset them or replace unreadable persisted configuration with an e
 
 STOP and report evidence when:
 
-- active task authorization is missing or materially stale;
+- mode-selected execution authorization is missing, unapproved or materially stale;
 - the requested mutation is outside task scope;
 - task-relevant baseline/Authority changed materially;
-- an overlapping predecessor contains unknown unique work;
+- an overlapping predecessor contains unclassified unique work or unverified writer ownership;
 - a required live repository-host gate fails;
 - a linked design/plan change invalidates task acceptance or scope;
-- safe ownership cannot be established without further navigation/incident evidence.
+- safe ownership cannot be established without further navigation/incident evidence;
+- a mode switch, untrusted approval, Issue digest mismatch or stale approval attempts to bypass cutover gates.
 
 Do not stop merely because Repository HEAD advanced only through control-plane changes with unchanged task semantics.
 
@@ -228,11 +240,13 @@ Task state: <ACTIVE / WAITING / TERMINAL / N/A>
 Root cause: <KNOWN / UNKNOWN / N/A>
 Merge: <MERGED / NOT MERGED / N/A>
 Updated files: <files or NONE>
-Control plane: STATUS=<UPDATED/UNCHANGED/STALE>, TASK=<UPDATED/UNCHANGED/STALE>
+Control mode: <FILE_CONTROL / ISSUE_CONTROL>
+Authority: <Task/Status ref OR approved repository/Issue/revision/digest>
+Control alignment: <FILE_CONTROL STATUS/TASK OR ISSUE_CONTROL receipt/approval state>
 PR / workspace: <state or N/A>
 Final state: <short result>
 ```
 
-Only report Skills actually used. If no merge occurred, say `NOT MERGED`; if no files changed, say `NONE`; if STATUS/TASK should have changed but did not, say `STALE`. For unresolved runtime failures, keep `Root cause: UNKNOWN`.
+Only report Skills actually used. If no merge occurred, say `NOT MERGED`; if no files changed, say `NONE`. In FILE_CONTROL, report stale STATUS/TASK when materially relevant; in ISSUE_CONTROL, report Issue revision, digest, approval and comment receipt evidence instead. For unresolved runtime failures, keep `Root cause: UNKNOWN`.
 
 The receipt is status visibility only; it never becomes repository Authority.

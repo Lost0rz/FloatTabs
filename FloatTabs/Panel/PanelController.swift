@@ -4,6 +4,117 @@ import WebKit
 
 typealias BrowserProfileSwitchConfirmation = @MainActor (WebAppProfile, BrowserProfile?, String) -> Bool
 
+enum PanelPresentationDisplayRelationship: String, Equatable {
+    case sameDisplay
+    case crossDisplay
+    case unknown
+}
+
+/// Records the Shell's display at presentation start and any observed moves.
+struct PanelPresentationDisplayMovement {
+    private(set) var initialDisplayID: CGDirectDisplayID?
+    private(set) var lastDisplayID: CGDirectDisplayID?
+    private(set) var didMoveAcrossDisplays = false
+
+    mutating func begin(on displayID: CGDirectDisplayID?) {
+        initialDisplayID = displayID
+        lastDisplayID = displayID
+        didMoveAcrossDisplays = false
+    }
+
+    mutating func observe(displayID: CGDirectDisplayID?) {
+        guard let displayID else { return }
+        if let lastDisplayID, lastDisplayID != displayID {
+            didMoveAcrossDisplays = true
+        }
+        lastDisplayID = displayID
+    }
+
+    mutating func reset() {
+        initialDisplayID = nil
+        lastDisplayID = nil
+        didMoveAcrossDisplays = false
+    }
+
+    func relationship(
+        to currentDisplayID: CGDirectDisplayID?,
+        connectedDisplayIDs: Set<CGDirectDisplayID>
+    ) -> PanelPresentationDisplayRelationship {
+        guard let initialDisplayID,
+              let currentDisplayID,
+              connectedDisplayIDs.contains(initialDisplayID),
+              connectedDisplayIDs.contains(currentDisplayID) else {
+            return .unknown
+        }
+
+        guard !didMoveAcrossDisplays, initialDisplayID == currentDisplayID else {
+            return .crossDisplay
+        }
+        return .sameDisplay
+    }
+}
+
+enum PanelDismissFocusDecisionReason: String, Equatable {
+    case sessionLocked
+    case floatTabsNotFrontmost
+    case sameDisplay
+    case previousApplicationUnavailable
+    case pinnedCrossDisplay
+    case pinnedDisplayUnknown
+    case unpinnedCrossDisplay
+    case unpinnedDisplayUnknown
+}
+
+struct PanelDismissFocusDecision: Equatable {
+    let shouldDeactivateApplication: Bool
+    let shouldActivatePreviousApplication: Bool
+    let reason: PanelDismissFocusDecisionReason
+
+    static func resolve(
+        isPinned: Bool,
+        floatTabsOwnsForeground: Bool,
+        displayRelationship: PanelPresentationDisplayRelationship,
+        previousApplicationAvailable: Bool,
+        isSessionLocked: Bool = false
+    ) -> PanelDismissFocusDecision {
+        if isSessionLocked {
+            return PanelDismissFocusDecision(
+                shouldDeactivateApplication: false,
+                shouldActivatePreviousApplication: false,
+                reason: .sessionLocked
+            )
+        }
+
+        guard floatTabsOwnsForeground else {
+            return PanelDismissFocusDecision(
+                shouldDeactivateApplication: false,
+                shouldActivatePreviousApplication: false,
+                reason: .floatTabsNotFrontmost
+            )
+        }
+
+        let shouldActivatePreviousApplication =
+            displayRelationship == .sameDisplay && previousApplicationAvailable
+        let shouldDeactivateApplication =
+            !isPinned || displayRelationship == .sameDisplay
+        let reason: PanelDismissFocusDecisionReason
+        switch displayRelationship {
+        case .sameDisplay:
+            reason = previousApplicationAvailable ? .sameDisplay : .previousApplicationUnavailable
+        case .crossDisplay:
+            reason = isPinned ? .pinnedCrossDisplay : .unpinnedCrossDisplay
+        case .unknown:
+            reason = isPinned ? .pinnedDisplayUnknown : .unpinnedDisplayUnknown
+        }
+
+        return PanelDismissFocusDecision(
+            shouldDeactivateApplication: shouldDeactivateApplication,
+            shouldActivatePreviousApplication: shouldActivatePreviousApplication,
+            reason: reason
+        )
+    }
+}
+
 struct FullscreenVisibilityIntent {
     private(set) var shouldRestoreNormalPresentation = false
 
@@ -145,8 +256,16 @@ enum PresentationNativeFocusPolicy {
 
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
+    private enum ScreenPlacementReason: Equatable {
+        case explicitSummon
+        case fullscreenCompanion
+    }
+
     private struct PreviousApplicationContext {
         let application: NSRunningApplication
+        /// Preserved for diagnostic compatibility only. `NSScreen.main` is
+        /// not authoritative for an external application's display and this
+        /// value must not drive positioning or focus restoration.
         let displayID: CGDirectDisplayID?
         /// Diagnostics-only observation. This value never participates in
         /// restore, focus, ordering, or any other business decision.
@@ -239,6 +358,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     )
 
     private var previousApplicationContext: PreviousApplicationContext?
+    private var presentationDisplayMovement = PanelPresentationDisplayMovement()
+    private var hideObservationTrace: RuntimeDiagnosticTrace?
+    private var hideObservationGeneration: UInt64 = 0
+    private var hideObservationSpaceChangeCount = 0
     private var restoreObservationTracker = RuntimeDiagnosticRestoreObservationTracker()
     private var pendingRestoreObservation: PendingRestoreObservation?
     private var restoredFrame: NSRect?
@@ -315,6 +438,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
     private var debugInteractionSurfaceFactOverrides: [UUID: Bool] = [:]
+    var debugTargetVisibleFrameOverride: NSRect?
 #endif
 
     var isVisible: Bool {
@@ -357,10 +481,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Present the shell and make its Web surface interactive. This is the
-    /// global-hotkey path: invoking a summon shortcut while the shell is
-    /// already visible must restore focus, not interpret the shortcut as a
-    /// request to hide the shell.
+    /// Present the shell and make its Web surface interactive. If the shell
+    /// is already visible, this explicit presentation path restores focus.
     func presentFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
         presentFloatTabs(
             trace: trace,
@@ -545,23 +667,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             subsystem: "panel",
             trace: trace
         )
-        if Self.shouldHideForGlobalShortcut(
-            shellIsVisible: panel.isVisible,
-            shellIsKey: panel.isKeyWindow,
-            sourceIsKey: sourceHostController.window.isKeyWindow
-        ) {
+        if Self.shouldHideForGlobalShortcut(shellIsVisible: panel.isVisible) {
             hideFloatTabs(trace: trace, dismissSource: .hotkey)
         } else {
             presentFloatTabs(trace: trace)
         }
     }
 
-    static func shouldHideForGlobalShortcut(
-        shellIsVisible: Bool,
-        shellIsKey: Bool,
-        sourceIsKey: Bool
-    ) -> Bool {
-        shellIsVisible && (shellIsKey || sourceIsKey)
+    static func shouldHideForGlobalShortcut(shellIsVisible: Bool) -> Bool {
+        shellIsVisible
     }
 
     var onPanelBecameHidden: (() -> Void)?
@@ -1320,6 +1434,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         webFocusOwner: PresentationWebFocusOwner
     ) {
         let trace = trace ?? diagnostics.beginTrace(root: "panel.summon")
+        presentationDisplayMovement.reset()
         invalidatePendingRestoreObservationForNewPresentation()
         var presentationFields = runtimeDiagnosticSnapshot().fields
         presentationFields["requested_before"] = .bool(requestedVisibility)
@@ -1349,7 +1464,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         capturePreviousApplication(trace: trace)
-        positionPanelForCurrentScreens(trace: trace)
+        positionPanelForCurrentScreens(
+            trace: trace,
+            reason: .explicitSummon
+        )
         synchronizeFixedViewportAfterPositioning()
         synchronizeSourceHostFrame(display: false)
         slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
@@ -1357,6 +1475,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.orderFrontRegardless()
         activateFloatTabs(trace: trace)
         panel.makeKeyAndOrderFront(nil)
+        presentationDisplayMovement.begin(
+            on: ScreenPositioning.displayID(forWindowFrame: panel.frame)
+        )
         recordRestoringSurfaceWindowVisibilityIfNeeded()
         beginPresentationFocusHandshake(
             trace: trace,
@@ -1382,6 +1503,134 @@ final class PanelController: NSObject, NSWindowDelegate {
     ) {
         let trace = trace ?? diagnostics.beginTrace(root: "panel.dismiss")
         let wasVisible = requestedVisibility
+        let isPinnedBeforeHide = isPinned
+        let applicationActiveBeforeHide = NSApp.isActive
+        let frontmostApplicationBeforeHide = NSWorkspace.shared.frontmostApplication
+        let frontmostProcessIdentifierBeforeHide =
+            frontmostApplicationBeforeHide?.processIdentifier
+        let ownProcessIdentifier = ProcessInfo.processInfo.processIdentifier
+        let shellKeyBeforeHide = panel.isKeyWindow
+        let sourceKeyBeforeHide = sourceHostController.window.isKeyWindow
+        let previousApplication = previousApplicationContext
+        let previousApplicationAvailable = previousApplication.map {
+            !$0.application.isTerminated
+                && $0.application.processIdentifier != ownProcessIdentifier
+        } ?? false
+        let connectedDisplayFrames = ScreenPositioning.connectedDisplayFrames()
+        let connectedDisplayIDs = Set(connectedDisplayFrames.map { $0.displayID })
+        let currentShellDisplayID = ScreenPositioning.displayID(
+            forWindowFrame: panel.frame,
+            displayFrames: connectedDisplayFrames
+        )
+        let initialShellDisplayID = presentationDisplayMovement.initialDisplayID
+        let displayRelationship = presentationDisplayMovement.relationship(
+            to: currentShellDisplayID,
+            connectedDisplayIDs: connectedDisplayIDs
+        )
+        let floatTabsOwnsForeground = applicationActiveBeforeHide
+            && frontmostProcessIdentifierBeforeHide == ownProcessIdentifier
+        let sessionLockedBeforeHide = sourceHostController.isSessionLocked
+        let focusDecision = PanelDismissFocusDecision.resolve(
+            isPinned: isPinnedBeforeHide,
+            floatTabsOwnsForeground: floatTabsOwnsForeground,
+            displayRelationship: displayRelationship,
+            previousApplicationAvailable: previousApplicationAvailable,
+            isSessionLocked: sessionLockedBeforeHide
+        )
+        hideObservationGeneration &+= 1
+        let observationGeneration = hideObservationGeneration
+        hideObservationTrace = trace
+        hideObservationSpaceChangeCount = 0
+        defer { presentationDisplayMovement.reset() }
+
+        var hideBeginFields = panelHideObservationFields()
+        hideBeginFields["application_active_before_hide"] = .bool(applicationActiveBeforeHide)
+        hideBeginFields["frontmost_process_identifier_before_hide"] =
+            frontmostProcessIdentifierBeforeHide.map { .integer(Int64($0)) } ?? .null
+        hideBeginFields["float_tabs_frontmost_before_hide"] = .bool(
+            frontmostProcessIdentifierBeforeHide == ownProcessIdentifier
+        )
+        hideBeginFields["float_tabs_owns_foreground_before_hide"] = .bool(
+            floatTabsOwnsForeground
+        )
+        hideBeginFields["shell_key_before_hide"] = .bool(shellKeyBeforeHide)
+        hideBeginFields["source_key_before_hide"] = .bool(sourceKeyBeforeHide)
+        hideBeginFields["pinned_before_hide"] = .bool(isPinnedBeforeHide)
+        hideBeginFields["initial_shell_display_id"] =
+            initialShellDisplayID.map { .integer(Int64($0)) } ?? .null
+        hideBeginFields["current_shell_display_id"] =
+            currentShellDisplayID.map { .integer(Int64($0)) } ?? .null
+        hideBeginFields["display_relationship"] = .string(displayRelationship.rawValue)
+        hideBeginFields["explicit_cross_display_move"] = .bool(
+            presentationDisplayMovement.didMoveAcrossDisplays
+        )
+        hideBeginFields["previous_application_available"] = .bool(
+            previousApplicationAvailable
+        )
+        if let frontmostApplicationBeforeHide,
+           let bundleIdentifier = RuntimeDiagnosticPrivacy.safeBundleIdentifier(
+               frontmostApplicationBeforeHide.bundleIdentifier
+           ) {
+            hideBeginFields["frontmost_application_bundle_id_before_hide"] = bundleIdentifier
+        }
+        diagnostics.record(
+            event: "panel.hide.begin",
+            level: .notice,
+            subsystem: "panel",
+            trace: trace,
+            fields: hideBeginFields
+        )
+
+        diagnostics.record(
+            event: "panel.hide.focus.decision",
+            level: .info,
+            subsystem: "panel",
+            trace: trace,
+            fields: [
+                "reason": .string(focusDecision.reason.rawValue),
+                "pinned": .bool(isPinnedBeforeHide),
+                "application_active": .bool(applicationActiveBeforeHide),
+                "frontmost_process_identifier":
+                    frontmostProcessIdentifierBeforeHide.map { .integer(Int64($0)) } ?? .null,
+                "float_tabs_owns_foreground": .bool(floatTabsOwnsForeground),
+                "display_relationship": .string(displayRelationship.rawValue),
+                "initial_shell_display_id":
+                    initialShellDisplayID.map { .integer(Int64($0)) } ?? .null,
+                "current_shell_display_id":
+                    currentShellDisplayID.map { .integer(Int64($0)) } ?? .null,
+                "explicit_cross_display_move": .bool(
+                    presentationDisplayMovement.didMoveAcrossDisplays
+                ),
+                "previous_application_available": .bool(previousApplicationAvailable),
+                "allow_application_deactivation": .bool(
+                    focusDecision.shouldDeactivateApplication
+                ),
+                "allow_previous_application_activation": .bool(
+                    focusDecision.shouldActivatePreviousApplication
+                )
+            ]
+        )
+        diagnostics.record(
+            event: "panel.dismiss.focus-release.decision",
+            level: .info,
+            subsystem: "panel",
+            trace: trace,
+            fields: [
+                "pinned": .bool(isPinnedBeforeHide),
+                "panel_moved_across_displays": .bool(
+                    presentationDisplayMovement.didMoveAcrossDisplays
+                ),
+                "application_deactivation_requested": .bool(
+                    focusDecision.shouldDeactivateApplication
+                ),
+                "previous_application_activation_allowed": .bool(
+                    focusDecision.shouldActivatePreviousApplication
+                ),
+                "reason": .string(focusDecision.reason.rawValue),
+                "shell_key_before_hide": .bool(shellKeyBeforeHide),
+                "source_key_before_hide": .bool(sourceKeyBeforeHide)
+            ]
+        )
         finishPendingRestoreObservationAsSuperseded()
         recordDismissBegin(
             trace: trace,
@@ -1402,9 +1651,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 ]
             )
         }
-        let currentPresentationDisplayID = ScreenPositioning.displayID(
-            for: sourceHostController.window.screen ?? panel.screen
-        )
         fullscreenExperimentLog(
             "HIDE_REQUEST requestedBefore=\(wasVisible) "
                 + "session=\(sourceHostController.sessionState.rawValue) "
@@ -1426,25 +1672,52 @@ final class PanelController: NSObject, NSWindowDelegate {
         addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
+        recordHideObservation(
+            event: "panel.hide.shell.orderOut.completed",
+            trace: trace
+        )
 
-        guard !sourceHostController.isSessionLocked else {
+        guard !sessionLockedBeforeHide else {
             fullscreenVisibilityIntent.dismissPresentation()
             tearDownFullscreenCompanion(
                 pauseInactiveMedia: true,
                 hidePanel: true
             )
-            recordDismissCompleted(
+            recordHideObservation(
+                event: "panel.hide.source.orderOut.completed",
+                trace: trace,
+                fields: ["source_order_out_path": .string("fullscreen_guard")]
+            )
+            completeHideObservation(
                 trace: trace,
                 wasVisible: wasVisible,
-                source: dismissSource
+                source: dismissSource,
+                generation: observationGeneration
             )
             return
         }
 
         sourceHostController.orderOutIfSafe()
+        recordHideObservation(
+            event: "panel.hide.source.orderOut.completed",
+            trace: trace
+        )
         slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
 
-        guard let previousApplicationContext else {
+        if focusDecision.shouldDeactivateApplication {
+            NSApp.deactivate()
+        } else {
+            diagnostics.record(
+                event: "app.deactivation.skipped",
+                level: .notice,
+                subsystem: "app",
+                trace: trace,
+                fields: ["reason": .string(focusDecision.reason.rawValue)]
+            )
+        }
+
+        previousApplicationContext = nil
+        guard let previousApplication else {
             diagnostics.record(
                 event: "previous_app.restore.decision",
                 level: .info,
@@ -1459,21 +1732,15 @@ final class PanelController: NSObject, NSWindowDelegate {
                 trace: trace,
                 fields: ["reason": .string("no_context")]
             )
-            NSApp.deactivate()
-            recordDismissCompleted(
+            completeHideObservation(
                 trace: trace,
                 wasVisible: wasVisible,
-                source: dismissSource
+                source: dismissSource,
+                generation: observationGeneration
             )
             return
         }
 
-        self.previousApplicationContext = nil
-        NSApp.deactivate()
-        let sameDisplay = ScreenPositioning.isSameKnownDisplay(
-            previousApplicationContext.displayID,
-            currentPresentationDisplayID
-        )
         diagnostics.record(
             event: "previous_app.restore.decision",
             level: .info,
@@ -1481,34 +1748,50 @@ final class PanelController: NSObject, NSWindowDelegate {
             trace: trace,
             fields: [
                 "has_context": .bool(true),
-                "same_display": .bool(sameDisplay)
+                "previous_application_available": .bool(previousApplicationAvailable),
+                "panel_moved_across_displays": .bool(
+                    presentationDisplayMovement.didMoveAcrossDisplays
+                ),
+                "display_relationship": .string(displayRelationship.rawValue),
+                "explicit_activation_allowed": .bool(
+                    focusDecision.shouldActivatePreviousApplication
+                )
             ]
         )
-        guard sameDisplay else {
+        guard focusDecision.shouldActivatePreviousApplication,
+              previousApplicationAvailable else {
+            let reason = !previousApplicationAvailable
+                ? "previous_application_unavailable"
+                : focusDecision.reason.rawValue
             diagnostics.record(
                 event: "previous_app.restore.skipped",
                 level: .notice,
                 subsystem: "panel",
                 trace: trace,
                 fields: [
-                    "reason": .string("cross_display"),
-                    "previous_display_id": .integer(Int64(previousApplicationContext.displayID ?? 0)),
-                    "current_display_id": .integer(Int64(currentPresentationDisplayID ?? 0))
+                    "reason": .string(reason),
+                    "previous_display_id": .integer(Int64(previousApplication.displayID ?? 0)),
+                    "current_display_id": currentShellDisplayID.map {
+                        .integer(Int64($0))
+                    } ?? .null
                 ]
             )
-            recordDismissCompleted(
+            completeHideObservation(
                 trace: trace,
                 wasVisible: wasVisible,
-                source: dismissSource
+                source: dismissSource,
+                generation: observationGeneration
             )
             return
         }
         var restoredFields: [String: RuntimeDiagnosticValue] = [
-            "previous_display_id": .integer(Int64(previousApplicationContext.displayID ?? 0)),
-            "current_display_id": .integer(Int64(currentPresentationDisplayID ?? 0))
+            "previous_display_id": .integer(Int64(previousApplication.displayID ?? 0)),
+            "current_display_id": currentShellDisplayID.map {
+                .integer(Int64($0))
+            } ?? .null
         ]
         if let bundleIdentifier = RuntimeDiagnosticPrivacy.safeBundleIdentifier(
-            previousApplicationContext.application.bundleIdentifier
+            previousApplication.application.bundleIdentifier
         ) {
             restoredFields["application_bundle_id"] = bundleIdentifier
         }
@@ -1524,12 +1807,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         let observationTicket = restoreObservationTracker.begin(trace: trace)
         pendingRestoreObservation = PendingRestoreObservation(
             ticket: observationTicket,
-            application: previousApplicationContext.application,
-            capturedWindowObservation: previousApplicationContext.windowObservation,
+            application: previousApplication.application,
+            capturedWindowObservation: previousApplication.windowObservation,
             requestedAtUptime: ProcessInfo.processInfo.systemUptime,
             requestAccepted: nil
         )
-        let activationAccepted = previousApplicationContext.application.activate(options: [])
+        let activationAccepted = previousApplication.application.activate(options: [])
         if var pendingRestoreObservation,
            pendingRestoreObservation.ticket == observationTicket {
             pendingRestoreObservation.requestAccepted = activationAccepted
@@ -1544,10 +1827,11 @@ final class PanelController: NSObject, NSWindowDelegate {
             fields: restoreRequestFields
         )
         scheduleRestoreObservation(observationTicket)
-        recordDismissCompleted(
+        completeHideObservation(
             trace: trace,
             wasVisible: wasVisible,
-            source: dismissSource
+            source: dismissSource,
+            generation: observationGeneration
         )
     }
 
@@ -1634,6 +1918,81 @@ final class PanelController: NSObject, NSWindowDelegate {
             trace: trace,
             fields: fields
         )
+    }
+
+    private func panelHideObservationFields() -> [String: RuntimeDiagnosticValue] {
+        let connectedDisplayFrames = ScreenPositioning.connectedDisplayFrames()
+        let connectedDisplayIDs = Set(connectedDisplayFrames.map { $0.displayID })
+        let shellDisplayID = ScreenPositioning.displayID(
+            forWindowFrame: panel.frame,
+            displayFrames: connectedDisplayFrames
+        )
+        let sourceDisplayID = ScreenPositioning.displayID(
+            forWindowFrame: sourceHostController.window.frame,
+            displayFrames: connectedDisplayFrames
+        )
+        let frontmostApplication = NSWorkspace.shared.frontmostApplication
+
+        return [
+            "application_active": .bool(NSApp.isActive),
+            "frontmost_process_identifier": frontmostApplication.map {
+                .integer(Int64($0.processIdentifier))
+            } ?? .null,
+            "shell_visible": .bool(panel.isVisible),
+            "source_visible": .bool(sourceHostController.window.isVisible),
+            "shell_key_window": .bool(panel.isKeyWindow),
+            "source_key_window": .bool(sourceHostController.window.isKeyWindow),
+            "shell_display_id": shellDisplayID.map { .integer(Int64($0)) } ?? .null,
+            "source_display_id": sourceDisplayID.map { .integer(Int64($0)) } ?? .null,
+            "shell_display_connected": .bool(
+                shellDisplayID.map { connectedDisplayIDs.contains($0) } ?? false
+            ),
+            "source_display_connected": .bool(
+                sourceDisplayID.map { connectedDisplayIDs.contains($0) } ?? false
+            ),
+            "pinned": .bool(isPinned),
+            "space_change_notification_count": .integer(
+                Int64(hideObservationSpaceChangeCount)
+            )
+        ]
+    }
+
+    private func recordHideObservation(
+        event: String,
+        trace: RuntimeDiagnosticTrace,
+        fields additionalFields: [String: RuntimeDiagnosticValue] = [:]
+    ) {
+        var fields = panelHideObservationFields()
+        fields.merge(additionalFields) { _, newer in newer }
+        diagnostics.record(
+            event: event,
+            level: .notice,
+            subsystem: "panel",
+            trace: trace,
+            fields: fields
+        )
+    }
+
+    private func completeHideObservation(
+        trace: RuntimeDiagnosticTrace,
+        wasVisible: Bool,
+        source: RuntimeDiagnosticDismissSource,
+        generation: UInt64
+    ) {
+        recordHideObservation(event: "panel.hide.completed", trace: trace)
+        recordDismissCompleted(trace: trace, wasVisible: wasVisible, source: source)
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.hideObservationGeneration == generation else {
+                return
+            }
+            self.recordHideObservation(
+                event: "panel.hide.next_main_turn",
+                trace: trace
+            )
+            self.hideObservationTrace = nil
+            self.hideObservationSpaceChangeCount = 0
+        }
     }
 
     func prepareForTermination(trace: RuntimeDiagnosticTrace? = nil) {
@@ -2367,6 +2726,15 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     @objc private func workspaceDidChangeActiveSpace(_ notification: Notification) {
+        if let hideObservationTrace {
+            hideObservationSpaceChangeCount += 1
+            recordHideObservation(
+                event: "panel.hide.space_change",
+                trace: hideObservationTrace,
+                fields: ["active_space_change_notification": .bool(true)]
+            )
+        }
+
         guard requestedVisibility,
               !sourceHostController.isSessionLocked else {
             return
@@ -2390,6 +2758,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         trace: RuntimeDiagnosticTrace? = nil,
         reason: String = "application_deactivated"
     ) {
+        defer { presentationDisplayMovement.reset() }
         let trace = trace ?? presentationTrace ?? diagnostics.beginTrace(root: "panel.dismiss")
         let wasVisible = requestedVisibility
         recordDismissBegin(
@@ -2589,6 +2958,10 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     var debugIsShowingRestoringState: Bool {
         rootView.webPanelContainerView.isShowingRestoringState
+    }
+
+    var debugPanelFrame: NSRect {
+        panel.frame
     }
 
     var debugPresentedWebView: WKWebView? {
@@ -4447,7 +4820,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func focusActiveWebViewIfAvailable(makeSourceWindowMain: Bool = false) {
-        guard !addressOverlayView.isPresented,
+        guard requestedVisibility,
+              !addressOverlayView.isPresented,
               let activeSlotID = tabStore.activeTabID,
               let webView = exactReadyWebView(for: activeSlotID) else { return }
         if sourceHostController.isSessionLocked {
@@ -5615,9 +5989,22 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
-    private func positionPanelForCurrentScreens(trace: RuntimeDiagnosticTrace? = nil) {
+    private func positionPanelForCurrentScreens(
+        trace: RuntimeDiagnosticTrace? = nil,
+        reason: ScreenPlacementReason
+    ) {
         let screens = NSScreen.screens
         guard let targetScreen = ScreenPositioning.targetScreen(screens: screens) else { return }
+        let targetVisibleFrame: NSRect
+#if DEBUG
+        if reason == .explicitSummon, let debugTargetVisibleFrameOverride {
+            targetVisibleFrame = debugTargetVisibleFrameOverride
+        } else {
+            targetVisibleFrame = targetScreen.visibleFrame
+        }
+#else
+        targetVisibleFrame = targetScreen.visibleFrame
+#endif
 
         var targetFields: [String: RuntimeDiagnosticValue] = [
             "screen_count": .integer(Int64(screens.count)),
@@ -5638,22 +6025,24 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         let targetFrame: NSRect
 
-        if hasPositionedPanel {
-            targetFrame = ScreenPositioning.relocatedFrame(
-                frameWithPreferredSize(panel.frame),
-                visibleFrames: [targetScreen.visibleFrame],
-                fallbackVisibleFrame: targetScreen.visibleFrame
-            )
-        } else if let restoredFrame {
-            targetFrame = ScreenPositioning.relocatedFrame(
-                frameWithPreferredSize(restoredFrame),
-                visibleFrames: screens.map(\.visibleFrame),
-                fallbackVisibleFrame: targetScreen.visibleFrame
-            )
+        if let startingFrame = hasPositionedPanel ? panel.frame : restoredFrame {
+            let frame = frameWithPreferredSize(startingFrame)
+            if reason == .explicitSummon {
+                targetFrame = ScreenPositioning.frameForExplicitSummon(
+                    frame,
+                    on: targetVisibleFrame
+                )
+            } else {
+                targetFrame = ScreenPositioning.relocatedFrame(
+                    frame,
+                    visibleFrames: screens.map(\.visibleFrame),
+                    fallbackVisibleFrame: targetVisibleFrame
+                )
+            }
         } else {
             targetFrame = ScreenPositioning.centeredFrame(
                 size: PanelMetrics.defaultPanelSize,
-                in: targetScreen.visibleFrame
+                in: targetVisibleFrame
             )
         }
 
@@ -5731,6 +6120,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
+        if requestedVisibility {
+            presentationDisplayMovement.observe(
+                displayID: ScreenPositioning.displayID(forWindowFrame: panel.frame)
+            )
+        }
         synchronizeSourceHostFrame(display: false)
     }
 
@@ -5896,7 +6290,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.removeFullscreenCompanionContainer(
             sourceHostController.companionContainer
         )
-        positionPanelForCurrentScreens()
+        positionPanelForCurrentScreens(reason: .fullscreenCompanion)
         panel.setFullscreenCompanionPresentation(true)
         rootView.companionRailFoldControlView.isHidden = false
         synchronizeFullscreenCompanionSlotState()

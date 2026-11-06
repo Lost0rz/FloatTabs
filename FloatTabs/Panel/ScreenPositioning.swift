@@ -176,6 +176,47 @@ enum ScreenPositioning {
         return CGDirectDisplayID(number.uint32Value)
     }
 
+    static func connectedDisplayFrames(
+        screens: [NSScreen] = NSScreen.screens
+    ) -> [(displayID: CGDirectDisplayID, frame: NSRect)] {
+        screens.compactMap { screen in
+            guard let displayID = displayID(for: screen) else { return nil }
+            return (displayID: displayID, frame: screen.frame)
+        }
+    }
+
+    static func displayID(
+        forWindowFrame frame: NSRect,
+        screens: [NSScreen] = NSScreen.screens
+    ) -> CGDirectDisplayID? {
+        displayID(
+            forWindowFrame: frame,
+            displayFrames: connectedDisplayFrames(screens: screens)
+        )
+    }
+
+    static func displayID(
+        forWindowFrame frame: NSRect,
+        displayFrames: [(displayID: CGDirectDisplayID, frame: NSRect)]
+    ) -> CGDirectDisplayID? {
+        var bestDisplayID: CGDirectDisplayID?
+        var bestArea: CGFloat = 0
+        var bestAreaIsAmbiguous = false
+
+        for display in displayFrames {
+            let area = intersectionArea(frame, display.frame)
+            if area > bestArea {
+                bestArea = area
+                bestDisplayID = display.displayID
+                bestAreaIsAmbiguous = false
+            } else if area > 0, area == bestArea {
+                bestAreaIsAmbiguous = true
+            }
+        }
+
+        return bestAreaIsAmbiguous ? nil : bestDisplayID
+    }
+
     static func isSameKnownDisplay(
         _ lhs: CGDirectDisplayID?,
         _ rhs: CGDirectDisplayID?
@@ -189,9 +230,20 @@ enum ScreenPositioning {
         screens: [NSScreen] = NSScreen.screens,
         fallback: NSScreen? = NSScreen.main
     ) -> NSScreen? {
-        screens.first(where: { $0.frame.contains(mouseLocation) })
-            ?? fallback
-            ?? screens.first
+        if let index = targetScreenIndex(
+            mouseLocation: mouseLocation,
+            screenFrames: screens.map(\.frame)
+        ) {
+            return screens[index]
+        }
+        return fallback ?? screens.first
+    }
+
+    static func targetScreenIndex(
+        mouseLocation: NSPoint,
+        screenFrames: [NSRect]
+    ) -> Int? {
+        screenFrames.firstIndex(where: { $0.contains(mouseLocation) })
     }
 
     static func centeredFrame(size: NSSize, in visibleFrame: NSRect) -> NSRect {
@@ -274,6 +326,20 @@ enum ScreenPositioning {
         }
 
         return result
+    }
+
+    /// Places an explicitly summoned Panel on the display selected for that
+    /// presentation, while preserving its saved size and position when it is
+    /// already on the selected display.
+    static func frameForExplicitSummon(
+        _ frame: NSRect,
+        on targetVisibleFrame: NSRect
+    ) -> NSRect {
+        relocatedFrame(
+            frame,
+            visibleFrames: [targetVisibleFrame],
+            fallbackVisibleFrame: targetVisibleFrame
+        )
     }
 
     /// When follow-preferred-size is enabled, Slot switching changes only the

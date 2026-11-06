@@ -2,15 +2,11 @@ name: QA DMG
 
 on:
   workflow_dispatch:
-  # QA DMG builds run only at final-gate moments. pull_request path filters
-  # evaluate the accumulated three-dot PR diff, so a `synchronize` trigger
-  # here would rebuild the DMG for every draft iteration and every
-  # control-only commit on a PR that already contains product changes,
-  # spending GitHub-hosted macOS minutes on builds nobody asked for.
   pull_request:
     branches:
       - main
     types:
+      - opened
       - ready_for_review
     paths:
       - 'FloatTabs/**'
@@ -20,6 +16,7 @@ on:
 
 jobs:
   build-dmg:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
