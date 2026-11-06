@@ -66,7 +66,7 @@ private struct RuntimePressurePolicy {
 
 @MainActor
 final class SlotLifecycleCoordinator {
-    nonisolated static let defaultRecentStageDuration: TimeInterval = 30
+    nonisolated static let defaultRecentStageDuration: TimeInterval = 120
     nonisolated static let defaultLongIdleThreshold: TimeInterval = 600
     nonisolated static let defaultHiddenActiveGraceDelay: TimeInterval = 0
     nonisolated static let defaultMediaProtectionPollDelay: TimeInterval = 10
@@ -99,6 +99,17 @@ final class SlotLifecycleCoordinator {
         let attention: Bool
     }
 
+    private enum ObservedMemoryPressureLevel: String {
+        case normal
+        case warning
+        case critical
+    }
+
+    private struct MemoryPressureObservation {
+        let level: ObservedMemoryPressureLevel
+        let observedAtUptime: TimeInterval
+    }
+
     private let webViewPool: WebViewPool
     private unowned let container: WebPanelContainerView
     private let recentStageDuration: TimeInterval
@@ -128,6 +139,9 @@ final class SlotLifecycleCoordinator {
     private let pressureStepDelay: TimeInterval
     /// Latest observed system memory-pressure level; `nil` means normal.
     private var latestMemoryPressureLevel: SlotMemoryPressureLevel?
+    /// Last explicit system pressure callback, kept separately from policy's
+    /// `nil means normal` state so diagnostics can distinguish unobserved.
+    private var latestMemoryPressureObservation: MemoryPressureObservation?
     /// Pending progressive pressure-reclaim continuation. At most one is
     /// ever scheduled; it is cancelled when pressure returns to normal.
     private var pressureReclaimWorkItem: DispatchWorkItem?
@@ -388,11 +402,16 @@ final class SlotLifecycleCoordinator {
     }
 
     func handleMemoryPressure(_ level: SlotMemoryPressureLevel) {
+        let observedAtUptime = monotonicUptime()
+        latestMemoryPressureObservation = MemoryPressureObservation(
+            level: level == .critical ? .critical : .warning,
+            observedAtUptime: observedAtUptime
+        )
         let incidentContext = RuntimeDiagnosticIncidentContext(
             id: UUID(),
             kind: .memoryPressure,
             trigger: level == .critical ? "critical" : "warning",
-            startedAtUptime: monotonicUptime()
+            startedAtUptime: observedAtUptime
         )
         let previousLevel = latestMemoryPressureLevel
         latestMemoryPressureLevel = level
@@ -448,6 +467,10 @@ final class SlotLifecycleCoordinator {
     /// continuation. Reclaimed Runtime is not restored; future restore stays
     /// demand-driven by existing Slot selection/materialization.
     func handleMemoryPressureNormalized() {
+        latestMemoryPressureObservation = MemoryPressureObservation(
+            level: .normal,
+            observedAtUptime: monotonicUptime()
+        )
         latestMemoryPressureLevel = nil
         let hadPendingContinuation = pressureReclaimWorkItem != nil
             || pressureReclaimEvaluationToken != nil
@@ -483,6 +506,10 @@ final class SlotLifecycleCoordinator {
     func diagnosticSnapshotFields(for slotID: UUID) -> [String: RuntimeDiagnosticValue] {
         let plan = inactivePlans[slotID]
         let protection = protectionState(slotID: slotID)
+        let pressureObservation = latestMemoryPressureObservation
+        let pressureObservationAge = pressureObservation.map {
+            max(monotonicUptime() - $0.observedAtUptime, 0)
+        }
         return [
             "lifecycle_slot_active": .bool(activeSlotID == slotID),
             "lifecycle_pending_release": .bool(plan != nil),
@@ -494,7 +521,16 @@ final class SlotLifecycleCoordinator {
             "lifecycle_attention_protected": .bool(protection.attention),
             "lifecycle_automatic_stage": .string(
                 plan?.stage?.rawValue ?? "none"
-            )
+            ),
+            "lifecycle_memory_pressure_observation": .string(
+                pressureObservation?.level.rawValue ?? "unobserved"
+            ),
+            "lifecycle_memory_pressure_observation_uptime": pressureObservation.map {
+                .double($0.observedAtUptime)
+            } ?? .null,
+            "lifecycle_memory_pressure_observation_age_seconds": pressureObservationAge.map {
+                .double($0)
+            } ?? .null
         ]
     }
 
