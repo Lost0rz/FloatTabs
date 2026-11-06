@@ -4,13 +4,13 @@ Read `../README.md` first. This directory contains a mixture of accepted feature
 
 ## Current-use rule
 
-No file in this directory is global task Authority. `CURRENT_TASK.md` controls execution. Current production source/tests control implementation truth. Newer cross-cutting architecture/design contracts override older feature-contract statements where scopes overlap.
+No file in this directory is global task authority. The effective `main` `AGENTS.md` selects either historical FILE_CONTROL (`CURRENT_TASK.md`) or ISSUE_CONTROL (one selected exact-approved GitHub Issue/revision); an unmerged migration branch does not change the mode. Current production source/tests control implementation truth. Newer cross-cutting architecture/design contracts override older feature-contract statements where scopes overlap.
 
 ## Bounded accepted feature references
 
 These remain useful for their feature-specific concepts, but are subordinate to current source/tests and newer cross-cutting contracts:
 
-- `FloatTabs_Browser_Profiles_Contract_V1.md` — persistent Profile/data isolation concepts. Old Hot/Warm/Cold lifecycle wording is historical and does not govern the active Runtime Lifecycle program.
+- `FloatTabs_Browser_Profiles_Contract_V1.md` — persistent Profile/data isolation concepts. Old Hot/Warm/Cold lifecycle wording is historical and does not govern the then-active Runtime Lifecycle program.
 - `FloatTabs_Runtime_Diagnostics_Contract_V1.md` — Diagnostics evidence-plane/privacy/ownership concepts. Historical incident/task details are not current authorization.
 - `FloatTabs_ChatGPT_Attention_Contract_V1.md` plus Attention amendments — historical/accepted Attention evolution. Current Attention/Unread semantics come from production source/tests; lifecycle residency/protection changes follow the active Runtime Lifecycle contract and phase gates.
 - Menu Bar Attention/Favicon contracts — bounded feature references; current design/source wins on conflict.
@@ -32,4 +32,4 @@ Browser Profile persistence is independent from live Runtime lifetime. When an o
 
 ## Attention / lifecycle overlap
 
-Older Attention contracts may say `Ready` is runtime-only or that `Ready` must always protect a live WKWebView. Preserve that as historical behavior/contract context. Do not use it to override the current program's phased plan, current source/tests, or future accepted Phase 2 changes.
+Older Attention contracts may say `Ready` is runtime-only or that `Ready` must always protect a live WKWebView. Preserve that as historical behavior/contract context. Do not use it to override an accepted current program's explicitly authorized phased plan, current source/tests, or future accepted Phase 2 changes.

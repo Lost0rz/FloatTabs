@@ -1,7 +1,5 @@
 # FloatTabs Performance Document Status
 
-Performance documents in this directory are historical benchmark protocols/results unless the current task explicitly adopts them.
+Performance documents are historic measurements/protocols unless a mode-selected authorized task explicitly adopts their bounded methods. `FloatTabs_Stage_5_Resource_Benchmark.md` was written for the former Hot/Warm/Cold model; its targets are **not** present lifecycle acceptance gates.
 
-`FloatTabs_Stage_5_Resource_Benchmark.md` is tied to the historical Hot/Warm/Cold Stage 5 model. It remains useful for prior measurements and benchmark methodology, but its policy assumptions and timing targets do **not** govern the active Runtime Lifecycle / Memory program.
-
-For current lifecycle/memory work, use `CURRENT_TASK.md` and `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`. New memory/release benchmarks must be defined and accepted by the current Phase gate before they become evidence for implementation decisions.
+For current work read [documentation routing](../README.md), [architecture contract index](../architecture/README.md), the selected execution authority and current source/tests. The Phase 8 [measurement feasibility report](../architecture/FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md) shows that ordinary public APIs do not deterministically attribute all WebContent/GPU footprints to the host: do not turn Runtime count into an exact GiB budget. Any new benchmarking target requires accepted scope and fresh evidence; older V1 memory plans cannot silently authorize it.
