@@ -4,10 +4,10 @@ Verified date: 2026-11-06
 Repository: Lost0rz/FloatTabs
 Control mode: FILE_CONTROL
 Current authorized task: FT-CI-TRIGGER-BOUNDARY-001
-Current stage: IMPLEMENTED / STATIC VALIDATION PASS / DRAFT DELIVERY PENDING
+Current stage: DRAFT PR OPEN / TARGETED CONFIG VALIDATION FOLLOW-UP
 Branch: codex/ft-ci-trigger-boundary-001
 Base main: d64c9ec62660e9a855056c08e013a71a58db821b
-PR: not created yet; target is a separate Draft PR
+PR: #201 — OPEN / DRAFT; latest verified head `5547c2b71853ce51897b56fe23de100509b24d49`
 Release: NOT_AUTHORIZED
 
 ## Task authority and handoff
@@ -39,10 +39,11 @@ PR #195 retains all product source, product tests, its XCTest partition strategy
 ## Focused verification
 
 - actionlint v1.7.12 passed against both workflows; the official Darwin and Linux release archive checksums were verified, including the Linux digest pinned by the workflow.
-- 11 CI scope-classifier tests passed, covering control/status, AGENTS, ordinary documentation, Swift source, XCTest, workflow configuration, manual full dispatch, unknown paths, and mixed paths.
+- 15 classifier and workflow-contract tests passed before the follow-up edit, covering control/status, AGENTS, ordinary documentation, Swift source, XCTest, workflow configuration, manual full dispatch, unknown paths, mixed paths, required-check entrypoint, runner boundary, and QA DMG draft behavior. One contract test was added for the narrowed actionlint file list and is pending rerun.
 - Python syntax compilation and `git diff --check` passed.
 - Required context and strict protection were re-read live; the required job name remains `Build & Test (Apple Silicon arm64)`.
-- No GitHub Actions run has been triggered for this task yet. Product XCTest has not been run locally.
+- PR-open macOS CI run `42134839759`: Scope Gate passed with `workflow-config`; product tests were skipped. Workflow validation failed because actionlint included the unrelated existing `publish-release.yml` shellcheck warning (`SC2129`). The required aggregator reported config failure; QA DMG run `42134839703` skipped its build job for this Draft PR. No Apple Silicon runner or product XCTest was used.
+- Follow-up narrows actionlint to the two workflows owned by this task; one corrective PR run is pending. Product XCTest has not been run locally.
 
 ## Current execution
 

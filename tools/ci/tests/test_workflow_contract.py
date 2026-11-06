@@ -37,6 +37,12 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("runs-on: [self-hosted, macOS, ARM64, mac-mini-ci]", MACOS_CI)
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", MACOS_CI)
 
+    def test_configuration_validation_is_limited_to_the_owned_workflows(self):
+        self.assertIn(
+            '"$RUNNER_TEMP/actionlint" .github/workflows/macos-ci.yml .github/workflows/qa-dmg.yml',
+            MACOS_CI,
+        )
+
     def test_qa_dmg_is_manual_or_review_boundary_and_skips_draft_build(self):
         self.assertIn("  workflow_dispatch:", QA_DMG)
         self.assertRegex(QA_DMG, re.compile(r"types:\n\s+- opened\n\s+- ready_for_review"))

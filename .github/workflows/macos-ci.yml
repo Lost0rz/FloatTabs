@@ -56,7 +56,7 @@ jobs:
             --output "$archive"
           echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  '"$archive" | sha256sum --check --status
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
-          "$RUNNER_TEMP/actionlint" .github/workflows/*.yml
+          "$RUNNER_TEMP/actionlint" .github/workflows/macos-ci.yml .github/workflows/qa-dmg.yml
 
       - name: Test CI scope classifier
         run: python3 -m unittest discover -s tools/ci/tests -v

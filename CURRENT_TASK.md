@@ -2,11 +2,11 @@
 
 **TASK_ID:** FT-CI-TRIGGER-BOUNDARY-001
 **TASK_CLASS:** CORRECTIVE
-**STATE:** VALIDATION_PASS / DRAFT_DELIVERY_PENDING
+**STATE:** TARGETED_VALIDATION_FOLLOW_UP
 **CONTROL_MODE:** FILE_CONTROL
 **BRANCH:** `codex/ft-ci-trigger-boundary-001`
 **BASE:** `main` at `d64c9ec62660e9a855056c08e013a71a58db821b`
-**PR:** independent Draft PR to be created after focused validation
+**PR:** #201 — open Draft PR for independent audit
 
 ## Authorization
 
@@ -41,7 +41,7 @@ Do not change product source, XCTest assertions, PR #195's test partition strate
 
 ## Verification and delivery
 
-Focused static workflow validation and the local scope-classifier matrix passed on 2026-11-06: actionlint v1.7.12, Python syntax compilation, and 11 classifier tests. Required-check name and branch protection were read live; no GitHub Actions run for this task has been triggered yet. Cover control/status-only, `AGENTS.md`, ordinary docs, Swift product source, `FloatTabsTests/**`, workflow configuration, manual full dispatch, and required-context aggregation. Do not run the product XCTest suite locally or dispatch unnecessary full tests. Do not push a succession of commits to simulate every path case. Use at most one real Draft PR trigger for acceptance and report its actual job scope.
+Focused local checks passed on 2026-11-06, including actionlint v1.7.12, Python syntax compilation, and the scope/contract test matrix. The first real PR-open run passed scope classification and correctly skipped product tests, but exposed that actionlint scanned an unrelated existing workflow warning. The bounded follow-up now validates only the two workflows owned by this task. Required-check name and branch protection were read live. Do not run the product XCTest suite locally or dispatch unnecessary full tests; perform only the necessary correction run and final delivery-state verification, and report every actual Actions run and scope.
 
 Create one independent branch and one Draft PR, leave it unmerged, attach the PR to this task, and stop after exact-head delivery verification. Do not mark Ready, merge, release, or start another full-test loop. Keep prior WebKit test failure evidence separate from this governance/CI correction.
 
