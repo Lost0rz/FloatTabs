@@ -10,6 +10,7 @@ Do not expand governance, telemetry, or generic frameworks ahead of actual produ
 
 CONTROL_MODE: ISSUE_CONTROL
 ISSUE_APPROVERS: Lost0rz
+ISSUE_DELEGATED_APPROVAL: ENABLED
 
 The mode declared here is authoritative **only when this file is verified on `main`**. An unmerged branch, draft PR, installed plugin, GitHub Issue or CLI success does not switch the effective mode. The cutover transaction also retires root `CURRENT_TASK.md` and `CURRENT_STATUS.md`; the historical FILE_CONTROL versions remain in Git history.
 
@@ -23,7 +24,7 @@ Canonical owners by mode:
 | Documentation | `docs/README.md` and accepted contracts | Same |
 | Source navigation | `docs/architecture/DOMAIN_MAP.md` | Same |
 
-`ISSUE_APPROVERS` designates eligible GitHub actors; it is **not approval**. Each execution Issue must separately have an authentic `SPEC_APPROVAL_V1` comment from an authorized human approver matching repository, Issue number, `TASK_ID`, `SPEC_REVISION` and canonical `SPEC_SHA256`. An agent must not submit its own approval through a connected account or infer authorization from labels, Issue authorship or chat. Check the comment's verified author ID and revocations with the installed official helper. A successful structural digest without approval is non-executable.
+`ISSUE_APPROVERS` designates eligible GitHub actors; it is **not approval**. Each execution Issue must separately have an authenticated approval comment from an authorized actor matching repository, Issue number, `TASK_ID`, `SPEC_REVISION` and canonical `SPEC_SHA256`. The strict/direct path is `SPEC_APPROVAL_V1`, authored by the human approver; an agent must not submit or claim that direct approval through a connected account. Because this repository explicitly opts in with `ISSUE_DELEGATED_APPROVAL: ENABLED`, a separate `SPEC_DELEGATED_APPROVAL_V1` may qualify only after the user explicitly approves that exact live Issue revision and digest in the current ChatGPT conversation. The delegated record carries lower assurance (`ACCOUNT_PROXY_NO_INDEPENDENT_CHAT_PROOF`) and does not independently prove who made the chat decision. Delegated task approval does not authorize merge or release; those require separate applicable authorization and host gates. Generic or standing chat permission, labels, Issue authorship, and progress comments do not authorize execution. Check the comment's verified author identity, current digest, revision and revocations with the installed official helper. A successful structural digest without a qualifying approval is non-executable.
 
 Before state-changing work, resolve the **main-selected** mode, refresh task-relevant Git/PR/CI evidence, check workspace/writer ownership and the corresponding authorization owner. In FILE_CONTROL, read `CURRENT_TASK.md` and `CURRENT_STATUS.md`; in ISSUE_CONTROL, fetch the selected Issue and its exact approval via authenticated `gh`/connector, and do **not** treat legacy Task/Status files as current authority.
 
