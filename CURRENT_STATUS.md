@@ -1,32 +1,49 @@
 # FloatTabs Current Status
 
-**Verified date:** 2026-11-04  
-**Repository:** Lost0rz/FloatTabs  
-**Task:** FT-PANEL-CROSS-DISPLAY-001  
-**Stage:** HUMAN_ACCEPTED / PR_196_FINAL_MERGE_GATE  
-**Release:** No new release authorized.
+Verified date: 2026-11-06
+Repository: Lost0rz/FloatTabs
+Control mode: FILE_CONTROL
+Current authorized task: FT-CI-TRIGGER-BOUNDARY-001
+Current stage: IMPLEMENTED / STATIC VALIDATION PASS / DRAFT DELIVERY PENDING
+Branch: codex/ft-ci-trigger-boundary-001
+Base main: d64c9ec62660e9a855056c08e013a71a58db821b
+PR: not created yet; target is a separate Draft PR
+Release: NOT_AUTHORIZED
 
-## Human-accepted Panel / Focus correction
+## Task authority and handoff
 
-User explicitly accepted corrective 005 on 2026-11-04. This supersedes the earlier failed cross-display QA result and the prior pending-human-acceptance snapshots. The user did not provide a separate test-by-test matrix, so do not invent individual A/B/C observations.
+The user authorized this independent CI corrective and the bounded workflow-ownership transfer on 2026-11-06. This branch alone carries the new FILE_CONTROL Task and Status. The task does not use Issue #197 or PR #199 as authorization and does not modify PR #195, #199 or #200 branches/worktrees.
 
-The accepted work in PR #196 covers preserved Panel display placement, one-press global-hotkey visibility toggle, foreground-owned explicit focus release, previous-app restoration safeguards, and narrowly scoped hide-phase diagnostics. Product implementation commit: `a39b87a91be60f70c40cf8b600f5b3b7725f6568`.
+PR #195 retains all product source, product tests, its XCTest partition strategy, and local unique work. Its committed CI trigger/scheduling and QA DMG trigger behavior are transferred to this task for correction. The old branch and worktree remain preserved and read-only for the transferred workflow scope.
 
-Evidence for that implementation head:
-- macOS arm64 CI: **PASS**, https://github.com/Lost0rz/FloatTabs/actions/runs/41813678039 — 1,173 tests passed, 4 skipped, 0 failed, Debug/Release passed.
-- QA DMG workflow: **PASS**, https://github.com/Lost0rz/FloatTabs/actions/runs/41813678313.
-- Local focused corrective checks: 144/144 PASS, arm64 Debug/Release PASS.
-- Provenance-bound manual QA DMG: `~/Downloads/FloatTabs-Focus-Ownership-QA-20261104-1800/FloatTabs-0.5.8.dmg` (ad-hoc, not a public release).
-- `HUMAN_UI_ACCEPTANCE=PASS` (explicit user verdict).
-- `SYSTEM_CROSS_DISPLAY_FOCUS_ROOT_CAUSE=UNKNOWN`; accepted user-visible recovery is not a causal proof.
-- `NEW_PRODUCT_CORRECTIVE=NOT_AUTHORIZED`; further investigation requires a fresh observed incident.
+## Verified repository state
 
-## Final merge gate
+- main remains FILE_CONTROL at d64c9ec62660e9a855056c08e013a71a58db821b. Its control snapshot still describes merged PR #196 and is reconciled by this task branch only.
+- PR #195 is OPEN / DRAFT / CONFLICTING at a9f07ca02df10d2ea3d0292d1afa5669d115da42. Its local worktree is at d02b1a24718fe7aaa569dd7c49713bba4c39c1ac, seven commits behind the remote, with local unique changes preserved:
+  - modified FloatTabs.xcodeproj/project.pbxproj
+  - modified FloatTabsTests/WebFocusAdapterTests.swift
+  - modified FloatTabsTests/WebViewFactoryTests.swift
+  - modified FloatTabsTests/WebsiteLayoutGeometryRegressionTests.swift
+  - untracked FloatTabsTests/WebKitFixtureTeardown.swift
+- PR #199 is OPEN / DRAFT at b69c86c551fc5c7d3bb400c3bd2243678b1b5aae. It remains a separate migration proposal; it does not change main's FILE_CONTROL authority.
+- PR #200 is OPEN / DRAFT / MERGEABLE at fa518dbc2c11528bd34bbb9019d64c8f454136fa, with human two-display acceptance still pending.
+- Branch protection requires the strict GitHub Actions context Build & Test (Apple Silicon arm64), app ID 15368. No protection rule change is authorized.
 
-PR #196 remains the sole Panel-task delivery until merge; existing branch `codex/panel-cross-display-position-001`. A control-only follow-up may advance the branch without changing product implementation. Before merge, verify PR-ref / branch-ref alignment, actual final PR diff, mergeability, and required literal-HEAD CI/QA checks. Do not promote previously green implementation checks into newer host-identity PASS without verification.
+## CI evidence and boundaries
 
-PR #195 (`codex/adaptive-lifecycle-wp2-policy`) remains OPEN / DRAFT / UNMERGED at last verified `a9f07ca02df10d2ea3d0292d1afa5669d115da42`; its separate task, human acceptance, unique work, and lifecycle controls are not included in #196. This Panel closeout must not merge, abandon, or alter #195.
+- PR #199 received nine macOS CI runs. Each ran Debug, Release, native arm64 verification, and XCTest; each failed during XCTest. Preserve the WebKit failure evidence separately.
+- PR #200 received repeated QA DMG pull_request builds on successive heads, in addition to manual dispatch runs.
+- The current self-hosted product job uses [self-hosted, macOS, ARM64, mac-mini-ci]. Keep product code off that runner for fork PRs.
+- Workflow configuration validation may use a GitHub-hosted runner. A skipped product test must be reported as skipped, never as PRODUCT_TESTS_PASS.
 
-## After merge
+## Focused verification
 
-Close `FT-PANEL-CROSS-DISPLAY-001` in the main control plane after verifying `main` contains the merged implementation. No further Panel corrective or release is planned. Future intermittent anomalies should be evaluated through existing runtime logs with fresh evidence and a newly authorized task, not automatic speculative changes.
+- actionlint v1.7.12 passed against both workflows; the official Darwin and Linux release archive checksums were verified, including the Linux digest pinned by the workflow.
+- 11 CI scope-classifier tests passed, covering control/status, AGENTS, ordinary documentation, Swift source, XCTest, workflow configuration, manual full dispatch, unknown paths, and mixed paths.
+- Python syntax compilation and `git diff --check` passed.
+- Required context and strict protection were re-read live; the required job name remains `Build & Test (Apple Silicon arm64)`.
+- No GitHub Actions run has been triggered for this task yet. Product XCTest has not been run locally.
+
+## Current execution
+
+No product source or XCTest assertion changes are in scope. No existing PR/worktree is being edited. The independent worktree was created at the exact current main base and contains only this task's control, workflow, and CI classifier changes. The focused implementation changes will be grouped in one commit, pushed only to this task branch, and delivered in one Draft PR for independent web audit.
