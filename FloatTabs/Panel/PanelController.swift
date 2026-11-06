@@ -256,6 +256,11 @@ enum PresentationNativeFocusPolicy {
 
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
+    private enum ScreenPlacementReason: Equatable {
+        case explicitSummon
+        case fullscreenCompanion
+    }
+
     private struct PreviousApplicationContext {
         let application: NSRunningApplication
         /// Preserved for diagnostic compatibility only. `NSScreen.main` is
@@ -433,6 +438,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
     private var debugInteractionSurfaceFactOverrides: [UUID: Bool] = [:]
+    var debugTargetVisibleFrameOverride: NSRect?
 #endif
 
     var isVisible: Bool {
@@ -1458,7 +1464,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         capturePreviousApplication(trace: trace)
-        positionPanelForCurrentScreens(trace: trace)
+        positionPanelForCurrentScreens(
+            trace: trace,
+            reason: .explicitSummon
+        )
         synchronizeFixedViewportAfterPositioning()
         synchronizeSourceHostFrame(display: false)
         slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
@@ -2949,6 +2958,10 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     var debugIsShowingRestoringState: Bool {
         rootView.webPanelContainerView.isShowingRestoringState
+    }
+
+    var debugPanelFrame: NSRect {
+        panel.frame
     }
 
     var debugPresentedWebView: WKWebView? {
@@ -5976,9 +5989,22 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
-    private func positionPanelForCurrentScreens(trace: RuntimeDiagnosticTrace? = nil) {
+    private func positionPanelForCurrentScreens(
+        trace: RuntimeDiagnosticTrace? = nil,
+        reason: ScreenPlacementReason
+    ) {
         let screens = NSScreen.screens
         guard let targetScreen = ScreenPositioning.targetScreen(screens: screens) else { return }
+        let targetVisibleFrame: NSRect
+#if DEBUG
+        if reason == .explicitSummon, let debugTargetVisibleFrameOverride {
+            targetVisibleFrame = debugTargetVisibleFrameOverride
+        } else {
+            targetVisibleFrame = targetScreen.visibleFrame
+        }
+#else
+        targetVisibleFrame = targetScreen.visibleFrame
+#endif
 
         var targetFields: [String: RuntimeDiagnosticValue] = [
             "screen_count": .integer(Int64(screens.count)),
@@ -5999,22 +6025,24 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         let targetFrame: NSRect
 
-        if hasPositionedPanel {
-            targetFrame = ScreenPositioning.relocatedFrame(
-                frameWithPreferredSize(panel.frame),
-                visibleFrames: screens.map(\.visibleFrame),
-                fallbackVisibleFrame: targetScreen.visibleFrame
-            )
-        } else if let restoredFrame {
-            targetFrame = ScreenPositioning.relocatedFrame(
-                frameWithPreferredSize(restoredFrame),
-                visibleFrames: screens.map(\.visibleFrame),
-                fallbackVisibleFrame: targetScreen.visibleFrame
-            )
+        if let startingFrame = hasPositionedPanel ? panel.frame : restoredFrame {
+            let frame = frameWithPreferredSize(startingFrame)
+            if reason == .explicitSummon {
+                targetFrame = ScreenPositioning.frameForExplicitSummon(
+                    frame,
+                    on: targetVisibleFrame
+                )
+            } else {
+                targetFrame = ScreenPositioning.relocatedFrame(
+                    frame,
+                    visibleFrames: screens.map(\.visibleFrame),
+                    fallbackVisibleFrame: targetVisibleFrame
+                )
+            }
         } else {
             targetFrame = ScreenPositioning.centeredFrame(
                 size: PanelMetrics.defaultPanelSize,
-                in: targetScreen.visibleFrame
+                in: targetVisibleFrame
             )
         }
 
@@ -6262,7 +6290,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.removeFullscreenCompanionContainer(
             sourceHostController.companionContainer
         )
-        positionPanelForCurrentScreens()
+        positionPanelForCurrentScreens(reason: .fullscreenCompanion)
         panel.setFullscreenCompanionPresentation(true)
         rootView.companionRailFoldControlView.isHidden = false
         synchronizeFullscreenCompanionSlotState()

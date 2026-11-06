@@ -2386,7 +2386,9 @@ final class ExternalShellTests: XCTestCase {
 
     private func makePhase6Harness(
         slotName: String,
-        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
+        frameStore: PanelFrameStore = PanelFrameStore(),
+        preferencesStore: AppPreferencesStore = AppPreferencesStore()
     ) throws -> (store: TabStore, pool: WebViewPool, controller: PanelController, profile: WebAppProfile) {
         let store = TabStore(repository: MemoryProfileRepository())
         let profile = try XCTUnwrap(
@@ -2401,8 +2403,8 @@ final class ExternalShellTests: XCTestCase {
             tabStore: store,
             webViewPool: pool,
             attentionCoordinator: WebAttentionCoordinator(),
-            frameStore: PanelFrameStore(),
-            preferencesStore: AppPreferencesStore(),
+            frameStore: frameStore,
+            preferencesStore: preferencesStore,
             diagnostics: diagnostics
         )
         return (store, pool, controller, profile)
@@ -2879,6 +2881,123 @@ final class ExternalShellTests: XCTestCase {
             pool.existingWebView(for: profile.id),
             "a stale materialization turn must not run after dismissal"
         )
+    }
+
+    func testExplicitSummonMovesRestoredPanelFromAToBThroughController() throws {
+        let displayB = NSRect(x: 1440, y: 0, width: 1920, height: 1080)
+        let restoredFrameOnA = NSRect(x: 200, y: 28, width: 688, height: 844)
+        let frameKey = "FloatTabs.test.panelFrame.\(UUID().uuidString)"
+        let suiteName = "FloatTabsTests.CrossDisplaySummon.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(NSStringFromRect(restoredFrameOnA), forKey: frameKey)
+
+        let (_, _, controller, _) = try makePhase6Harness(
+            slotName: "SummonRestoredAToB",
+            frameStore: PanelFrameStore(defaults: defaults, key: frameKey),
+            preferencesStore: AppPreferencesStore(defaults: defaults)
+        )
+        controller.debugTargetVisibleFrameOverride = displayB
+
+        controller.showFloatTabs()
+
+        let summonedFrame = controller.debugPanelFrame
+        XCTAssertTrue(
+            summonedFrame.intersects(displayB),
+            "restored A → B summon must follow the selected display"
+        )
+        XCTAssertEqual(
+            summonedFrame,
+            NSRect(
+                x: displayB.minX,
+                y: restoredFrameOnA.minY,
+                width: restoredFrameOnA.width,
+                height: restoredFrameOnA.height
+            )
+        )
+        XCTAssertEqual(summonedFrame.size, restoredFrameOnA.size)
+
+        controller.hideFloatTabs()
+    }
+
+    func testExplicitSummonMovesRestoredPanelFromBToAThroughController() throws {
+        let displayA = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let restoredFrameOnB = NSRect(x: 1700, y: 100, width: 688, height: 844)
+        let frameKey = "FloatTabs.test.panelFrame.\(UUID().uuidString)"
+        let suiteName = "FloatTabsTests.CrossDisplaySummon.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(NSStringFromRect(restoredFrameOnB), forKey: frameKey)
+
+        let (_, _, controller, _) = try makePhase6Harness(
+            slotName: "SummonRestoredBToA",
+            frameStore: PanelFrameStore(defaults: defaults, key: frameKey),
+            preferencesStore: AppPreferencesStore(defaults: defaults)
+        )
+        controller.debugTargetVisibleFrameOverride = displayA
+
+        controller.showFloatTabs()
+
+        let summonedFrame = controller.debugPanelFrame
+        XCTAssertTrue(
+            summonedFrame.intersects(displayA),
+            "restored B → A summon must follow the selected display"
+        )
+        XCTAssertEqual(
+            summonedFrame,
+            NSRect(
+                x: displayA.maxX - restoredFrameOnB.width,
+                y: displayA.maxY - restoredFrameOnB.height,
+                width: restoredFrameOnB.width,
+                height: restoredFrameOnB.height
+            )
+        )
+        XCTAssertEqual(summonedFrame.size, restoredFrameOnB.size)
+
+        controller.hideFloatTabs()
+    }
+
+    func testExplicitSummonKeepsPositionOnSameDisplayAndMovesPositionedPanelToB() throws {
+        let displayA = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let displayB = NSRect(x: 1440, y: 0, width: 1920, height: 1080)
+        let frameKey = "FloatTabs.test.panelFrame.\(UUID().uuidString)"
+        let suiteName = "FloatTabsTests.CrossDisplaySummon.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let (_, _, controller, _) = try makePhase6Harness(
+            slotName: "SummonPositionedAToB",
+            frameStore: PanelFrameStore(defaults: defaults, key: frameKey),
+            preferencesStore: AppPreferencesStore(defaults: defaults)
+        )
+        controller.debugTargetVisibleFrameOverride = displayA
+
+        controller.showFloatTabs()
+        let positionedFrameOnA = controller.debugPanelFrame
+        XCTAssertTrue(positionedFrameOnA.intersects(displayA))
+
+        controller.hideFloatTabs()
+        controller.debugTargetVisibleFrameOverride = displayA
+        controller.showFloatTabs()
+
+        XCTAssertEqual(
+            controller.debugPanelFrame,
+            positionedFrameOnA,
+            "same-display summon must preserve the current frame"
+        )
+
+        controller.hideFloatTabs()
+        controller.debugTargetVisibleFrameOverride = displayB
+        controller.showFloatTabs()
+
+        let summonedFrameOnB = controller.debugPanelFrame
+        XCTAssertTrue(
+            summonedFrameOnB.intersects(displayB),
+            "positioned A → B summon must follow the selected display"
+        )
+        XCTAssertEqual(summonedFrameOnB.size, positionedFrameOnA.size)
+
+        controller.hideFloatTabs()
     }
 }
 
