@@ -31,7 +31,7 @@ Chat history, Memory, handoff cards, audit replies, historical reports, old PRs,
 
 **Migration provenance:** [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197) and [carry-forward #198](https://github.com/Lost0rz/FloatTabs/issues/198) contain digest-bound approvals; [PR #199](https://github.com/Lost0rz/FloatTabs/pull/199) is the control-mode transition carrier. Actual cutover requires verified merge into `main`, approved Issue identities, host checks and safe preservation of independent product work. Never overwrite PR #195's local unique files or infer human product acceptance from Issue approval.
 
-When consulting repository documentation beyond the three control files, read `docs/README.md` before relying on old architecture/product/design/validation/plan files. A historical document does not regain current Authority because its body says `FROZEN`, `LOCKED`, `canonical`, `accepted`, `implemented`, `current`, or `CONSTRUCTION_GATE_READY`.
+When consulting repository documentation beyond the mode-selected authority sources, read `docs/README.md` before relying on old architecture/product/design/validation/plan files. A historical document does not regain current Authority because its body says `FROZEN`, `LOCKED`, `canonical`, `accepted`, `implemented`, `current`, or `CONSTRUCTION_GATE_READY`.
 
 If the user says “continue” and the active task is still accurate, continue it. Do not generate a second execution contract.
 
@@ -44,7 +44,7 @@ Distinguish:
 - **Repository HEAD** — literal current commit;
 - **Delivery / Semantic HEAD** — implementation identity being verified.
 
-A commit changing only `CURRENT_STATUS.md` / `CURRENT_TASK.md` is `CONTROL_ONLY_DRIFT`. It does not by itself invalidate product implementation evidence or require a new task/PR/test cycle.
+Under historical FILE_CONTROL, a commit changing only `CURRENT_STATUS.md` / `CURRENT_TASK.md` is `CONTROL_ONLY_DRIFT`; it does not invalidate unchanged product implementation evidence. In ISSUE_CONTROL, progress belongs in the approved Issue's receipt comments, not recreated root control files.
 
 Do not treat every historical recorded SHA as a permanent equality lock. Fresh Git/GitHub refs are authoritative for current branch/PR identity.
 
