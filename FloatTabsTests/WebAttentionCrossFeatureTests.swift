@@ -1838,7 +1838,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         // The compressed-delay lifecycle reads the real attention authority.
         let lifecycle = makeCompressedLifecycle(
             pool: pool,
-            warmReleaseDelay: 0.05,
+            longIdleThreshold: 0.05,
             attentionCoordinator: coordinator
         )
 
@@ -1847,12 +1847,17 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         makeInactive(lifecycle, profile: chat)
         makeInactive(lifecycle, profile: ordinaryA)
         makeInactive(lifecycle, profile: ordinaryB)
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 2)
-        XCTAssertEqual([ordinaryA, ordinaryB].filter { pool.contains(slotID: $0.id) }.count, 1)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
+        XCTAssertEqual([ordinaryA, ordinaryB].filter { pool.contains(slotID: $0.id) }.count, 2)
         XCTAssertTrue(pool.contains(slotID: chat.id))
 
-        // Warning target is one Automatic runtime; generating protection wins.
+        // Warning reclaims eligible Automatic Runtime progressively;
+        // generation protection keeps ChatWarm resident.
         lifecycle.handleMemoryPressure(.warning)
+        let ordinaryReclaimed = try await waitUntil {
+            !pool.contains(slotID: ordinaryA.id) && !pool.contains(slotID: ordinaryB.id)
+        }
+        XCTAssertTrue(ordinaryReclaimed)
         XCTAssertFalse(pool.contains(slotID: ordinaryA.id))
         XCTAssertFalse(pool.contains(slotID: ordinaryB.id))
         XCTAssertTrue(pool.contains(slotID: chat.id))
@@ -1866,9 +1871,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: chat.id))
         XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
 
-        // Same-deadline differential: OrdinaryC goes inactive NOW, so its
-        // 50ms release is the semantic event proving the boundary time has
-        // passed for the earlier-scheduled protected plan too. The
+        // OrdinaryC reaches the configured long-idle threshold while the
+        // protected ChatWarm Runtime remains resident. The
         // Generating runtime must still hold its plan and stay resident.
         let ordinaryC = try materializeRuntime(
             pool: pool, store: store, slotName: "OrdinaryC"
@@ -1904,7 +1908,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.4 Ready + memory pressure
 
-    func testReadyAutomaticCanBeReclaimedWhileUnreadSurvivesMemoryPressure() throws {
+    func testReadyAutomaticCanBeReclaimedWhileUnreadSurvivesMemoryPressure() async throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatReady", url: "https://chatgpt.com/chat-ready"),
@@ -1931,7 +1935,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         let lifecycle = makeCompressedLifecycle(
             pool: pool,
-            warmReleaseDelay: 60,
+            longIdleThreshold: 60,
             attentionCoordinator: coordinator
         )
 
@@ -1945,19 +1949,22 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         makeInactive(lifecycle, profile: ordinaryA)
         makeInactive(lifecycle, profile: ordinaryB)
-        XCTAssertEqual(pool.count, 2)
+        XCTAssertEqual(pool.count, 3)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: chat.id))
 
         lifecycle.handleMemoryPressure(.warning)
-        XCTAssertEqual(pool.count, 1)
+        XCTAssertEqual(pool.count, 2)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: chat.id))
 
         // Critical pressure evicts the Ready/unread runtime because Ready is
         // transient; the durable unread projection remains.
         lifecycle.handleMemoryPressure(.critical)
-        XCTAssertFalse(pool.contains(slotID: ordinaryA.id))
-        XCTAssertFalse(pool.contains(slotID: ordinaryB.id))
-        XCTAssertFalse(pool.contains(slotID: chat.id))
+        let fullyReclaimed = try await waitUntil {
+            !pool.contains(slotID: ordinaryA.id)
+                && !pool.contains(slotID: ordinaryB.id)
+                && !pool.contains(slotID: chat.id)
+        }
+        XCTAssertTrue(fullyReclaimed)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: chat.id))
         XCTAssertEqual(coordinator.state(for: chat.id), .idle)
         XCTAssertEqual(menuUnreadCounts.last, 1)
@@ -3498,7 +3505,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         var mediaPlaying = true
         let lifecycle = makeCompressedLifecycle(
             pool: pool,
-            warmReleaseDelay: 0.03,
+            longIdleThreshold: 0.03,
             attentionCoordinator: coordinator,
             mediaPlayingQuery: { _, completion in completion(mediaPlaying) },
             mediaProtectionPollDelay: 0.005
@@ -5486,10 +5493,11 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     private func makeCompressedLifecycle(
         pool: WebViewPool,
-        warmReleaseDelay: TimeInterval,
+        longIdleThreshold: TimeInterval,
         attentionCoordinator: WebAttentionCoordinator,
         mediaPlayingQuery: SlotLifecycleCoordinator.MediaPlayingQuery? = nil,
-        mediaProtectionPollDelay: TimeInterval = 0.01
+        mediaProtectionPollDelay: TimeInterval = 0.01,
+        pressureStepDelay: TimeInterval = 0.01
     ) -> SlotLifecycleCoordinator {
         let container = WebPanelContainerView(
             frame: NSRect(x: 0, y: 0, width: 430, height: 820)
@@ -5498,10 +5506,11 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         return SlotLifecycleCoordinator(
             webViewPool: pool,
             container: container,
-            coldReleaseDelay: 30,
-            warmReleaseDelay: warmReleaseDelay,
+            recentStageDuration: 0,
+            longIdleThreshold: longIdleThreshold,
             hiddenActiveGraceDelay: 120,
             mediaProtectionPollDelay: mediaProtectionPollDelay,
+            pressureStepDelay: pressureStepDelay,
             mediaPlayingQuery: mediaPlayingQuery,
             attentionProtectionQuery: { slotID in
                 attentionCoordinator.isAttentionProtected(slotID)

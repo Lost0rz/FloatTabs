@@ -7,6 +7,8 @@
 **Parent design authority:** `FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`  
 **Gate 0 evidence:** `FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`
 
+> **WP2 policy status (2026-11-02):** This delivered Phase 8 re-scope remains historical evidence for pressure/background-efficiency implementation and the aggregate-memory attribution boundary. Its preserved healthy-state fixed-count target and Keep Loaded critical-reclaim semantics are superseded for WP2 by [Runtime Lifecycle Policy V7](FloatTabs_Runtime_Lifecycle_Policy_V7.md). The original pre-WP2 body is preserved in the architecture archive.
+
 ## 1. Decision and purpose
 
 Phase 8 Gate 0 proved that FloatTabs cannot, with supported public production APIs, deterministically attribute the dominant WebContent/GPU helper processes to the host app. Therefore the aggregate-memory-budget track remains blocked.
