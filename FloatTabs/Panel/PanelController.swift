@@ -2988,6 +2988,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.webPanelContainerView.isShowingRestoringState
     }
 
+    var debugIsFullscreenCompanionShowingRestoringState: Bool {
+        sourceHostController.companionContainer.isShowingRestoringState
+    }
+
+    func debugSynchronizeFullscreenCompanionSlotState() {
+        synchronizeFullscreenCompanionSlotState()
+    }
+
     var debugIsShowingLoadFailure: Bool {
         rootView.webPanelContainerView.isShowingLoadFailure
     }
@@ -3502,6 +3510,31 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         if let pending = pendingRuntimeMaterialization,
            pending.slotID == activeProfile.id {
+            if (requestedVisibility || panel.isVisible),
+               webViewPool.requiresWebViewRebuild(for: activeProfile) {
+                // The selected Slot's rendering configuration may change
+                // after a pending Runtime was attached. Keep the existing
+                // Restoring transaction and replace only through the Pool's
+                // current compatibility decision before accepting readiness.
+                do {
+                    let webView = try webViewForPanelController(activeProfile)
+                    guard pendingRuntimeMaterialization?.generation == pending.generation,
+                          webViewPool.existingWebView(for: activeProfile.id) === webView else {
+                        return
+                    }
+                    attachDeferredRuntime(
+                        webView: webView,
+                        profile: activeProfile,
+                        request: pending
+                    )
+                } catch {
+                    finishPendingRuntimeMaterializationAsFailed(
+                        profile: activeProfile,
+                        error: error
+                    )
+                    return
+                }
+            }
             container(for: pending.surface).showRestoringState()
             webFocusRouter.setCurrentWebView(nil)
             if requestedVisibility || panel.isVisible {
@@ -4391,7 +4424,17 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
         }
 
+        let needsCompatibleRuntimeReplacement =
+            webViewPool.existingWebView(for: profile.id) != nil
+                && webViewPool.requiresWebViewRebuild(for: profile)
         beginDeferredRuntimeMaterialization(for: profile, surface: surface)
+        if needsCompatibleRuntimeReplacement {
+            // The explicit action owns this replacement. Let deferred
+            // materialization create one Runtime from the latest Slot config;
+            // do not first navigate the failed, incompatible WebView.
+            webFocusRouter.setCurrentWebView(nil)
+            return
+        }
         if webViewPool.existingWebView(for: profile.id) != nil,
            !webViewPool.retryNavigation(slotID: profile.id) {
             cancelPendingRuntimeMaterialization(reason: "explicit_retry_unavailable")
@@ -6637,6 +6680,18 @@ final class PanelController: NSObject, NSWindowDelegate {
             )
             companionActiveProfile = nil
             synchronizeResidentIndicators()
+            return
+        }
+
+        if runtimeReadinessState(for: activeProfile.id) == .ready,
+           webViewPool.requiresWebViewRebuild(for: activeProfile) {
+            // Pool replacement is synchronous. Establish the companion's
+            // native restoring owner and revoke Web focus before asking the
+            // Pool to materialize a Runtime for the latest rendering profile.
+            beginDeferredRuntimeMaterialization(
+                for: activeProfile,
+                surface: .fullscreenCompanion
+            )
             return
         }
 

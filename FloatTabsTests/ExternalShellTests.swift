@@ -2388,7 +2388,8 @@ final class ExternalShellTests: XCTestCase {
         slotName: String,
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         frameStore: PanelFrameStore = PanelFrameStore(),
-        preferencesStore: AppPreferencesStore = AppPreferencesStore()
+        preferencesStore: AppPreferencesStore = AppPreferencesStore(),
+        initialLoad: @escaping WebViewPool.LoadHandler = { _, _ in }
     ) throws -> (store: TabStore, pool: WebViewPool, controller: PanelController, profile: WebAppProfile) {
         let store = TabStore(repository: MemoryProfileRepository())
         let profile = try XCTUnwrap(
@@ -2396,7 +2397,7 @@ final class ExternalShellTests: XCTestCase {
         )
         let pool = WebViewPool(
             onURLChange: { _, _ in },
-            initialLoad: { _, _ in },
+            initialLoad: initialLoad,
             diagnostics: diagnostics
         )
         let controller = PanelController(
@@ -2697,6 +2698,248 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(store.profiles.first?.browserProfileID, originalBrowserProfileID)
         XCTAssertEqual(store.profiles.first?.homeURL, profile.homeURL)
         XCTAssertEqual(pool.count, 1)
+    }
+
+    func testPendingModeReplacementSupersedesRuntimeCreatedForObsoleteRendering() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var initialLoadURLs: [URL] = []
+        let (store, pool, controller, profile) = try makePhase6Harness(
+            slotName: "PendingModeSupersession",
+            diagnostics: diagnostics,
+            initialLoad: { _, request in
+                if let url = request.url {
+                    initialLoadURLs.append(url)
+                }
+            }
+        )
+        let originalWebView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        let originalIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+
+        func setWebsiteMode(_ mode: WebsiteMode) throws {
+            let current = try XCTUnwrap(store.profiles.first { $0.id == profile.id })
+            XCTAssertTrue(
+                store.updateRenderingProfile(
+                    id: profile.id,
+                    renderingProfile: current.renderingProfile.settingWebsiteMode(mode)
+                )
+            )
+        }
+
+        controller.handleSlotNavigationFinish(
+            slotID: profile.id,
+            runtimeIdentity: originalIdentity
+        )
+        controller.showFloatTabs()
+        XCTAssertTrue(controller.debugPresentedWebView === originalWebView)
+
+        try setWebsiteMode(.mobile)
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        drainMainThreadTurns()
+
+        let mobileWebView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        let mobileIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        XCTAssertFalse(mobileWebView === originalWebView)
+        XCTAssertNotEqual(mobileIdentity, originalIdentity)
+        XCTAssertFalse(pool.requiresWebViewRebuild(for: try XCTUnwrap(store.activeProfile)))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        let pendingMobileProfile = try XCTUnwrap(store.activeProfile)
+        XCTAssertTrue(
+            store.updateRenderingProfile(
+                id: profile.id,
+                renderingProfile: pendingMobileProfile.renderingProfile
+                    .settingZoom(1.25)
+                    .settingViewport(CGSize(width: 640, height: 900))
+            )
+        )
+        XCTAssertFalse(pool.requiresWebViewRebuild(for: try XCTUnwrap(store.activeProfile)))
+        XCTAssertTrue(pool.existingWebView(for: profile.id) === mobileWebView)
+        XCTAssertEqual(pool.runtimeDiagnosticIdentity(for: profile.id), mobileIdentity)
+        XCTAssertEqual(
+            initialLoadURLs.count,
+            2,
+            "compatible changes must not create another Runtime or navigation"
+        )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+
+        // The Mobile Runtime now exists under Restoring but has not finished.
+        // Returning the same Slot to Desktop must supersede this pending
+        // presentation before an old Mobile finish can reveal it.
+        try setWebsiteMode(.desktop)
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+        let desktopWebView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        let desktopIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        XCTAssertFalse(desktopWebView === mobileWebView)
+        XCTAssertNotEqual(desktopIdentity, mobileIdentity)
+        XCTAssertFalse(pool.requiresWebViewRebuild(for: try XCTUnwrap(store.activeProfile)))
+        XCTAssertTrue(controller.debugPresentedWebView === desktopWebView)
+        XCTAssertEqual(initialLoadURLs.count, 3)
+
+        controller.handleSlotNavigationFinish(
+            slotID: profile.id,
+            runtimeIdentity: mobileIdentity
+        )
+        XCTAssertTrue(
+            controller.debugIsShowingRestoringState,
+            "an obsolete Mobile Runtime finish must not reveal under the latest Desktop configuration"
+        )
+        XCTAssertTrue(controller.debugPresentedWebView === desktopWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+
+        drainMainThreadTurns()
+
+        XCTAssertTrue(pool.existingWebView(for: profile.id) === desktopWebView)
+        XCTAssertEqual(pool.runtimeDiagnosticIdentity(for: profile.id), desktopIdentity)
+        XCTAssertFalse(pool.requiresWebViewRebuild(for: try XCTUnwrap(store.activeProfile)))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === desktopWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+
+        controller.handleSlotNavigationFinish(
+            slotID: profile.id,
+            runtimeIdentity: desktopIdentity
+        )
+
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === desktopWebView)
+        XCTAssertTrue(controller.debugCurrentWebFocusWebView === desktopWebView)
+        XCTAssertEqual(store.activeProfile?.renderingProfile.websiteMode, .desktop)
+        XCTAssertEqual(store.activeProfile?.browserProfileID, profile.browserProfileID)
+        XCTAssertEqual(store.activeProfile?.homeURL, profile.homeURL)
+    }
+
+    func testFullscreenCompanionDefersIncompatibleReadyRuntimeUnderRestoring() throws {
+        let (store, pool, controller, profile) = try makePhase6Harness(
+            slotName: "FullscreenCompanionReplacement"
+        )
+        let originalWebView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        let originalIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        controller.handleSlotNavigationFinish(
+            slotID: profile.id,
+            runtimeIdentity: originalIdentity
+        )
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: profile.id), "ready")
+        controller.showFloatTabs()
+        XCTAssertTrue(controller.debugCurrentWebFocusWebView === originalWebView)
+
+        // Suppress the ordinary shell sync to exercise the fullscreen
+        // companion's own selected-Slot synchronization boundary.
+        store.onChange = nil
+        XCTAssertTrue(
+            store.updateRenderingProfile(
+                id: profile.id,
+                renderingProfile: profile.renderingProfile.settingWebsiteMode(.mobile)
+            )
+        )
+        XCTAssertTrue(pool.requiresWebViewRebuild(for: try XCTUnwrap(store.activeProfile)))
+
+        controller.debugSynchronizeFullscreenCompanionSlotState()
+
+        XCTAssertTrue(controller.debugIsFullscreenCompanionShowingRestoringState)
+        XCTAssertTrue(pool.existingWebView(for: profile.id) === originalWebView)
+        XCTAssertEqual(pool.runtimeDiagnosticIdentity(for: profile.id), originalIdentity)
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: profile.id), "ready")
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+        XCTAssertEqual(pool.count, 1)
+    }
+
+    func testExplicitRetryRebuildsFailedRuntimeForLatestWebsiteMode() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var initialLoadURLs: [URL] = []
+        let (store, pool, controller, profile) = try makePhase6Harness(
+            slotName: "RetryAfterModeChange",
+            diagnostics: diagnostics,
+            initialLoad: { _, request in
+                if let url = request.url {
+                    initialLoadURLs.append(url)
+                }
+            }
+        )
+
+        pool.hibernate(slotID: profile.id)
+        controller.showFloatTabs()
+        drainMainThreadTurns()
+
+        let failedWebView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        let failedIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        controller.handleSlotNavigationFinish(
+            slotID: profile.id,
+            runtimeIdentity: failedIdentity
+        )
+        controller.handleSlotNavigationStart(
+            slotID: profile.id,
+            runtimeIdentity: failedIdentity,
+            navigationGeneration: 1
+        )
+        controller.handleSlotNavigationFailure(
+            slotID: profile.id,
+            runtimeIdentity: failedIdentity,
+            navigationGeneration: 1
+        )
+        XCTAssertTrue(controller.debugIsShowingLoadFailure)
+
+        let originalCurrentURL = profile.currentURL
+        let originalHomeURL = profile.homeURL
+        let originalBrowserProfileID = profile.browserProfileID
+        let originalDataStore = failedWebView.configuration.websiteDataStore
+        let initialLoadCount = initialLoadURLs.count
+        let retryRequestCount = writer.events.filter {
+            $0.event == "web_runtime.retry.requested"
+        }.count
+
+        let current = try XCTUnwrap(store.activeProfile)
+        XCTAssertTrue(
+            store.updateRenderingProfile(
+                id: profile.id,
+                renderingProfile: current.renderingProfile.settingWebsiteMode(.mobile)
+            )
+        )
+        XCTAssertTrue(controller.debugIsShowingLoadFailure)
+        XCTAssertTrue(pool.requiresWebViewRebuild(for: try XCTUnwrap(store.activeProfile)))
+
+        // Retry is the only action that begins replacement. It must not send
+        // a retry navigation to the incompatible failed Desktop Runtime.
+        controller.debugTriggerLoadFailureRetry()
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertFalse(controller.debugIsShowingLoadFailure)
+        XCTAssertTrue(pool.existingWebView(for: profile.id) === failedWebView)
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "web_runtime.retry.requested" }.count,
+            retryRequestCount
+        )
+        XCTAssertEqual(initialLoadURLs.count, initialLoadCount)
+
+        drainMainThreadTurns()
+
+        let mobileWebView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        let mobileIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        XCTAssertFalse(mobileWebView === failedWebView)
+        XCTAssertNotEqual(mobileIdentity, failedIdentity)
+        XCTAssertFalse(pool.requiresWebViewRebuild(for: try XCTUnwrap(store.activeProfile)))
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === mobileWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+        XCTAssertEqual(initialLoadURLs.count, initialLoadCount + 1)
+        XCTAssertEqual(initialLoadURLs.last, originalCurrentURL ?? originalHomeURL)
+        XCTAssertTrue(mobileWebView.configuration.websiteDataStore === originalDataStore)
+        XCTAssertEqual(store.activeProfile?.currentURL, originalCurrentURL)
+        XCTAssertEqual(store.activeProfile?.homeURL, originalHomeURL)
+        XCTAssertEqual(store.activeProfile?.browserProfileID, originalBrowserProfileID)
+        XCTAssertEqual(pool.count, 1)
+
+        controller.handleSlotNavigationFinish(
+            slotID: profile.id,
+            runtimeIdentity: mobileIdentity
+        )
+
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertFalse(controller.debugIsShowingLoadFailure)
+        XCTAssertTrue(controller.debugPresentedWebView === mobileWebView)
+        XCTAssertTrue(controller.debugCurrentWebFocusWebView === mobileWebView)
     }
 
     func testPanelReadinessIgnoresSupersededNavigationGenerations() throws {

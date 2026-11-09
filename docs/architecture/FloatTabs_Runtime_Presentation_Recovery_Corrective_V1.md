@@ -31,6 +31,8 @@ Unsupported Browser Profile remains its own presentation and is not converted to
 
 For a visible selected Slot, Panel queries the Pool-owned compatibility decision before a synchronous replacement. If rebuilding is required, Panel starts its existing deferred materialization transaction, shows Restoring, and clears old Web focus first. The Pool then replaces the runtime using the same comparison. Panel attaches the new exact WebView beneath Restoring and reveals it only after the current runtime and navigation are Ready. Compatible resident reuse, including Zoom and Viewport updates, remains on the fast path.
 
+The fullscreen companion uses that same Pool decision. A ready but incompatible companion Runtime first enters deferred materialization on the companion surface, so native Restoring owns presentation and Web focus is cleared before Pool replacement.
+
 ### Navigation generations
 
 Each current provisional navigation start updates the corresponding Runtime’s readiness to Loading with its generation. A finish or failure can update readiness only when both runtime identity and navigation generation still match. Superseded callbacks, including an old cancelled navigation, cannot complete or fail a newer request. A current genuine failure clears Web focus and resolves to Failure when that Runtime owns the visible presentation; a later explicit navigation may move the same Runtime through Loading to Ready.
@@ -45,7 +47,7 @@ The Pool preserves its accepted active/inactive `recoveryDisposition`. Before an
 
 ## Regression boundaries
 
-- Visible Desktop↔Mobile and Browser Profile replacement: Restoring precedes Pool replacement; the new runtime reveals without a tab round-trip.
+- Visible Desktop↔Mobile and Browser Profile replacement, including the fullscreen companion: Restoring precedes Pool replacement; the new runtime reveals without a tab round-trip.
 - Compatible Zoom/Viewport changes and ready resident reuse do not rebuild.
 - Rapid same-Slot toggles, A→B→A, hidden/visible surfaces, fullscreen companion, stale WebView identities, and old navigation callbacks cannot reveal or focus stale content.
 - Current navigation failure produces native Failure; explicit Retry preserves the safe URL, Browser Profile, runtime data store, and Slot configuration; repeated failure does not loop.
