@@ -996,6 +996,7 @@ final class WebPanelContainerView: NSView {
     var isShowingUnsupportedBrowserProfile: Bool {
         currentContentView === unsupportedBrowserProfileView
             && !unsupportedBrowserProfileView.isHidden
+            && !isShowingRestoringState
     }
 
     var isShowingLoadFailure: Bool {
