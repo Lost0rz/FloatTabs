@@ -418,7 +418,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
     private struct RuntimeReadinessRecord {
         let identity: WebRuntimeDiagnosticIdentity
-        let state: RuntimeReadinessState
+        var state: RuntimeReadinessState
+        var navigationGeneration: UInt64?
     }
     private struct PendingColdUnreadAcknowledgement {
         let slotID: UUID
@@ -1279,6 +1280,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         sourceHostController.onSourceRebuildRequired = { [weak self] in
             self?.rebuildFullscreenSourceAfterRestoreTimeout()
         }
+        rootView.webPanelContainerView.onRetryRequested = { [weak self] in
+            self?.retryFailedSelectedSlot(in: .standard)
+        }
+        sourceHostController.companionContainer.onRetryRequested = { [weak self] in
+            self?.retryFailedSelectedSlot(in: .fullscreenCompanion)
+        }
 
         rootView.webPanelContainerView.layer?.borderWidth = 0
         rootView.webPanelContainerView.layer?.shadowOpacity = 0
@@ -1365,11 +1372,32 @@ final class PanelController: NSObject, NSWindowDelegate {
         webViewPool.onCommittedURLChange = { [weak self] slotID, url in
             self?.handleCommittedURLChange(slotID: slotID, url: url)
         }
-        webViewPool.onSlotNavigationFinish = { [weak self] slotID, identity in
-            self?.handleSlotNavigationFinish(slotID: slotID, runtimeIdentity: identity)
+        webViewPool.onSlotNavigationStart = { [weak self] slotID, identity, navigationGeneration in
+            self?.handleSlotNavigationStart(
+                slotID: slotID,
+                runtimeIdentity: identity,
+                navigationGeneration: navigationGeneration
+            )
         }
-        webViewPool.onSlotNavigationFailure = { [weak self] slotID, identity in
-            self?.handleSlotNavigationFailure(slotID: slotID, runtimeIdentity: identity)
+        webViewPool.onSlotNavigationFinish = { [weak self] slotID, identity, navigationGeneration in
+            self?.handleSlotNavigationFinish(
+                slotID: slotID,
+                runtimeIdentity: identity,
+                navigationGeneration: navigationGeneration
+            )
+        }
+        webViewPool.onSlotNavigationFailure = { [weak self] slotID, identity, navigationGeneration in
+            self?.handleSlotNavigationFailure(
+                slotID: slotID,
+                runtimeIdentity: identity,
+                navigationGeneration: navigationGeneration
+            )
+        }
+        webViewPool.onRuntimeRecoveryStart = { [weak self] slotID, identity in
+            self?.handleRuntimeRecoveryStart(slotID: slotID, runtimeIdentity: identity)
+        }
+        webViewPool.onRuntimeRecoveryUnavailable = { [weak self] slotID, identity in
+            self?.handleRuntimeRecoveryUnavailable(slotID: slotID, runtimeIdentity: identity)
         }
         tabStore.onChange = { [weak self] in
             guard let self, !self.suppressTabStoreSynchronization else { return }
@@ -2960,6 +2988,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.webPanelContainerView.isShowingRestoringState
     }
 
+    var debugIsShowingLoadFailure: Bool {
+        rootView.webPanelContainerView.isShowingLoadFailure
+    }
+
+    func debugTriggerLoadFailureRetry() {
+        rootView.webPanelContainerView.debugTriggerLoadFailureRetry()
+    }
+
     var debugPanelFrame: NSRect {
         panel.frame
     }
@@ -3477,7 +3513,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         if runtimeReadinessState(for: activeProfile.id) == .failed {
             slotLifecycleCoordinator.activate(profile: activeProfile)
             webFocusRouter.setCurrentWebView(nil)
-            rootView.webPanelContainerView.showEmptyState()
+            rootView.webPanelContainerView.showLoadFailure(
+                retryEnabled: canRetrySelectedSlot(activeProfile)
+            )
             lastSynchronizedActiveID = activeProfile.id
             lastSynchronizedActiveProfile = activeProfile
             onSelectedSlotPresentationChange?(
@@ -3499,7 +3537,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             if requestedVisibility || panel.isVisible {
                 beginDeferredRuntimeMaterialization(for: activeProfile)
             } else {
-                rootView.webPanelContainerView.showEmptyState()
+                rootView.webPanelContainerView.showRestoringState()
                 webFocusRouter.setCurrentWebView(nil)
                 slotLifecycleCoordinator.activate(profile: activeProfile)
                 lastSynchronizedActiveID = activeProfile.id
@@ -3509,6 +3547,15 @@ final class PanelController: NSObject, NSWindowDelegate {
                     faviconURL(for: activeProfile)
                 )
             }
+            return
+        }
+
+        if (requestedVisibility || panel.isVisible),
+           webViewPool.requiresWebViewRebuild(for: activeProfile) {
+            // Website Mode / Browser Profile replacement is synchronous inside
+            // WebViewPool. Establish the selected Slot's native restore owner
+            // and revoke old Web focus before allowing that replacement.
+            beginDeferredRuntimeMaterialization(for: activeProfile)
             return
         }
 
@@ -3527,22 +3574,28 @@ final class PanelController: NSObject, NSWindowDelegate {
                     defaultProfileName: tabStore.defaultBrowserProfilePresentation.name
                 )
             } else {
-                rootView.webPanelContainerView.showEmptyState()
+                rootView.webPanelContainerView.showLoadFailure(
+                    retryEnabled: canRetrySelectedSlot(activeProfile)
+                )
             }
             synchronizeResidentIndicators()
             return
         }
         guard runtimeReadinessState(for: activeProfile.id) == .ready else {
-            rootView.webPanelContainerView.showEmptyState()
-            webFocusRouter.setCurrentWebView(nil)
-            slotLifecycleCoordinator.activate(profile: activeProfile)
-            lastSynchronizedActiveID = activeProfile.id
-            lastSynchronizedActiveProfile = activeProfile
-            onSelectedSlotPresentationChange?(
-                activeProfile.name,
-                faviconURL(for: activeProfile)
-            )
-            synchronizeResidentIndicators()
+            if requestedVisibility || panel.isVisible {
+                beginDeferredRuntimeMaterialization(for: activeProfile)
+            } else {
+                rootView.webPanelContainerView.showRestoringState()
+                webFocusRouter.setCurrentWebView(nil)
+                slotLifecycleCoordinator.activate(profile: activeProfile)
+                lastSynchronizedActiveID = activeProfile.id
+                lastSynchronizedActiveProfile = activeProfile
+                onSelectedSlotPresentationChange?(
+                    activeProfile.name,
+                    faviconURL(for: activeProfile)
+                )
+                synchronizeResidentIndicators()
+            }
             return
         }
         if pendingRuntimeMaterialization?.slotID == activeProfile.id {
@@ -3553,6 +3606,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             slotID: activeProfile.id,
             residencyPolicy: activeProfile.residencyPolicy
         )
+        rootView.webPanelContainerView.hideRestoringState()
         webFocusRouter.setCurrentWebView(webView)
         slotLifecycleCoordinator.activate(profile: activeProfile)
         WebViewFactory.configureHiddenScrollers(in: webView)
@@ -3639,7 +3693,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         if previousIdentity != currentIdentity {
             runtimeReadinessBySlot[profile.id] = RuntimeReadinessRecord(
                 identity: currentIdentity,
-                state: .loading
+                state: .loading,
+                navigationGeneration: nil
             )
         } else if runtimeReadinessBySlot[profile.id]?.identity != currentIdentity {
             // An already resident Runtime without controller-owned provenance
@@ -3964,7 +4019,9 @@ final class PanelController: NSObject, NSWindowDelegate {
                 defaultProfileName: tabStore.defaultBrowserProfilePresentation.name
             )
         } else {
-            presentationContainer.showEmptyState()
+            presentationContainer.showLoadFailure(
+                retryEnabled: canRetrySelectedSlot(profile)
+            )
         }
         diagnostics.record(
             event: "panel.materialization.failed",
@@ -3981,14 +4038,156 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
-    func handleSlotNavigationFinish(slotID: UUID, runtimeIdentity: WebRuntimeDiagnosticIdentity) {
-        guard webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
+    func handleSlotNavigationStart(
+        slotID: UUID,
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        navigationGeneration: UInt64
+    ) {
+        guard navigationGeneration > 0,
+              webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
               webViewPool.existingWebView(for: slotID) != nil else {
+            return
+        }
+        if let existing = runtimeReadinessBySlot[slotID],
+           existing.identity == runtimeIdentity,
+           let currentGeneration = existing.navigationGeneration,
+           navigationGeneration <= currentGeneration {
             return
         }
         runtimeReadinessBySlot[slotID] = RuntimeReadinessRecord(
             identity: runtimeIdentity,
-            state: .ready
+            state: .loading,
+            navigationGeneration: navigationGeneration
+        )
+        guard tabStore.activeTabID == slotID,
+              requestedVisibility || panel.isVisible,
+              let profile = tabStore.profiles.first(where: { $0.id == slotID }) else {
+            return
+        }
+        let surface: RuntimePresentationSurface?
+        if sourceHostController.isSessionLocked,
+           sourceHostController.companionContainer.isShowingLoadFailure {
+            surface = .fullscreenCompanion
+        } else if !sourceHostController.isSessionLocked,
+                  rootView.webPanelContainerView.isShowingLoadFailure {
+            surface = .standard
+        } else {
+            surface = nil
+        }
+        if let surface {
+            beginDeferredRuntimeMaterialization(for: profile, surface: surface)
+        }
+    }
+
+    private func handleRuntimeRecoveryStart(
+        slotID: UUID,
+        runtimeIdentity: WebRuntimeDiagnosticIdentity
+    ) {
+        guard webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
+              let webView = webViewPool.existingWebView(for: slotID) else {
+            return
+        }
+        let currentRecord = runtimeReadinessBySlot[slotID].flatMap {
+            $0.identity == runtimeIdentity ? $0 : nil
+        }
+        runtimeReadinessBySlot[slotID] = RuntimeReadinessRecord(
+            identity: runtimeIdentity,
+            state: .loading,
+            navigationGeneration: currentRecord?.navigationGeneration
+        )
+
+        guard tabStore.activeTabID == slotID else { return }
+        if webFocusRouter.currentWebView === webView {
+            webFocusRouter.setCurrentWebView(nil)
+        }
+        guard requestedVisibility || panel.isVisible else { return }
+
+        let surface: RuntimePresentationSurface = sourceHostController.isSessionLocked
+            ? .fullscreenCompanion
+            : .standard
+        if let pending = pendingRuntimeMaterialization,
+           pending.slotID == slotID,
+           pending.surface == surface {
+            container(for: surface).showRestoringState()
+            return
+        }
+        guard let profile = tabStore.profiles.first(where: { $0.id == slotID }) else {
+            return
+        }
+        beginDeferredRuntimeMaterialization(for: profile, surface: surface)
+    }
+
+    private func handleRuntimeRecoveryUnavailable(
+        slotID: UUID,
+        runtimeIdentity: WebRuntimeDiagnosticIdentity
+    ) {
+        guard webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
+              webViewPool.existingWebView(for: slotID) != nil else {
+            return
+        }
+        let currentRecord = runtimeReadinessBySlot[slotID].flatMap {
+            $0.identity == runtimeIdentity ? $0 : nil
+        }
+        runtimeReadinessBySlot[slotID] = RuntimeReadinessRecord(
+            identity: runtimeIdentity,
+            state: .failed,
+            navigationGeneration: currentRecord?.navigationGeneration
+        )
+        guard tabStore.activeTabID == slotID,
+              let profile = tabStore.profiles.first(where: { $0.id == slotID }) else {
+            return
+        }
+
+        webFocusRouter.setCurrentWebView(nil)
+        if pendingRuntimeMaterialization?.slotID == slotID {
+            cancelPendingRuntimeMaterialization(reason: "recovery_url_unavailable")
+        }
+        let surface: RuntimePresentationSurface = sourceHostController.isSessionLocked
+            ? .fullscreenCompanion
+            : .standard
+        if surface == .fullscreenCompanion {
+            rootView.installFullscreenCompanionContainer(
+                sourceHostController.companionContainer
+            )
+        }
+        container(for: surface).showLoadFailure(
+            retryEnabled: canRetrySelectedSlot(profile)
+        )
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString),
+            "presentation_state": .string("failed"),
+            "failure_reason": .string("recovery_url_unavailable")
+        ]
+        fields.merge(runtimeIdentity.fields) { current, _ in current }
+        diagnostics.record(
+            event: "panel.materialization.recovery_unavailable",
+            level: .warning,
+            subsystem: "panel",
+            fields: fields
+        )
+    }
+
+    func handleSlotNavigationFinish(
+        slotID: UUID,
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        navigationGeneration: UInt64? = nil
+    ) {
+        guard webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
+              webViewPool.existingWebView(for: slotID) != nil else {
+            return
+        }
+        let currentRecord = runtimeReadinessBySlot[slotID].flatMap {
+            $0.identity == runtimeIdentity ? $0 : nil
+        }
+        if let currentGeneration = currentRecord?.navigationGeneration,
+           navigationGeneration != currentGeneration {
+            return
+        }
+        if let navigationGeneration, navigationGeneration == 0 { return }
+        runtimeReadinessBySlot[slotID] = RuntimeReadinessRecord(
+            identity: runtimeIdentity,
+            state: .ready,
+            navigationGeneration: navigationGeneration ?? currentRecord?.navigationGeneration
         )
 
         guard let pending = pendingRuntimeMaterialization,
@@ -4071,14 +4270,27 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
-    func handleSlotNavigationFailure(slotID: UUID, runtimeIdentity: WebRuntimeDiagnosticIdentity) {
+    func handleSlotNavigationFailure(
+        slotID: UUID,
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        navigationGeneration: UInt64? = nil
+    ) {
         guard webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
               webViewPool.existingWebView(for: slotID) != nil else {
             return
         }
+        let currentRecord = runtimeReadinessBySlot[slotID].flatMap {
+            $0.identity == runtimeIdentity ? $0 : nil
+        }
+        if let currentGeneration = currentRecord?.navigationGeneration,
+           navigationGeneration != currentGeneration {
+            return
+        }
+        if let navigationGeneration, navigationGeneration == 0 { return }
         runtimeReadinessBySlot[slotID] = RuntimeReadinessRecord(
             identity: runtimeIdentity,
-            state: .failed
+            state: .failed,
+            navigationGeneration: navigationGeneration ?? currentRecord?.navigationGeneration
         )
 
         let pending = pendingRuntimeMaterialization.flatMap { request in
@@ -4105,18 +4317,31 @@ final class PanelController: NSObject, NSWindowDelegate {
             clearPendingColdUnreadAcknowledgement(for: pending)
             pendingRuntimeMaterialization = nil
             pendingRuntimeMaterializationIdentity = nil
-            container(for: pending.surface).showEmptyState()
+            container(for: pending.surface).showLoadFailure(
+                retryEnabled: canRetrySelectedSlot(
+                    tabStore.profiles.first(where: { $0.id == slotID })
+                        ?? tabStore.activeProfile
+                )
+            )
         } else if standardOwnsRuntime {
-            rootView.webPanelContainerView.showEmptyState()
+            if let profile = tabStore.profiles.first(where: { $0.id == slotID }) {
+                rootView.webPanelContainerView.showLoadFailure(
+                    retryEnabled: canRetrySelectedSlot(profile)
+                )
+            }
         } else {
-            sourceHostController.companionContainer.showEmptyState()
+            if let profile = tabStore.profiles.first(where: { $0.id == slotID }) {
+                sourceHostController.companionContainer.showLoadFailure(
+                    retryEnabled: canRetrySelectedSlot(profile)
+                )
+            }
             companionActiveProfile = nil
         }
         webFocusRouter.setCurrentWebView(nil)
         var fields: [String: RuntimeDiagnosticValue] = [
             "slot_id": .string(slotID.uuidString),
             "readiness_source": .string("navigation_failed"),
-            "failure_presentation": .string("native_empty_state")
+            "failure_presentation": .string("native_retry_state")
         ]
         if let pending {
             fields["materialization_generation"] = .integer(Int64(pending.generation))
@@ -4128,6 +4353,53 @@ final class PanelController: NSObject, NSWindowDelegate {
             subsystem: "panel",
             fields: fields
         )
+    }
+
+    private func canRetrySelectedSlot(_ profile: WebAppProfile?) -> Bool {
+        guard let profile else { return false }
+        if webViewPool.existingWebView(for: profile.id) != nil {
+            return webViewPool.canRetryNavigation(slotID: profile.id)
+        }
+        return [profile.currentURL, profile.homeURL].contains { candidate in
+            guard let candidate else { return false }
+            return WebAppURL.isSafe(candidate)
+        }
+    }
+
+    private func retryFailedSelectedSlot(in surface: RuntimePresentationSurface) {
+        let presentationContainer = container(for: surface)
+        guard presentationContainer.isShowingLoadFailure,
+              let profile = tabStore.activeProfile,
+              canRetrySelectedSlot(profile) else {
+            return
+        }
+        switch surface {
+        case .standard where sourceHostController.isSessionLocked:
+            return
+        case .fullscreenCompanion where !sourceHostController.isSessionLocked:
+            return
+        default:
+            break
+        }
+
+        if webViewPool.existingWebView(for: profile.id) != nil {
+            guard let identity = webViewPool.runtimeDiagnosticIdentity(for: profile.id),
+                  runtimeReadinessBySlot[profile.id]?.identity == identity,
+                  runtimeReadinessBySlot[profile.id]?.state == .failed,
+                  webViewPool.canRetryNavigation(slotID: profile.id) else {
+                return
+            }
+        }
+
+        beginDeferredRuntimeMaterialization(for: profile, surface: surface)
+        if webViewPool.existingWebView(for: profile.id) != nil,
+           !webViewPool.retryNavigation(slotID: profile.id) {
+            cancelPendingRuntimeMaterialization(reason: "explicit_retry_unavailable")
+            presentationContainer.showLoadFailure(
+                retryEnabled: canRetrySelectedSlot(profile)
+            )
+        }
+        webFocusRouter.setCurrentWebView(nil)
     }
 
     private func handleCommittedURLChange(slotID: UUID, url: URL) {
@@ -6360,7 +6632,9 @@ final class PanelController: NSObject, NSWindowDelegate {
             rootView.installFullscreenCompanionContainer(
                 sourceHostController.companionContainer
             )
-            sourceHostController.companionContainer.showEmptyState()
+            sourceHostController.companionContainer.showLoadFailure(
+                retryEnabled: canRetrySelectedSlot(activeProfile)
+            )
             companionActiveProfile = nil
             synchronizeResidentIndicators()
             return
@@ -6392,7 +6666,12 @@ final class PanelController: NSObject, NSWindowDelegate {
                     defaultProfileName: tabStore.defaultBrowserProfilePresentation.name
                 )
             } else {
-                sourceHostController.companionContainer.showEmptyState()
+                rootView.installFullscreenCompanionContainer(
+                    sourceHostController.companionContainer
+                )
+                sourceHostController.companionContainer.showLoadFailure(
+                    retryEnabled: canRetrySelectedSlot(activeProfile)
+                )
             }
             companionActiveProfile = nil
             synchronizeResidentIndicators()
@@ -6413,6 +6692,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             slotID: activeProfile.id,
             residencyPolicy: activeProfile.residencyPolicy
         )
+        sourceHostController.companionContainer.hideRestoringState()
         webFocusRouter.setCurrentWebView(webView)
         slotLifecycleCoordinator.beginSupplementalVisibility(profile: activeProfile)
         WebViewFactory.configureHiddenScrollers(in: webView)

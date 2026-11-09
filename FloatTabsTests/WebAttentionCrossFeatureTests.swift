@@ -5556,7 +5556,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     ) throws -> WKWebView {
         try select(named: slotName, in: store)
         let slot = try profile(named: slotName, in: store)
-        if controllersByPool[ObjectIdentifier(pool)]?.debugIsShowingRestoringState == true {
+        if controllersByPool[ObjectIdentifier(pool)]?.debugIsShowingRestoringState == true,
+           pool.existingWebView(for: slot.id) == nil {
             let attached = expectation(description: "resident Runtime attached beneath restoring state")
             DispatchQueue.main.async { attached.fulfill() }
             wait(for: [attached], timeout: 5)
@@ -5564,7 +5565,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let webView = try XCTUnwrap(pool.existingWebView(for: slot.id))
         pool.onSlotNavigationFinish?(
             slot.id,
-            try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slot.id))
+            try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slot.id)),
+            1
         )
         return webView
     }
@@ -5582,7 +5584,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: slot.id))
         pool.onSlotNavigationFinish?(
             slot.id,
-            try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slot.id))
+            try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slot.id)),
+            1
         )
         return (slot, webView)
     }

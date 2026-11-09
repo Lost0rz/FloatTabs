@@ -408,6 +408,68 @@ final class WebViewPoolTests: XCTestCase {
         pool.release(slotID: profile.id)
     }
 
+    func testNavigationReadinessProjectionOnlyEmitsForCurrentTicketGeneration() throws {
+        let webView = WebViewFactory.makeWebView()
+        var startGenerations: [UInt64] = []
+        var finishGenerations: [UInt64] = []
+        var failureGenerations: [UInt64] = []
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            onNavigationStart: { _, generation in startGenerations.append(generation) },
+            onNavigationFinish: { _, _, generation in finishGenerations.append(generation) },
+            onNavigationFailure: { _, generation in failureGenerations.append(generation) }
+        )
+        webView.navigationDelegate = nil
+
+        let firstNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>first</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: firstNavigation)
+        let currentNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>current</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: currentNavigation)
+
+        let cancelled = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+        observer.webView(
+            webView,
+            didFailProvisionalNavigation: firstNavigation,
+            withError: cancelled
+        )
+        observer.webView(webView, didFinish: firstNavigation)
+        XCTAssertEqual(startGenerations, [1, 2])
+        XCTAssertTrue(failureGenerations.isEmpty)
+        XCTAssertTrue(finishGenerations.isEmpty)
+
+        // A cancellation is terminal only while its ticket is still current.
+        observer.webView(
+            webView,
+            didFailProvisionalNavigation: currentNavigation,
+            withError: cancelled
+        )
+        observer.webView(
+            webView,
+            didFailProvisionalNavigation: currentNavigation,
+            withError: cancelled
+        )
+        XCTAssertEqual(failureGenerations, [2])
+
+        let retryNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>retry</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: retryNavigation)
+        observer.webView(webView, didFinish: currentNavigation)
+        observer.webView(webView, didFinish: retryNavigation)
+
+        XCTAssertEqual(startGenerations, [1, 2, 3])
+        XCTAssertEqual(failureGenerations, [2])
+        XCTAssertEqual(finishGenerations, [3])
+        observer.invalidate()
+    }
+
     func testNavigationStallWatchdogSeparatesPhasesAndEmitsAtMostOncePerGeneration() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
@@ -1598,6 +1660,65 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(pool.count, 1)
     }
 
+    func testRequiresWebViewRebuildUsesPoolCompatibilityDecision() throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "CompatibilityDecision")
+        let desktop = try pool.webView(for: profile)
+
+        XCTAssertFalse(pool.requiresWebViewRebuild(for: profile))
+
+        profile.renderingProfile = profile.renderingProfile.settingZoom(1.25)
+        XCTAssertFalse(pool.requiresWebViewRebuild(for: profile))
+        XCTAssertTrue(try pool.webView(for: profile) === desktop)
+
+        profile.renderingProfile = profile.renderingProfile.settingViewport(
+            CGSize(width: 640, height: 780)
+        )
+        XCTAssertFalse(pool.requiresWebViewRebuild(for: profile))
+        XCTAssertTrue(try pool.webView(for: profile) === desktop)
+
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
+        XCTAssertTrue(pool.requiresWebViewRebuild(for: profile))
+        let mobile = try pool.webView(for: profile)
+        XCTAssertFalse(mobile === desktop)
+        XCTAssertFalse(pool.requiresWebViewRebuild(for: profile))
+
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.desktop)
+        XCTAssertTrue(pool.requiresWebViewRebuild(for: profile))
+        let desktopAgain = try pool.webView(for: profile)
+        XCTAssertFalse(desktopAgain === mobile)
+
+        profile.renderingProfile = profile.renderingProfile.settingBrowserIdentity(.macosChrome)
+        XCTAssertTrue(pool.requiresWebViewRebuild(for: profile))
+        XCTAssertFalse(try pool.webView(for: profile) === desktopAgain)
+    }
+
+    func testExplicitRetryLoadsSameSafeURLOnSameRuntimeOnce() throws {
+        var requestedURLs: [URL] = []
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in
+                if let url = request.url {
+                    requestedURLs.append(url)
+                }
+            }
+        )
+        let profile = makeProfile(name: "ExplicitRetry")
+        let webView = try pool.webView(for: profile)
+        let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+
+        XCTAssertTrue(pool.canRetryNavigation(slotID: profile.id))
+        XCTAssertTrue(pool.retryNavigation(slotID: profile.id))
+        XCTAssertEqual(requestedURLs, [profile.homeURL, profile.homeURL])
+        XCTAssertTrue(pool.existingWebView(for: profile.id) === webView)
+        XCTAssertEqual(pool.runtimeDiagnosticIdentity(for: profile.id), identity)
+
+        XCTAssertFalse(pool.canRetryNavigation(slotID: UUID()))
+        XCTAssertFalse(pool.retryNavigation(slotID: UUID()))
+        XCTAssertEqual(requestedURLs.count, 2, "retry is one request per explicit action")
+        pool.release(slotID: profile.id)
+    }
+
     func testChatGPTMobileAutomaticUsesDesktopPointerCompatibilityIdentity() throws {
         let pool = makePool()
         var profile = makeProfile(
@@ -2185,6 +2306,40 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
     }
 
+    func testActiveTerminationSignalsPresentationBeforeStartingRecoveryLoad() throws {
+        var operations: [String] = []
+        var projectedIdentity: WebRuntimeDiagnosticIdentity?
+        let profile = makeProfile(name: "ActiveTerminationSignal")
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            recoveryLoad: { _, _ in
+                operations.append("recovery_load")
+                return nil
+            },
+            isSlotActive: { _ in true }
+        )
+        _ = try pool.webView(for: profile)
+        pool.onRuntimeRecoveryStart = { slotID, identity in
+            XCTAssertEqual(slotID, profile.id)
+            projectedIdentity = identity
+            operations.append("presentation_start")
+        }
+        let currentIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+
+        pool.handleContentProcessTermination(slotID: profile.id)
+
+        XCTAssertEqual(operations, ["presentation_start", "recovery_load"])
+        XCTAssertEqual(projectedIdentity, currentIdentity)
+        XCTAssertEqual(
+            WebViewPool.recoveryDisposition(
+                isActive: true,
+                runtimeRetentionPreference: .automatic
+            ),
+            .reloadNow
+        )
+    }
+
     func testRecoveryLoadRegistersReturnedNavigationBeforeCommitCallback() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
@@ -2250,6 +2405,7 @@ final class WebViewPoolTests: XCTestCase {
     func testInactiveWebContentTerminationDefersReloadUntilSlotActivation() throws {
         var loadedRequests: [URLRequest] = []
         var isActive = false
+        var recoveryStartCount = 0
         var profile = makeProfile(name: "A")
         profile.currentURL = URL(string: "https://example.com/current")!
         let pool = WebViewPool(
@@ -2257,10 +2413,12 @@ final class WebViewPoolTests: XCTestCase {
             initialLoad: { _, request in loadedRequests.append(request) },
             isSlotActive: { _ in isActive }
         )
+        pool.onRuntimeRecoveryStart = { _, _ in recoveryStartCount += 1 }
 
         let original = try pool.webView(for: profile)
         pool.handleContentProcessTermination(slotID: profile.id)
         XCTAssertEqual(loadedRequests.count, 1)
+        XCTAssertEqual(recoveryStartCount, 0)
 
         isActive = true
         let recovered = try pool.webView(for: profile)
@@ -2269,6 +2427,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(loadedRequests.count, 2)
         XCTAssertEqual(loadedRequests.last?.url, profile.currentURL)
         XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
+        XCTAssertEqual(recoveryStartCount, 1)
     }
 
     func testDeferredRecoveryRegistersExactNavigationThroughCommitAndFinish() throws {
@@ -2461,8 +2620,16 @@ final class WebViewPoolTests: XCTestCase {
             diagnostics: diagnostics
         )
         _ = try pool.webView(for: profile)
+        var unavailableRuntime: (UUID, WebRuntimeDiagnosticIdentity)?
+        pool.onRuntimeRecoveryUnavailable = { slotID, identity in
+            unavailableRuntime = (slotID, identity)
+        }
+        let runtimeIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
 
         pool.handleContentProcessTermination(slotID: profile.id)
+
+        XCTAssertEqual(unavailableRuntime?.0, profile.id)
+        XCTAssertEqual(unavailableRuntime?.1, runtimeIdentity)
 
         let deferred = try XCTUnwrap(
             writer.events.last { $0.event == "web_runtime.recovery.deferred" }
@@ -3049,20 +3216,22 @@ final class WebViewPoolTests: XCTestCase {
         let webView = try pool.webView(for: profile)
         let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
         webView.navigationDelegate = nil
-        var finishEvents: [(UUID, WebRuntimeDiagnosticIdentity)] = []
-        pool.onSlotNavigationFinish = { slotID, identity in
-            finishEvents.append((slotID, identity))
+        var finishEvents: [(UUID, WebRuntimeDiagnosticIdentity, UInt64)] = []
+        pool.onSlotNavigationFinish = { slotID, identity, navigationGeneration in
+            finishEvents.append((slotID, identity, navigationGeneration))
         }
 
         let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
         let navigation = try XCTUnwrap(
             webView.loadHTMLString("<html><body>one</body></html>", baseURL: nil)
         )
+        observer.webView(webView, didStartProvisionalNavigation: navigation)
         observer.webView(webView, didFinish: navigation)
 
         XCTAssertEqual(finishEvents.count, 1)
         XCTAssertEqual(finishEvents[0].0, profile.id)
         XCTAssertEqual(finishEvents[0].1, identity)
+        XCTAssertEqual(finishEvents[0].2, 1)
 
         // A finish from a runtime that is no longer the Slot's currently
         // resident WebView must not project as current-Runtime readiness.
@@ -3084,9 +3253,9 @@ final class WebViewPoolTests: XCTestCase {
         let webView = try pool.webView(for: profile)
         let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
         webView.navigationDelegate = nil
-        var failureEvents: [(UUID, WebRuntimeDiagnosticIdentity)] = []
-        pool.onSlotNavigationFailure = { slotID, identity in
-            failureEvents.append((slotID, identity))
+        var failureEvents: [(UUID, WebRuntimeDiagnosticIdentity, UInt64)] = []
+        pool.onSlotNavigationFailure = { slotID, identity, navigationGeneration in
+            failureEvents.append((slotID, identity, navigationGeneration))
         }
 
         let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
@@ -3097,17 +3266,19 @@ final class WebViewPoolTests: XCTestCase {
             domain: NSURLErrorDomain,
             code: NSURLErrorCannotConnectToHost
         )
+        observer.webView(webView, didStartProvisionalNavigation: navigation)
         observer.webView(webView, didFail: navigation, withError: error)
         observer.webView(webView, didFailProvisionalNavigation: navigation, withError: error)
 
-        XCTAssertEqual(failureEvents.count, 2)
+        XCTAssertEqual(failureEvents.count, 1)
         XCTAssertTrue(failureEvents.allSatisfy { $0.0 == profile.id && $0.1 == identity })
+        XCTAssertEqual(failureEvents[0].2, 1)
 
         // After teardown the same observer no longer represents the resident
         // runtime, so its failure must not project.
         pool.release(slotID: profile.id)
         observer.webView(webView, didFail: navigation, withError: error)
-        XCTAssertEqual(failureEvents.count, 2)
+        XCTAssertEqual(failureEvents.count, 1)
     }
 
     private static func pageAppPayload(token: String) -> [String: Any] {

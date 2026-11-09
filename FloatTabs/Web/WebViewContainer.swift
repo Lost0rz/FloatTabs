@@ -912,6 +912,65 @@ private final class WebRestoringOverlayView: NSView {
     }
 }
 
+/// Native, content-free failure state for a selected configured Slot. Retry
+/// is an explicit user action; the view never schedules another navigation.
+private final class WebLoadFailureView: NSView {
+    private let titleLabel = NSTextField(labelWithString: "Page couldn’t load")
+    private let detailLabel = NSTextField(labelWithString: "Check your connection, then try again.")
+    fileprivate let retryButton = NSButton(title: "Retry", target: nil, action: nil)
+    private let stackView: NSStackView
+    var onRetry: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        stackView = NSStackView(views: [titleLabel, detailLabel, retryButton])
+        super.init(frame: frameRect)
+
+        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.alignment = .center
+
+        detailLabel.font = .systemFont(ofSize: 13)
+        detailLabel.textColor = .secondaryLabelColor
+        detailLabel.alignment = .center
+        detailLabel.maximumNumberOfLines = 2
+
+        retryButton.target = self
+        retryButton.action = #selector(retryPressed(_:))
+        retryButton.setAccessibilityIdentifier("floatTabs.webLoadFailure.retry")
+
+        stackView.orientation = .vertical
+        stackView.alignment = .centerX
+        stackView.spacing = 10
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stackView)
+
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 32),
+            stackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -32),
+            stackView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stackView.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    convenience init() {
+        self.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func triggerRetry() {
+        guard retryButton.isEnabled else { return }
+        onRetry?()
+    }
+
+    @objc private func retryPressed(_ sender: NSButton) {
+        triggerRetry()
+    }
+}
+
 /// Owns the visible FloatTabs web surface. Runtime residency is owned by
 /// `SlotLifecycleCoordinator` / `WebViewPool`; this view only presents the
 /// selected Runtime and detaches it when presentation changes.
@@ -920,6 +979,7 @@ final class WebPanelContainerView: NSView {
     private let logicalHostView = NSView()
     private let emptyView = EmptyWebAppView()
     private let unsupportedBrowserProfileView = UnsupportedBrowserProfileView()
+    private let loadFailureView = WebLoadFailureView()
     private let restoringOverlayView = WebRestoringOverlayView()
     private weak var currentContentView: NSView?
     private weak var hostedWebView: WKWebView?
@@ -927,6 +987,7 @@ final class WebPanelContainerView: NSView {
     private var activeSlotID: UUID?
 
     private(set) var websiteLayoutScale: CGFloat = 1
+    var onRetryRequested: (() -> Void)?
 
     var currentWebView: WKWebView? {
         activeWebView
@@ -935,6 +996,16 @@ final class WebPanelContainerView: NSView {
     var isShowingUnsupportedBrowserProfile: Bool {
         currentContentView === unsupportedBrowserProfileView
             && !unsupportedBrowserProfileView.isHidden
+    }
+
+    var isShowingLoadFailure: Bool {
+        currentContentView === loadFailureView
+            && !loadFailureView.isHidden
+            && !isShowingRestoringState
+    }
+
+    var isLoadFailureRetryEnabled: Bool {
+        loadFailureView.retryButton.isEnabled
     }
 
     var displayedUnsupportedBrowserProfileName: String? {
@@ -946,6 +1017,9 @@ final class WebPanelContainerView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         configureShell()
+        loadFailureView.onRetry = { [weak self] in
+            self?.onRetryRequested?()
+        }
         showEmptyState()
     }
 
@@ -1071,6 +1145,23 @@ final class WebPanelContainerView: NSView {
         // An unsupported-profile presentation is terminal for this Slot; any
         // restoring state it replaces is stale.
         hideRestoringState()
+    }
+
+    func showLoadFailure(retryEnabled: Bool) {
+        prepareForNonWebPresentation()
+
+        if currentContentView !== loadFailureView || loadFailureView.superview !== clipView {
+            setContentView(loadFailureView)
+        }
+        loadFailureView.retryButton.isEnabled = retryEnabled
+        loadFailureView.isHidden = false
+        bringToFront(loadFailureView)
+        hideRestoringState()
+    }
+
+    func debugTriggerLoadFailureRetry() {
+        guard isShowingLoadFailure else { return }
+        loadFailureView.triggerRetry()
     }
 
     private func prepareForNonWebPresentation() {
