@@ -27,8 +27,8 @@ final class FaviconRecoveryTests: XCTestCase {
         let chatGPT = try XCTUnwrap(URL(string: "https://chatgpt.com/c/123?secret=private#message"))
         let chatGPTImage = await load(provider, from: chatGPT)
         XCTAssertNotNil(chatGPTImage)
-        XCTAssertEqual(loader.requests.prefix(3).compactMap { $0.url?.path }, [
-            "/favicon.ico", "/", "/unauth-mweb/favicon.svg",
+        XCTAssertEqual(loader.requests.prefix(2).compactMap { $0.url?.path }, [
+            "/", "/unauth-mweb/favicon.svg",
         ])
         XCTAssertTrue(loader.requests.allSatisfy { $0.url?.query == nil && $0.url?.fragment == nil })
 
@@ -36,13 +36,58 @@ final class FaviconRecoveryTests: XCTestCase {
         let wwwChatGPT = try XCTUnwrap(URL(string: "https://www.chatgpt.com/c/456?secret=also-private"))
         let wwwImage = await load(provider, from: wwwChatGPT)
         XCTAssertNotNil(wwwImage)
-        XCTAssertEqual(loader.requests.count, countAfterChatGPT + 3)
+        XCTAssertEqual(loader.requests.count, countAfterChatGPT + 2)
         XCTAssertEqual(Set(loader.requests.compactMap { $0.url?.host }), [
             "chatgpt.com", "www.chatgpt.com",
         ])
         let cachedChatGPTImage = await load(provider, from: chatGPT)
         XCTAssertNotNil(cachedChatGPTImage)
-        XCTAssertEqual(loader.requests.count, countAfterChatGPT + 3)
+        XCTAssertEqual(loader.requests.count, countAfterChatGPT + 2)
+    }
+
+    func testDeclaredCandidatesPreferStandardSizedIconsAndPlaceMaskIconsLast() throws {
+        let baseURL = try XCTUnwrap(URL(string: "https://chatgpt.example.test/"))
+        let html = """
+        <link rel="mask-icon" href="/mask.svg" sizes="any" type="image/svg+xml">
+        <link rel="apple-touch-icon" href="/touch.png" sizes="180x180" type="image/png">
+        <link rel="icon" href="/unknown.bin">
+        <link rel="icon" href="/small.png" sizes="16x16" type="image/png">
+        <link rel="icon" href="/retina.ico" sizes="32x32" type="image/x-icon">
+        <link rel="icon" href="/dark.svg" sizes="any" type="image/svg+xml" media="(prefers-color-scheme: dark)">
+        """
+
+        let candidates = WebsiteFaviconProvider.discoveredFaviconCandidates(
+            in: html,
+            baseURL: baseURL
+        )
+
+        XCTAssertEqual(candidates.map(\.url.path), [
+            "/retina.ico", "/small.png", "/unknown.bin", "/dark.svg", "/touch.png", "/mask.svg",
+        ])
+        XCTAssertEqual(candidates.first?.kind, .icon)
+        XCTAssertEqual(candidates.last?.kind, .mask)
+    }
+
+    func testTransparentDeclaredIconIsSkippedForNextVisibleCandidate() async throws {
+        let transparentData = try fixtureTransparentImageData()
+        let visibleData = try fixtureImageData(color: .systemBlue)
+        let loader = FaviconTestLoader { request, _ in
+            let data = request.url?.path == "/transparent.png" ? transparentData : visibleData
+            return (data, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let pageURL = try XCTUnwrap(URL(string: "https://icons.example.test/"))
+        let transparentURL = try XCTUnwrap(URL(string: "https://icons.example.test/transparent.png"))
+        let visibleURL = try XCTUnwrap(URL(string: "https://icons.example.test/brand.png"))
+        provider.setDOMCandidates(
+            [.declared(transparentURL), .declared(visibleURL, sourceOrder: 1)],
+            for: pageURL
+        )
+
+        let image = await load(provider, from: pageURL)
+
+        XCTAssertNotNil(image)
+        XCTAssertEqual(loader.requests.compactMap(\.url), [transparentURL, visibleURL])
     }
 
     func testRootFailureFallsBackToSanitizedPathHTMLBeforeLegacyIcons() async throws {
@@ -72,7 +117,7 @@ final class FaviconRecoveryTests: XCTestCase {
         let image = await load(provider, from: page)
         XCTAssertNotNil(image)
         XCTAssertEqual(loader.requests.map { $0.url?.path }, [
-            "/favicon.ico", "/", "/unauth-mweb", "/icons/site.png",
+            "/", "/unauth-mweb", "/icons/site.png",
         ])
         XCTAssertTrue(loader.requests.allSatisfy { $0.url?.query == nil && $0.url?.fragment == nil })
     }
@@ -100,16 +145,16 @@ final class FaviconRecoveryTests: XCTestCase {
         }
         await fulfillment(of: [completions], timeout: 2)
 
-        XCTAssertEqual(loader.requests.count, 1)
+        XCTAssertEqual(loader.requests.count, 3)
         XCTAssertEqual(completionCount, 2)
         let cachedImage = await load(provider, from: url)
         XCTAssertNotNil(cachedImage)
-        XCTAssertEqual(loader.requests.count, 1)
+        XCTAssertEqual(loader.requests.count, 3)
 
         let xURL = try XCTUnwrap(URL(string: "https://x.com/home"))
         let xImage = await load(provider, from: xURL)
         XCTAssertNotNil(xImage)
-        XCTAssertEqual(loader.requests.count, 2)
+        XCTAssertEqual(loader.requests.count, 6)
         XCTAssertEqual(Set(loader.requests.compactMap { $0.url?.host }), ["www.google.com", "x.com"])
     }
 
@@ -140,11 +185,11 @@ final class FaviconRecoveryTests: XCTestCase {
         retryGate.resumeNext()
         let recoveredImage = await result.value
         XCTAssertNotNil(recoveredImage)
-        XCTAssertEqual(loader.requests.count, 8)
+        XCTAssertEqual(loader.requests.count, 10)
         XCTAssertEqual(loader.requests.last?.cachePolicy, .reloadIgnoringLocalCacheData)
         let cachedImage = await load(provider, from: url)
         XCTAssertNotNil(cachedImage)
-        XCTAssertEqual(loader.requests.count, 8)
+        XCTAssertEqual(loader.requests.count, 10)
         XCTAssertEqual(retryGate.delays, [15])
     }
 
@@ -184,7 +229,7 @@ final class FaviconRecoveryTests: XCTestCase {
         clock.now = 140
         let expiredCooldownImage = await load(provider, from: url)
         XCTAssertNotNil(expiredCooldownImage)
-        XCTAssertEqual(loader.requests.count, 15)
+        XCTAssertEqual(loader.requests.count, 17)
     }
 
     func testActiveDemandUsesBoundedProgressiveCooldownThrough900Seconds() async throws {
@@ -270,6 +315,75 @@ final class FaviconRecoveryTests: XCTestCase {
         XCTAssertEqual(loader.requests[0].timeoutInterval, 8)
     }
 
+    func testLateDOMCandidateReplacesFallbackAndMenuConsumerSurvivesTabDetach() async throws {
+        let fallbackData = try fixtureImageData(color: .systemRed)
+        let declaredData = try fixtureImageData(color: .systemBlue)
+        let loader = FaviconTestLoader { request, _ in
+            switch request.url?.path {
+            case "/favicon.ico":
+                return (fallbackData, Self.response(for: request, status: 200, mimeType: "image/png"))
+            case "/assets/brand.png":
+                return (declaredData, Self.response(for: request, status: 200, mimeType: "image/png"))
+            default:
+                return (Data(), Self.response(for: request, status: 404))
+            }
+        }
+        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let pageURL = try XCTUnwrap(URL(string: "https://chatgpt.example.test/c/123"))
+        let iconURL = try XCTUnwrap(URL(string: "https://chatgpt.example.test/assets/brand.png"))
+        let tabConsumerID = UUID()
+        let menuConsumerID = UUID()
+        let initialConsumers = expectation(description: "tab and menu both receive the current fallback")
+        initialConsumers.expectedFulfillmentCount = 2
+        let improvedMenuImage = expectation(description: "menu receives the better declared icon")
+        var tabImages: [NSImage?] = []
+        var menuImages: [NSImage?] = []
+
+        provider.subscribe(for: pageURL, consumerID: tabConsumerID) { image in
+            tabImages.append(image)
+            initialConsumers.fulfill()
+        }
+
+        let defaultsName = "FloatTabsTests.FaviconRecovery.LateDOM.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+        let statusItem = StatusItemController(
+            onToggle: {},
+            isVisible: { false },
+            onSettings: {},
+            onQuit: {},
+            preferencesStore: AppPreferencesStore(defaults: defaults),
+            faviconLoader: { url, completion in
+                provider.subscribe(for: url, consumerID: menuConsumerID) { image in
+                    menuImages.append(image)
+                    if menuImages.count == 1 {
+                        initialConsumers.fulfill()
+                    } else if menuImages.count == 2 {
+                        improvedMenuImage.fulfill()
+                    }
+                    completion(image)
+                }
+            },
+            faviconCanceller: { provider.cancel(consumerID: $0) }
+        )
+        statusItem.setActiveWebApp(name: "ChatGPT", faviconURL: pageURL)
+        await fulfillment(of: [initialConsumers], timeout: 2)
+        let fallbackStatusImage = statusItem.debugStatusButtonImageTIFF
+
+        // A hidden panel may detach its Tab view. The independently selected
+        // menu-bar consumer remains subscribed and receives the improved icon.
+        provider.cancel(consumerID: tabConsumerID)
+        provider.setDOMCandidates([.declared(iconURL)], for: pageURL)
+        await fulfillment(of: [improvedMenuImage], timeout: 2)
+
+        XCTAssertEqual(tabImages.count, 1)
+        XCTAssertEqual(menuImages.count, 2)
+        XCTAssertNotEqual(statusItem.debugStatusButtonImageTIFF, fallbackStatusImage)
+        XCTAssertTrue(loader.requests.allSatisfy { !$0.httpShouldHandleCookies })
+        XCTAssertEqual(loader.requests.last?.url, iconURL)
+        provider.cancel(consumerID: menuConsumerID)
+    }
+
     func testICOFixtureDecodesAsAnActualICOFile() async throws {
         let icoData = try fixtureICOData(color: .systemPurple)
         let loader = FaviconTestLoader { request, _ in
@@ -284,8 +398,8 @@ final class FaviconRecoveryTests: XCTestCase {
         let image = await load(provider, from: url)
 
         XCTAssertNotNil(image)
-        XCTAssertEqual(loader.requests.count, 1)
-        XCTAssertEqual(loader.requests[0].url?.path, "/favicon.ico")
+        XCTAssertEqual(loader.requests.count, 2)
+        XCTAssertEqual(loader.requests.map { $0.url?.path }, ["/", "/favicon.ico"])
     }
 
     func testWebKitDOMReaderResolvesOnlyHTTPIconDeclarations() async throws {
@@ -301,9 +415,10 @@ final class FaviconRecoveryTests: XCTestCase {
         let html = """
         <base href="https://chatgpt.example.test/unauth-mweb/">
         <link rel="stylesheet" href="/site.css">
-        <link rel="mask-icon" href="https://cdn.example.test/brand.svg">
-        <link rel="apple-touch-icon" href="icons/apple.png">
-        <link rel="shortcut icon" href="/icons/favicon.svg">
+        <link rel="mask-icon" href="https://cdn.example.test/brand.svg" sizes="any" type="image/svg+xml">
+        <link rel="apple-touch-icon" href="icons/apple.png" sizes="180x180" type="image/png">
+        <link rel="shortcut icon" href="/icons/favicon.svg" sizes="any" type="image/svg+xml">
+        <link rel="icon" href="/icons/dark-only.png" media="(max-width: 1px)">
         <link rel="icon" href="javascript:alert(1)">
         <link rel="icon" href="data:image/png;base64,AA==">
         """
@@ -324,16 +439,48 @@ final class FaviconRecoveryTests: XCTestCase {
         }
         await fulfillment(of: [injected], timeout: 5)
 
-        let candidates = await withCheckedContinuation { continuation in
+        let candidates: [WebsiteFaviconProvider.Candidate] = await withCheckedContinuation { continuation in
             WebsiteFaviconProvider.readDOMFaviconCandidates(from: webView) {
                 continuation.resume(returning: $0)
             }
         }
-        XCTAssertEqual(candidates.map(\.absoluteString), [
-            "https://cdn.example.test/brand.svg",
-            "https://chatgpt.example.test/unauth-mweb/icons/apple.png",
+        XCTAssertEqual(candidates.map { $0.url.absoluteString }, [
             "https://chatgpt.example.test/icons/favicon.svg",
+            "https://chatgpt.example.test/unauth-mweb/icons/apple.png",
+            "https://cdn.example.test/brand.svg",
         ])
+        XCTAssertEqual(candidates.first?.kind, .icon)
+        XCTAssertEqual(candidates.last?.kind, .mask)
+    }
+
+    func testTabIconAppearanceUsesActiveStateAcrossRuntimeResidencyMatrix() {
+        let icon = fixtureImage(color: .systemOrange)
+        let profile = makeProfile(url: "https://www.google.com/")
+        var activeImages: [Bool: Data] = [:]
+        var inactiveImages: [Bool: Data] = [:]
+
+        for isActive in [false, true] {
+            for isResident in [false, true] {
+                let tab = ExternalWebAppTabView(slotID: UUID(), faviconLoader: { _, _ in })
+                tab.update(profile: profile, isActive: isActive, isResident: isResident)
+                tab.setSourceIcon(icon)
+
+                let displayed = try! XCTUnwrap(tab.displayedIcon)
+                let data = try! XCTUnwrap(displayed.tiffRepresentation)
+                XCTAssertEqual(tab.displayedIconAlpha, isActive ? 1 : 0.56, accuracy: 0.001)
+                if isActive {
+                    XCTAssertTrue(displayed === icon)
+                    activeImages[isResident] = data
+                } else {
+                    XCTAssertFalse(displayed === icon)
+                    XCTAssertNotEqual(data, icon.tiffRepresentation)
+                    inactiveImages[isResident] = data
+                }
+            }
+        }
+
+        XCTAssertEqual(activeImages[false], activeImages[true])
+        XCTAssertEqual(inactiveImages[false], inactiveImages[true])
     }
 
     func testActiveConsumerRetriesAfterCooldownWithoutAnotherUIUpdate() async throws {
@@ -374,7 +521,7 @@ final class FaviconRecoveryTests: XCTestCase {
         retryGate.resumeNext()
         await fulfillment(of: [recovered], timeout: 2)
 
-        XCTAssertEqual(loader.requests.count, 15)
+        XCTAssertEqual(loader.requests.count, 17)
         XCTAssertEqual(results.count, 2)
         XCTAssertNotNil(results.last ?? nil)
         provider.cancel(consumerID: consumerID)
@@ -494,6 +641,29 @@ final class FaviconRecoveryTests: XCTestCase {
     private func fixtureImageData(color: NSColor) throws -> Data {
         let tiff = try XCTUnwrap(fixtureImage(color: color).tiffRepresentation)
         let bitmap = try XCTUnwrap(NSBitmapImageRep(data: tiff))
+        return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+    }
+
+    private func fixtureTransparentImageData() throws -> Data {
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 16,
+            pixelsHigh: 16,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        NSColor.clear.setFill()
+        NSRect(x: 0, y: 0, width: 16, height: 16).fill(using: .copy)
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
         return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
     }
 

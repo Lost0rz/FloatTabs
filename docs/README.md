@@ -27,6 +27,8 @@ This file is a **project-document router**, not a workflow, task authorization o
 
 The [Adaptive Lifecycle Restore V2](architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md), [Phase 8 Pressure/Efficiency Rescope V1](architecture/FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md) and other architecture-indexed documents own **bounded technical semantics**, not present task permission. Check their applicability against more recent accepted contracts and actual production source/tests.
 
+The [Favicon Identity and Active-State Amendment V1](product/FloatTabs_Favicon_Active_State_Amendment_V1.md) records the current bounded Tab and menu-bar favicon projection contract; its rules do not assert live third-party resource availability.
+
 ## Historical evidence and supersession
 
 Historical contracts, Stage/WP plans, audits, releases and all `docs/superpowers/` plans remain available as evidence. `CURRENT`, `LOCKED`, `APPROVED`, `IMPLEMENTED` and `NEXT` in those materials are relative to their original scope and date, not current executable instructions. Do not rewrite history to make it look current.

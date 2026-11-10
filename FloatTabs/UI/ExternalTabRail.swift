@@ -1984,6 +1984,95 @@ final class WebsiteFaviconProvider {
     typealias RetryWaiter = @MainActor @Sendable (TimeInterval) async -> Void
     typealias Completion = (NSImage?) -> Void
 
+    struct Candidate: Equatable {
+        enum Kind: Equatable {
+            case icon
+            case appleTouch
+            case mask
+            case conventional
+
+            var preference: Int {
+                switch self {
+                case .icon: 0
+                case .appleTouch: 1
+                case .mask: 2
+                case .conventional: 3
+                }
+            }
+        }
+
+        let url: URL
+        let kind: Kind
+        let sizes: String
+        let type: String
+        let mediaSpecific: Bool
+        let sourceOrder: Int
+
+        var priority: Int {
+            let sizeRank: Int
+            let declaredSizes = sizes.lowercased().split(whereSeparator: \.isWhitespace)
+            if declaredSizes.contains("any") || declaredSizes.contains("32x32") {
+                sizeRank = 0
+            } else if declaredSizes.contains("16x16") {
+                sizeRank = 1
+            } else if declaredSizes.isEmpty {
+                sizeRank = 2
+            } else {
+                sizeRank = 3
+            }
+
+            let normalizedType = type.lowercased()
+            let typeRank: Int
+            if normalizedType == "image/png" || normalizedType == "image/svg+xml" {
+                typeRank = 0
+            } else if normalizedType == "image/x-icon"
+                || normalizedType == "image/vnd.microsoft.icon" {
+                typeRank = 1
+            } else if normalizedType.hasPrefix("image/") {
+                typeRank = 2
+            } else {
+                typeRank = 3
+            }
+
+            return kind.preference * 1_000
+                + (mediaSpecific ? 100 : 0)
+                + sizeRank * 10
+                + typeRank
+        }
+
+        static func conventional(_ url: URL, sourceOrder: Int = 0) -> Self {
+            Self(
+                url: url,
+                kind: .conventional,
+                sizes: "",
+                type: "",
+                mediaSpecific: false,
+                sourceOrder: sourceOrder
+            )
+        }
+
+        static func declared(_ url: URL, sourceOrder: Int = 0) -> Self {
+            Self(
+                url: url,
+                kind: .icon,
+                sizes: "",
+                type: "",
+                mediaSpecific: false,
+                sourceOrder: sourceOrder
+            )
+        }
+    }
+
+    private struct CachedFavicon {
+        let image: NSImage
+        let priority: Int
+    }
+
+    private struct FetchedFavicon {
+        let image: NSImage
+        let priority: Int
+    }
+
     private struct ConsumerDemand {
         let originKey: String
         var url: URL
@@ -2022,9 +2111,9 @@ final class WebsiteFaviconProvider {
     private let dataLoader: DataLoader
     private let monotonicClock: MonotonicClock
     private let retryWaiter: RetryWaiter
-    private var cache: [String: NSImage] = [:]
+    private var cache: [String: CachedFavicon] = [:]
     private var cacheOrder: [String] = []
-    private var domCandidates: [String: [URL]] = [:]
+    private var domCandidates: [String: [Candidate]] = [:]
     private var domCandidateOrder: [String] = []
     private var demands: [UUID: ConsumerDemand] = [:]
     private var oneShotCompletions: [String: [Completion]] = [:]
@@ -2067,24 +2156,73 @@ final class WebsiteFaviconProvider {
     /// page-provided JavaScript and returns no page content.
     static func readDOMFaviconCandidates(
         from webView: WKWebView,
-        completion: @escaping ([URL]) -> Void
+        completion: @escaping ([Candidate]) -> Void
     ) {
         let script = #"""
-        (() => Array.from(document.querySelectorAll("link[rel]"))
-          .filter(link => {
-            const tokens = (link.getAttribute("rel") || "").toLowerCase().split(/\s+/);
-            return tokens.includes("icon") || tokens.includes("apple-touch-icon")
-              || tokens.includes("apple-touch-icon-precomposed") || tokens.includes("mask-icon");
-          })
-          .map(link => link.href)
-          .filter(href => /^https?:\/\//i.test(href))
-          .slice(0, 8))()
+        (() => {
+          const records = Array.from(document.querySelectorAll("link[rel]"))
+            .map((link, sourceOrder) => {
+              const rel = (link.getAttribute("rel") || "").toLowerCase();
+              const tokens = rel.split(/\s+/).filter(Boolean);
+              const kind = tokens.includes("icon") ? "icon"
+                : tokens.includes("apple-touch-icon-precomposed") ? "appleTouch"
+                : tokens.includes("apple-touch-icon") ? "appleTouch"
+                : tokens.includes("mask-icon") ? "mask" : null;
+              const media = link.getAttribute("media") || "";
+              const matchesMedia = !media || (() => {
+                try { return window.matchMedia(media).matches; }
+                catch (_) { return false; }
+              })();
+              return {
+                href: link.href,
+                kind,
+                sizes: link.getAttribute("sizes") || "",
+                type: (link.getAttribute("type") || "").toLowerCase(),
+                mediaSpecific: false,
+                sourceOrder,
+                matchesMedia
+              };
+            })
+            .filter(item => item.kind && item.matchesMedia && /^https?:\/\//i.test(item.href));
+          const priority = item => {
+            const kindRank = { icon: 0, appleTouch: 1, mask: 2 }[item.kind] * 1000;
+            const sizes = item.sizes.toLowerCase().split(/\s+/).filter(Boolean);
+            const sizeRank = sizes.includes("any") || sizes.includes("32x32") ? 0
+              : sizes.includes("16x16") ? 1 : sizes.length === 0 ? 2 : 3;
+            const typeRank = item.type === "image/png" || item.type === "image/svg+xml" ? 0
+              : item.type === "image/x-icon" || item.type === "image/vnd.microsoft.icon" ? 1
+              : item.type.startsWith("image/") ? 2 : 3;
+            return kindRank + sizeRank * 10 + typeRank;
+          };
+          const seen = new Set();
+          const selected = records
+            .sort((a, b) => priority(a) - priority(b) || a.sourceOrder - b.sourceOrder)
+            .filter(item => seen.has(item.href) ? false : (seen.add(item.href), true))
+            .slice(0, 8);
+          return JSON.stringify(selected);
+        })()
         """#
         webView.evaluateJavaScript(script, in: nil, in: .defaultClient) { result in
-            let values = (try? result.get()) as? [String] ?? []
-            let candidates = values.compactMap { URL(string: $0) }
-                .filter { Self.originKey(for: $0) != nil }
-            completion(Array(candidates.prefix(maximumDeclaredCandidates)))
+            let json = (try? result.get()) as? String ?? "[]"
+            let records = (try? JSONSerialization.jsonObject(with: Data(json.utf8)))
+                as? [[String: Any]] ?? []
+            let candidates = records.enumerated().compactMap { order, record -> Candidate? in
+                guard let href = record["href"] as? String,
+                      let url = URL(string: href),
+                      Self.originKey(for: url) != nil,
+                      let kind = Self.candidateKind(from: record["kind"] as? String) else {
+                    return nil
+                }
+                return Candidate(
+                    url: url,
+                    kind: kind,
+                    sizes: record["sizes"] as? String ?? "",
+                    type: record["type"] as? String ?? "",
+                    mediaSpecific: record["mediaSpecific"] as? Bool ?? false,
+                    sourceOrder: record["sourceOrder"] as? Int ?? order
+                )
+            }
+            completion(Array(Self.orderedCandidates(candidates).prefix(maximumDeclaredCandidates)))
         }
     }
 
@@ -2110,6 +2248,14 @@ final class WebsiteFaviconProvider {
         baseURL: URL,
         limit: Int = 8
     ) -> [URL] {
+        discoveredFaviconCandidates(in: html, baseURL: baseURL, limit: limit).map(\.url)
+    }
+
+    static func discoveredFaviconCandidates(
+        in html: String,
+        baseURL: URL,
+        limit: Int = 8
+    ) -> [Candidate] {
         guard limit > 0 else { return [] }
         let linkPattern = #"(?is)<link\b[^>]*>"#
         let attributePattern = #"(?i)([A-Za-z][A-Za-z0-9:_-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
@@ -2127,8 +2273,7 @@ final class WebsiteFaviconProvider {
             .flatMap { URL(string: $0, relativeTo: baseURL)?.absoluteURL }
             ?? baseURL
 
-        var result: [URL] = []
-        var seen = Set<String>()
+        var result: [Candidate] = []
         let htmlRange = NSRange(html.startIndex..<html.endIndex, in: html)
         for match in linkRegex.matches(in: html, range: htmlRange) {
             guard let tagRange = Range(match.range, in: html) else { continue }
@@ -2138,22 +2283,50 @@ final class WebsiteFaviconProvider {
                 .lowercased()
                 .split { $0.isWhitespace }
                 .map(String.init)
-            let isIcon = relTokens.contains("icon")
-                || relTokens.contains("apple-touch-icon")
-                || relTokens.contains("apple-touch-icon-precomposed")
-                || relTokens.contains("mask-icon")
-            guard isIcon,
+            guard let kind = Self.candidateKind(from: relTokens),
                   let href = attributes["href"],
                   let candidate = URL(string: href, relativeTo: documentBaseURL)?.absoluteURL,
                   isHTTPURL(candidate) else {
                 continue
             }
-            let key = candidate.absoluteString
-            guard seen.insert(key).inserted else { continue }
-            result.append(candidate)
-            if result.count == limit { break }
+            result.append(Candidate(
+                url: candidate,
+                kind: kind,
+                sizes: attributes["sizes"] ?? "",
+                type: (attributes["type"] ?? "").lowercased(),
+                mediaSpecific: !(attributes["media"] ?? "").isEmpty,
+                sourceOrder: match.range.location
+            ))
         }
-        return result
+        return Array(Self.orderedCandidates(result).prefix(limit))
+    }
+
+    private static func candidateKind(from rawKind: String?) -> Candidate.Kind? {
+        switch rawKind?.lowercased() {
+        case "icon": .icon
+        case "appletouch", "apple-touch-icon", "apple-touch-icon-precomposed": .appleTouch
+        case "mask", "mask-icon": .mask
+        default: nil
+        }
+    }
+
+    private static func candidateKind(from relTokens: [String]) -> Candidate.Kind? {
+        if relTokens.contains("icon") { return .icon }
+        if relTokens.contains("apple-touch-icon-precomposed")
+            || relTokens.contains("apple-touch-icon") {
+            return .appleTouch
+        }
+        if relTokens.contains("mask-icon") { return .mask }
+        return nil
+    }
+
+    private static func orderedCandidates(_ candidates: [Candidate]) -> [Candidate] {
+        let sorted = candidates.filter { originKey(for: $0.url) != nil }.sorted {
+            if $0.priority != $1.priority { return $0.priority < $1.priority }
+            return $0.sourceOrder < $1.sourceOrder
+        }
+        var seen = Set<String>()
+        return sorted.filter { seen.insert($0.url.absoluteString).inserted }
     }
 
     /// One stable subscriber per UI consumer. Repeating the call for the same
@@ -2174,17 +2347,21 @@ final class WebsiteFaviconProvider {
            demands[consumerID] != nil {
             cancel(consumerID: consumerID)
         }
-        if let cached = cachedImage(for: key) {
-            demands.removeValue(forKey: consumerID)
-            completion(cached)
-            return
-        }
         demands[consumerID] = ConsumerDemand(
             originKey: key,
             url: url,
             automaticallyRetries: automaticallyRetries,
             completion: completion
         )
+        if let cached = cachedImage(for: key) {
+            completion(cached)
+            if let bestDOMCandidate = domCandidates[key]?.first,
+               let entry = cache[key],
+               bestDOMCandidate.priority < entry.priority {
+                startRequest(for: key, fallbackURL: url)
+            }
+            return
+        }
         ensureRequest(for: key, fallbackURL: url)
     }
 
@@ -2231,23 +2408,34 @@ final class WebsiteFaviconProvider {
 
     /// Called only after PanelController has revalidated the exact Slot,
     /// Runtime, committed URL and navigation generation for the DOM result.
-    func setDOMCandidates(_ candidates: [URL], for committedURL: URL) {
+    func setDOMCandidates(_ candidates: [Candidate], for committedURL: URL) {
         guard let key = Self.originKey(for: committedURL) else { return }
-        let normalized = Self.uniqueHTTPURLs(candidates).prefix(Self.maximumDeclaredCandidates)
+        let normalized = Self.orderedCandidates(candidates).prefix(Self.maximumDeclaredCandidates)
         let next = Array(normalized)
         guard domCandidates[key] != next else { return }
         storeDOMCandidates(next, for: key)
 
-        guard cache[key] == nil,
-              hasDemand(for: key) || oneShotCompletions[key]?.isEmpty == false else {
+        let hasInterest = hasDemand(for: key) || oneShotCompletions[key]?.isEmpty == false
+        let improvesCache = cache[key].map { entry in
+            next.first.map { $0.priority < entry.priority } ?? false
+        } ?? false
+        guard hasInterest, cache[key] == nil || improvesCache else {
             return
         }
-        // A newly committed DOM declaration is a better, identity-checked
-        // source. Replace an in-flight fallback fetch once for this change.
+        // A newly committed DOM declaration is an identity-checked source.
+        // It can replace an in-flight fallback or improve a previously cached
+        // conventional icon without discarding the currently displayed image.
         inFlight.removeValue(forKey: key)?.task.cancel()
         scheduledRetries.removeValue(forKey: key)?.task.cancel()
         cooldownUntil.removeValue(forKey: key)
         startRequest(for: key, fallbackURL: committedURL)
+    }
+
+    func setDOMCandidates(_ candidates: [URL], for committedURL: URL) {
+        setDOMCandidates(
+            candidates.enumerated().map { Candidate.declared($0.element, sourceOrder: $0.offset) },
+            for: committedURL
+        )
     }
 
     private func ensureRequest(for key: String, fallbackURL: URL) {
@@ -2303,19 +2491,19 @@ final class WebsiteFaviconProvider {
         inFlight[key] = InFlightRequest(id: requestID, task: task)
     }
 
-    private func finish(_ image: NSImage?, for key: String, requestID: UUID) {
+    private func finish(_ fetched: FetchedFavicon?, for key: String, requestID: UUID) {
         guard inFlight[key]?.id == requestID else { return }
         inFlight.removeValue(forKey: key)
         let callbacks = demands.compactMap { id, demand in
             demand.originKey == key ? (id, demand.completion) : nil
         }
         let oneShots = oneShotCompletions.removeValue(forKey: key) ?? []
-        if let image {
-            storeImage(image, for: key)
+        let existingImage = cache[key]?.image
+        if let fetched {
+            storeImage(fetched, for: key)
             failureCycles.removeValue(forKey: key)
             cooldownUntil.removeValue(forKey: key)
             scheduledRetries.removeValue(forKey: key)?.task.cancel()
-            callbacks.forEach { demands.removeValue(forKey: $0.0) }
         } else {
             let failureIndex = failureCycles[key, default: 0]
             let delay = Self.retryBackoff[min(failureIndex, Self.retryBackoff.count - 1)]
@@ -2330,8 +2518,12 @@ final class WebsiteFaviconProvider {
                 }
             }
         }
-        callbacks.forEach { $0.1(image) }
-        oneShots.forEach { $0(image) }
+        if let fetched {
+            callbacks.forEach { $0.1(fetched.image) }
+        } else if existingImage == nil {
+            callbacks.forEach { $0.1(nil) }
+        }
+        oneShots.forEach { $0(fetched?.image) }
     }
 
     private func hasDemand(for key: String) -> Bool {
@@ -2339,14 +2531,14 @@ final class WebsiteFaviconProvider {
     }
 
     private func cachedImage(for key: String) -> NSImage? {
-        guard let image = cache[key] else { return nil }
+        guard let image = cache[key]?.image else { return nil }
         cacheOrder.removeAll { $0 == key }
         cacheOrder.append(key)
         return image
     }
 
-    private func storeImage(_ image: NSImage, for key: String) {
-        cache[key] = image
+    private func storeImage(_ fetched: FetchedFavicon, for key: String) {
+        cache[key] = CachedFavicon(image: fetched.image, priority: fetched.priority)
         cacheOrder.removeAll { $0 == key }
         cacheOrder.append(key)
         while cacheOrder.count > Self.maximumCachedOrigins {
@@ -2354,7 +2546,7 @@ final class WebsiteFaviconProvider {
         }
     }
 
-    private func storeDOMCandidates(_ candidates: [URL], for key: String) {
+    private func storeDOMCandidates(_ candidates: [Candidate], for key: String) {
         if candidates.isEmpty {
             domCandidates.removeValue(forKey: key)
             domCandidateOrder.removeAll { $0 == key }
@@ -2399,37 +2591,24 @@ final class WebsiteFaviconProvider {
 
     private func fetchFavicon(
         for url: URL,
-        iconURLHints: [URL],
+        iconURLHints: [Candidate],
         cachePolicy: URLRequest.CachePolicy
-    ) async -> NSImage? {
+    ) async -> FetchedFavicon? {
         let deadline = monotonicClock() + Self.requestBudget
         var seen = Set<String>()
         var declaredCount = 0
 
-        for candidate in Self.uniqueHTTPURLs(iconURLHints).prefix(Self.maximumDeclaredCandidates) {
+        for candidate in Self.orderedCandidates(iconURLHints).prefix(Self.maximumDeclaredCandidates) {
             guard monotonicClock() < deadline else { return nil }
-            seen.insert(candidate.absoluteString)
-            if let image = await fetchImage(
+            guard seen.insert(candidate.url.absoluteString).inserted else { continue }
+            declaredCount += 1
+            if let fetched = await fetchImage(
                 from: candidate,
                 cachePolicy: cachePolicy,
                 deadline: deadline
             ) {
-                return image
+                return fetched
             }
-            declaredCount += 1
-        }
-
-        // Keep the original conventional endpoint before URLSession HTML
-        // discovery when the loaded page supplied no working icon.
-        if let faviconURL = Self.faviconURL(for: url),
-           seen.insert(faviconURL.absoluteString).inserted,
-           monotonicClock() < deadline,
-           let image = await fetchImage(
-            from: faviconURL,
-            cachePolicy: cachePolicy,
-            deadline: deadline
-           ) {
-            return image
         }
 
         for pageURL in Self.pageDiscoveryURLs(for: url).prefix(Self.maximumDiscoveryPages) {
@@ -2440,36 +2619,36 @@ final class WebsiteFaviconProvider {
                 cachePolicy: cachePolicy,
                 deadline: deadline
             ) else { continue }
-            let candidates = Self.discoveredFaviconURLs(
+            let candidates = Self.discoveredFaviconCandidates(
                 in: html,
                 baseURL: response.url ?? pageURL,
                 limit: Self.maximumDeclaredCandidates - declaredCount
             )
-            for candidate in Self.uniqueHTTPURLs(candidates) {
+            for candidate in candidates {
                 guard monotonicClock() < deadline else { return nil }
-                guard seen.insert(candidate.absoluteString).inserted else { continue }
+                guard seen.insert(candidate.url.absoluteString).inserted else { continue }
                 declaredCount += 1
-                if let image = await fetchImage(
+                if let fetched = await fetchImage(
                     from: candidate,
                     cachePolicy: cachePolicy,
                     deadline: deadline
                 ) {
-                    return image
+                    return fetched
                 }
             }
         }
 
-        // Keep legacy conventional names after HTML discovery so an
-        // unreachable optional endpoint cannot delay declared site icons.
-        for candidate in Self.fallbackFaviconURLs(for: url).dropFirst()
-            where seen.insert(candidate.absoluteString).inserted {
+        // Declared icons from the loaded page and the bounded HTML discovery
+        // pass take precedence over conventional filenames such as favicon.ico.
+        for (sourceOrder, candidateURL) in Self.fallbackFaviconURLs(for: url).enumerated()
+            where seen.insert(candidateURL.absoluteString).inserted {
             guard monotonicClock() < deadline else { return nil }
-            if let image = await fetchImage(
-                from: candidate,
+            if let fetched = await fetchImage(
+                from: Candidate.conventional(candidateURL, sourceOrder: sourceOrder),
                 cachePolicy: cachePolicy,
                 deadline: deadline
             ) {
-                return image
+                return fetched
             }
         }
         return nil
@@ -2563,10 +2742,11 @@ final class WebsiteFaviconProvider {
     }
 
     private func fetchImage(
-        from url: URL,
+        from candidate: Candidate,
         cachePolicy: URLRequest.CachePolicy,
         deadline: TimeInterval
-    ) async -> NSImage? {
+    ) async -> FetchedFavicon? {
+        let url = candidate.url
         guard Self.isHTTPURL(url),
               let timeout = effectiveTimeout(until: deadline) else { return nil }
         var request = URLRequest(url: url)
@@ -2583,12 +2763,53 @@ final class WebsiteFaviconProvider {
                !(200..<300).contains(http.statusCode) {
                 return nil
             }
-            guard let image = NSImage(data: data) else { return nil }
+            guard let image = NSImage(data: data), Self.hasVisiblePixels(image) else { return nil }
             image.size = NSSize(width: 16, height: 16)
-            return image
+            image.isTemplate = candidate.kind == .mask
+            return FetchedFavicon(image: image, priority: candidate.priority)
         } catch {
             return nil
         }
+    }
+
+    private static func hasVisiblePixels(_ image: NSImage) -> Bool {
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 32,
+            pixelsHigh: 32,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ),
+        let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            return false
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        image.draw(
+            in: NSRect(x: 0, y: 0, width: 32, height: 32),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1,
+            respectFlipped: false,
+            hints: nil
+        )
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                if (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.01 {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     private func fetchPageHTML(
@@ -2736,6 +2957,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     var isActiveTab: Bool { isActive }
     var isResidentRuntime: Bool { isResident }
     var displayedIcon: NSImage? { iconView.image }
+    var displayedIconAlpha: CGFloat { iconView.alphaValue }
     var isShowingUnreadResponse: Bool { isUnreadResponse }
     var unreadResponseFrame: NSRect { isUnreadResponse ? bounds : .zero }
     var iconFrame: NSRect { iconView.frame }
@@ -3414,27 +3636,18 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
 
     private func applyIconAppearance(attentionForeground: NSColor? = nil) {
         let base = sourceIcon ?? Self.fallbackIcon()
-        let templateTint = isUnreadResponse
-            ? (attentionForeground ?? attentionStyle.configuration(for: attentionPalette).foregroundColor)
-            : NSColor.labelColor
-        if isResident {
-            // Runtime truth owns color: active, Hot, Warm cache and Cold grace
-            // all stay full color while a live WKWebView still exists.
+        if base?.isTemplate == true {
             iconView.image = base
-            iconView.alphaValue = 1
-            iconView.contentTintColor = base?.isTemplate == true ? templateTint : nil
+            iconView.contentTintColor = isActive
+                ? (isUnreadResponse
+                    ? (attentionForeground ?? attentionStyle.configuration(for: attentionPalette).foregroundColor)
+                    : .labelColor)
+                : .tertiaryLabelColor
         } else {
-            if base?.isTemplate == true {
-                iconView.image = base
-                iconView.contentTintColor = isUnreadResponse
-                    ? templateTint
-                    : (isActive ? .labelColor : .tertiaryLabelColor)
-            } else {
-                iconView.image = grayscaleIcon ?? Self.fallbackIcon()
-                iconView.contentTintColor = grayscaleIcon == nil ? .tertiaryLabelColor : nil
-            }
-            iconView.alphaValue = isHovered ? 0.74 : 0.56
+            iconView.image = isActive ? base : (grayscaleIcon ?? base)
+            iconView.contentTintColor = nil
         }
+        iconView.alphaValue = isActive ? 1 : (isHovered ? 0.74 : 0.56)
     }
 
     private func updateRuntimeToolTip() {
