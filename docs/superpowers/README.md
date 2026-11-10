@@ -4,6 +4,6 @@ Everything under `docs/superpowers/` is **historical planning material from an o
 
 These files may explain why earlier diagnostics/settings/unread work was structured a certain way, but they are not current Engineering Governance capability definitions, task contracts, or execution instructions.
 
-Do not invoke or reconstruct an old framework from these documents. Current engineering routing is defined by `AGENTS.md` and the installed Engineering Governance capabilities. Current work authorization comes from the mode-selected owner in `AGENTS.md`: `CURRENT_TASK.md` in FILE_CONTROL, or one explicitly selected and verified approved Issue revision after ISSUE_CONTROL cutover.
+Do not invoke or reconstruct an old framework from these documents. The installed Engineering Governance plugin owns current generic workflow. [AGENTS.md](../../AGENTS.md) holds FloatTabs-specific settings and safety boundaries; historical plans cannot grant current task authority.
 
 All files under `docs/superpowers/plans/` are historical evidence/plans, even when their body uses imperative language such as “implement”, “next”, “must”, or “gate”.
