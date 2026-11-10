@@ -87,6 +87,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let onToggleWithTrace: ((RuntimeDiagnosticTrace) -> Void)?
     private var selectedFaviconOriginKey: String?
     private var selectedFaviconImage: NSImage?
+    private var selectedFaviconLoaded = false
+    private var selectedFaviconRequestGeneration: UInt64 = 0
     private var latestActiveWebAppName: String?
     private(set) var attentionPresentation = StatusItemAttentionPresentation.resolve(
         unreadCount: 0,
@@ -214,31 +216,40 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         guard let faviconURL,
               let originKey = Self.faviconOriginKey(for: faviconURL) else {
+            selectedFaviconRequestGeneration &+= 1
             selectedFaviconOriginKey = nil
             selectedFaviconImage = nil
+            selectedFaviconLoaded = false
             redrawStatusImage()
             return
         }
 
-        // The menu bar favicon is origin-scoped. A path/query commit within
-        // the same site must keep the current image and its in-flight request;
-        // only a cross-origin selection invalidates the previous projection.
-        if selectedFaviconOriginKey == originKey {
-            return
+        if selectedFaviconOriginKey != originKey {
+            selectedFaviconRequestGeneration &+= 1
+            selectedFaviconOriginKey = originKey
+            selectedFaviconImage = nil
+            selectedFaviconLoaded = false
+            // Do not leave the previous site's image visible while this
+            // origin's favicon is loading.
+            redrawStatusImage()
         }
 
-        selectedFaviconOriginKey = originKey
-        // Never leave the previous site's favicon visible while a newly selected
-        // origin is loading. The shared provider normally returns immediately from
-        // the same cache already populated by the tab rail.
-        selectedFaviconImage = nil
-        redrawStatusImage()
+        // Success remains stable for same-origin navigation. A failed or
+        // pending origin stays eligible for a normal update to re-enter the
+        // provider, which owns in-flight coalescing and failure cooldown.
+        guard !selectedFaviconLoaded else { return }
+        selectedFaviconRequestGeneration &+= 1
+        let requestGeneration = selectedFaviconRequestGeneration
         loadFavicon(faviconURL) { [weak self] image in
             guard let self,
                   Self.acceptsFaviconCompletion(
                       selectedOriginKey: self.selectedFaviconOriginKey,
                       completionOriginKey: originKey
-                  ) else { return }
+                  ),
+                  self.selectedFaviconRequestGeneration == requestGeneration else { return }
+            if image != nil {
+                self.selectedFaviconLoaded = true
+            }
             self.applyStatusImage(image)
         }
     }

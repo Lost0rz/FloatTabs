@@ -1979,19 +1979,41 @@ final class WebsiteFaviconProvider {
     typealias DataLoader = @MainActor @Sendable (
         URLRequest
     ) async throws -> (Data, URLResponse)
+    typealias MonotonicClock = @MainActor @Sendable () -> TimeInterval
+    typealias RetryWaiter = @MainActor @Sendable (TimeInterval) async -> Void
+    typealias Completion = (NSImage?) -> Void
+
+    private struct InFlightRequest {
+        let id: UUID
+        var completions: [Completion]
+    }
 
     static let shared = WebsiteFaviconProvider()
+    private static let automaticRetryDelay: TimeInterval = 15
+    private static let failureCooldown: TimeInterval = 120
 
     private let dataLoader: DataLoader
+    private let monotonicClock: MonotonicClock
+    private let retryWaiter: RetryWaiter
     private var cache: [String: NSImage] = [:]
-    private var failedOrigins = Set<String>()
+    private var failedUntil: [String: TimeInterval] = [:]
+    private var inFlight: [String: InFlightRequest] = [:]
 
     init(
         dataLoader: @escaping DataLoader = { request in
             try await URLSession.shared.data(for: request)
+        },
+        monotonicClock: @escaping MonotonicClock = {
+            ProcessInfo.processInfo.systemUptime
+        },
+        retryWaiter: @escaping RetryWaiter = { delay in
+            let nanoseconds = UInt64(max(delay, 0) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanoseconds)
         }
     ) {
         self.dataLoader = dataLoader
+        self.monotonicClock = monotonicClock
+        self.retryWaiter = retryWaiter
     }
 
     static func originKey(for url: URL) -> String? {
@@ -2066,66 +2088,118 @@ final class WebsiteFaviconProvider {
         return result
     }
 
-    func load(for url: URL, completion: @escaping (NSImage?) -> Void) {
+    func load(for url: URL, completion: @escaping Completion) {
         guard let key = Self.originKey(for: url) else {
             completion(nil)
             return
         }
+        let now = monotonicClock()
+        failedUntil = failedUntil.filter { $0.value > now }
         if let cached = cache[key] {
             completion(cached)
             return
         }
-        if failedOrigins.contains(key) {
+        if var active = inFlight[key] {
+            active.completions.append(completion)
+            inFlight[key] = active
+            return
+        }
+
+        if failedUntil[key] != nil {
             completion(nil)
             return
         }
 
+        let requestID = UUID()
+        inFlight[key] = InFlightRequest(id: requestID, completions: [completion])
         Task { [weak self] in
             guard let self else { return }
-
-            // Keep the inexpensive and conventional endpoint first. Some
-            // modern sites, including Gemini, return an empty HTML response
-            // from /favicon.ico even though their real icon is declared in
-            // the document head.
-            if let faviconURL = Self.faviconURL(for: url),
-               let image = await self.fetchImage(from: faviconURL) {
-                self.cache[key] = image
-                completion(image)
+            let cachedImage = await self.fetchFavicon(for: url, cachePolicy: .returnCacheDataElseLoad)
+            if let cachedImage {
+                self.finish(cachedImage, for: key, requestID: requestID)
                 return
             }
 
-            // Read only the page markup and inspect <link rel="icon">. This
-            // supports absolute/relative, PNG/SVG and cross-origin CDN icons
-            // without executing JavaScript or sharing website cookies.
-            if let (html, response) = await self.fetchPageHTML(for: url) {
-                let pageURL = response.url ?? url
-                let htmlCandidates = Self.discoveredFaviconURLs(
-                    in: html,
-                    baseURL: pageURL
-                )
-                for candidate in htmlCandidates {
-                    if let image = await self.fetchImage(from: candidate) {
-                        self.cache[key] = image
-                        completion(image)
-                        return
-                    }
-                }
+            await self.retryWaiter(Self.automaticRetryDelay)
+            guard !Task.isCancelled else {
+                self.finish(nil, for: key, requestID: requestID)
+                return
             }
 
-            // A few older sites omit HTML declarations but expose one of
-            // these conventional names. Keep these after HTML discovery so a
-            // slow or unreachable fallback endpoint cannot delay normal pages.
-            for candidate in Self.fallbackFaviconURLs(for: url).dropFirst() {
-                if let image = await self.fetchImage(from: candidate) {
-                    self.cache[key] = image
-                    completion(image)
-                    return
-                }
-            }
-
-            failedOrigins.insert(key)
-            completion(nil)
+            let freshImage = await self.fetchFavicon(for: url, cachePolicy: .reloadIgnoringLocalCacheData)
+            self.finish(freshImage, for: key, requestID: requestID)
         }
+    }
+
+    private func finish(_ image: NSImage?, for key: String, requestID: UUID) {
+        guard let request = inFlight[key], request.id == requestID else { return }
+        inFlight.removeValue(forKey: key)
+        if let image {
+            cache[key] = image
+            failedUntil.removeValue(forKey: key)
+        } else {
+            failedUntil[key] = monotonicClock() + Self.failureCooldown
+        }
+        request.completions.forEach { $0(image) }
+    }
+
+    private func fetchFavicon(
+        for url: URL,
+        cachePolicy: URLRequest.CachePolicy
+    ) async -> NSImage? {
+        // Preserve the inexpensive conventional endpoint, then inspect the
+        // origin's root document before a bounded path-specific discovery.
+        if let faviconURL = Self.faviconURL(for: url),
+           let image = await fetchImage(from: faviconURL, cachePolicy: cachePolicy) {
+            return image
+        }
+
+        let discoveryPages = Self.pageDiscoveryURLs(for: url)
+        for pageURL in discoveryPages {
+            guard let (html, response) = await fetchPageHTML(
+                for: pageURL,
+                cachePolicy: cachePolicy
+            ) else { continue }
+            let candidates = Self.discoveredFaviconURLs(
+                in: html,
+                baseURL: response.url ?? pageURL
+            )
+            for candidate in candidates {
+                if let image = await fetchImage(from: candidate, cachePolicy: cachePolicy) {
+                    return image
+                }
+            }
+        }
+
+        // Keep legacy conventional names after HTML discovery so an
+        // unreachable optional endpoint cannot delay declared site icons.
+        for candidate in Self.fallbackFaviconURLs(for: url).dropFirst() {
+            if let image = await fetchImage(from: candidate, cachePolicy: cachePolicy) {
+                return image
+            }
+        }
+        return nil
+    }
+
+    static func pageDiscoveryURLs(for url: URL) -> [URL] {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme != nil,
+              components.host != nil else { return [] }
+        let origin = components
+        components.path = "/"
+        components.query = nil
+        components.fragment = nil
+        var pages = [components.url].compactMap { $0 }
+
+        guard !origin.path.isEmpty, origin.path != "/" else { return pages }
+        var pathComponents = origin
+        pathComponents.query = nil
+        pathComponents.fragment = nil
+        if let pathURL = pathComponents.url,
+           !pages.contains(pathURL) {
+            pages.append(pathURL)
+        }
+        return pages
     }
 
     private static func iconURL(path: String, for url: URL) -> URL? {
@@ -2194,10 +2268,13 @@ final class WebsiteFaviconProvider {
         return nil
     }
 
-    private func fetchImage(from url: URL) async -> NSImage? {
+    private func fetchImage(
+        from url: URL,
+        cachePolicy: URLRequest.CachePolicy
+    ) async -> NSImage? {
         guard Self.isHTTPURL(url) else { return nil }
         var request = URLRequest(url: url)
-        request.cachePolicy = .returnCacheDataElseLoad
+        request.cachePolicy = cachePolicy
         request.timeoutInterval = 8
         request.setValue(
             "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
@@ -2217,7 +2294,10 @@ final class WebsiteFaviconProvider {
         }
     }
 
-    private func fetchPageHTML(for url: URL) async -> (String, URLResponse)? {
+    private func fetchPageHTML(
+        for url: URL,
+        cachePolicy: URLRequest.CachePolicy
+    ) async -> (String, URLResponse)? {
         guard Self.isHTTPURL(url) else { return nil }
         guard var components = URLComponents(
             url: url,
@@ -2232,7 +2312,7 @@ final class WebsiteFaviconProvider {
         components.fragment = nil
         guard let pageURL = components.url else { return nil }
         var request = URLRequest(url: pageURL)
-        request.cachePolicy = .returnCacheDataElseLoad
+        request.cachePolicy = cachePolicy
         request.timeoutInterval = 8
         request.setValue(
             "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
@@ -2254,6 +2334,11 @@ final class WebsiteFaviconProvider {
 
 @MainActor
 final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
+    typealias FaviconLoadHandler = @MainActor (
+        URL,
+        @escaping (NSImage?) -> Void
+    ) -> Void
+
     let slotID: UUID
 
     var onSelect: ((UUID) -> Void)?
@@ -2278,6 +2363,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         frame: .zero,
         geometry: .railTab
     )
+    private let requestFavicon: FaviconLoadHandler
     private let iconView = NSImageView()
     private let unreadDotView = ClassicUnreadDotView()
     private let label = NSTextField(labelWithString: "")
@@ -2300,6 +2386,8 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     private var browserProfileAssignmentEnabled = true
     private var browserProfileDuplicationEnabled = true
     private var faviconOriginKey: String?
+    private var loadedFaviconOriginKey: String?
+    private var faviconRequestGeneration: UInt64 = 0
     private var sourceIcon: NSImage?
     private var grayscaleIcon: NSImage?
     private var isUnreadResponse = false
@@ -2353,8 +2441,11 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         attentionSurfaceView.isReduceMotionEnabled
     }
 
-    init(slotID: UUID) {
+    init(slotID: UUID, faviconLoader: FaviconLoadHandler? = nil) {
         self.slotID = slotID
+        self.requestFavicon = faviconLoader ?? { url, completion in
+            WebsiteFaviconProvider.shared.load(for: url, completion: completion)
+        }
         super.init(frame: .zero)
 
         wantsLayer = true
@@ -2876,11 +2967,23 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
 
     private func loadFaviconIfNeeded(from url: URL) {
         let key = WebsiteFaviconProvider.originKey(for: url)
-        guard key != faviconOriginKey else { return }
-        faviconOriginKey = key
-        setSourceIcon(Self.fallbackIcon())
-        WebsiteFaviconProvider.shared.load(for: url) { [weak self] image in
-            guard let self, self.faviconOriginKey == key else { return }
+        if key != faviconOriginKey {
+            faviconOriginKey = key
+            loadedFaviconOriginKey = nil
+            faviconRequestGeneration &+= 1
+            setSourceIcon(Self.fallbackIcon())
+        }
+        guard let key, loadedFaviconOriginKey != key else { return }
+
+        faviconRequestGeneration &+= 1
+        let requestGeneration = faviconRequestGeneration
+        requestFavicon(url) { [weak self] image in
+            guard let self,
+                  self.faviconOriginKey == key,
+                  self.faviconRequestGeneration == requestGeneration else { return }
+            if image != nil {
+                self.loadedFaviconOriginKey = key
+            }
             self.setSourceIcon(image ?? Self.fallbackIcon())
         }
     }
