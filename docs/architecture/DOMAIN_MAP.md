@@ -1,6 +1,6 @@
 # FloatTabs — Domain and Source Navigation Map
 
-Derived map only. It does **not** authorize implementation. Read [AGENTS.md](../../AGENTS.md), [docs/README.md](../README.md) and [architecture contract index](README.md); use FILE_CONTROL Task/Status only until verified cutover, and a selected exact-approved GitHub Issue thereafter.
+Derived map only: this document identifies FloatTabs Domain responsibilities and code entry points, not task authorization or a separate engineering workflow. See [AGENTS.md](../../AGENTS.md), the [documentation index](../README.md) and [architecture contract index](README.md).
 
 This map names ownership and likely source entry points, not a task-specific WP0/WP1 plan or literal source-head guarantee. Verify paths and tests against the intended PR/commit before work.
 
@@ -22,18 +22,6 @@ This map names ownership and likely source entry points, not a task-specific WP0
 | Website Cache / Storage | re-downloadable website-cache measurement/cleanup | `FloatTabs/Storage/WebsiteCacheCleanupCoordinator.swift`, `WebsiteCacheCleanupService.swift`, `WebsiteCachePolicy.swift` | cache cleanup is not Runtime memory lifecycle |
 | Tab Rail / Retention Projection | Automatic/Keep Loaded control, Browser Profile/media projection | `FloatTabs/UI/ExternalTabRail.swift` | retain accepted preference semantics |
 | Global Settings | app settings presentation | `FloatTabs/UI/GlobalSettingsController.swift`, `SettingsInformationArchitecture.swift` | no new lifecycle/memory settings without approved policy evidence |
-
-## Current decision route
-
-```text
-user-observed runtime/restore problem
-→ selected mode-controlled task authorization
-→ applicable accepted bounded restore/lifecycle contract
-→ branch-aligned source/tests and live runtime evidence
-→ single owning domain/writer and risk-proportional verification
-```
-
-In November 2026, the active carry-forward lifecycle/restore work is [Issue #198](https://github.com/Lost0rz/FloatTabs/issues/198) linked to independent [Draft PR #195](https://github.com/Lost0rz/FloatTabs/pull/195). This is a dated navigation hint; live repository evidence and human UI acceptance decide current readiness. Issue #198 revision 1 received authenticated approval on 2026-11-06. Its product execution remains gated on verified `main` ISSUE_CONTROL cutover, current source/writer boundaries and independent human UI acceptance.
 
 ## Canonical runtime and restore flow
 
