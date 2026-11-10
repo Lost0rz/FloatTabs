@@ -28,7 +28,7 @@ FloatTabs 的目标是把长期使用的网页变成一组稳定、快速切换�
 - 全局快捷键或菜单栏图标快速显示 / 隐藏；
 - 左侧 Tab rail 支持快速切换、排序、折叠和右键设置；
 - Browser Profiles 提供相互隔离并持续保存的登录 / Session 容器；
-- 支持 Pin、自动隐藏、多显示器 WebKit 全屏、后台音频和 Hot / Warm / Cold Residency；
+- 支持 Pin、自动隐藏、多显示器 WebKit 全屏、后台音频和 Automatic / Keep Loaded Runtime 保留偏好；
 - ChatGPT 回答完成后可产生 Ready / unread Attention 提示；
 - Runtime Diagnostics 为 Web runtime、navigation、Attention、focus、memory pressure 和 recovery 留下可关联证据。
 
@@ -49,7 +49,7 @@ FloatTabs 不会把 reload / reset / restart 当作运行时根因。历史 WebC
 | Floating resize | Ordinary floating-window resize constrained to the current display. |
 | Pin / auto-hide | Keep FloatTabs visible when pinned; otherwise hide when focus moves elsewhere. |
 | WebKit element fullscreen | Separates fullscreen source hosting from the FloatTabs shell and restores through guarded lifecycle coordination. |
-| Hot / Warm / Cold lifecycle | Balances fast switching against resource use on a Slot-by-Slot basis. |
+| Automatic / Keep Loaded retention | Balances fast switching against resource use on a per-Slot basis. |
 | Background audio policy | Pauses inactive media by default or allows background playback per Slot. |
 | Backup & restore | Exports and restores FloatTabs configuration without storing website credentials or cookies. |
 | Runtime Diagnostics | Persists privacy-filtered runtime evidence for incident analysis and export. |
@@ -117,15 +117,14 @@ Browser Profiles let multiple accounts of the same website remain signed in inde
 
 Browser Profile/session data is user data. Runtime recovery, diagnostics and release installation do not implicitly clear it.
 
-## Residency
+## Runtime Retention
 
-| Policy | Behavior |
+| Preference | Behavior |
 | --- | --- |
-| **Hot** | Keep the live WebView available; renderer termination can be recovered without requiring Slot selection. |
-| **Warm** | Keep inactive runtimes for the configured retention during normal operation; memory pressure can shorten retention according to policy. |
-| **Cold** | Release inactive runtimes after the cold retention boundary, with recent-active protection where applicable. |
+| **Automatic** | The lifecycle coordinator may reclaim an eligible inactive, unprotected Runtime under the accepted policy; it can restore on demand when reselected. |
+| **Keep Loaded** | Prefers to keep an already loaded inactive Runtime during normal operation; system termination and critical-pressure protections can still apply. |
 
-Background media is separate from Residency. Inactive media pauses by default unless the Slot explicitly allows background audio.
+Former **Hot / Warm / Cold** labels remain as legacy compatibility representations, not the current user-facing Runtime retention choices. Persistent Slot identity, Browser Profile and website Sessions are independent of whether the WKWebView Runtime is resident. Background media is configured separately.
 
 ## Runtime Diagnostics and Observation
 
@@ -248,13 +247,12 @@ FloatTabs-<version>.dSYM.zip.sha256
 Engineering and document authority:
 
 - Project rules and current **control mode**: [`AGENTS.md`](AGENTS.md).
-- Current task/progress: `CURRENT_TASK.md` and `CURRENT_STATUS.md` **only while main is in FILE_CONTROL**; after verified ISSUE_CONTROL cutover, use the specifically selected, digest-bound **approved GitHub Issue** and Issue receipts (not legacy root files).
 - Canonical documentation routing: [`docs/README.md`](docs/README.md).
 - Architecture contracts and source map: [`docs/architecture/README.md`](docs/architecture/README.md) and [`docs/architecture/DOMAIN_MAP.md`](docs/architecture/DOMAIN_MAP.md).
 - Current shell / interaction references: [`docs/design/`](docs/design/).
 - Browser Profiles bounded product reference: [`docs/product/FloatTabs_Browser_Profiles_Contract_V1.md`](docs/product/FloatTabs_Browser_Profiles_Contract_V1.md).
 - This version's release record: [`docs/release/FloatTabs_v0.5.8.md`](docs/release/FloatTabs_v0.5.8.md).
 
-GitHub Issue-based Web ↔ Codex collaboration uses a selected exact-approved `EXECUTION_SPEC_V1` Issue for task authority. Migration provenance: [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197) and [PR #199](https://github.com/Lost0rz/FloatTabs/pull/199). The effective `main` `AGENTS.md` determines the live control mode; Issue creation, comments without matching approval and unmerged PRs do not independently change authority.
+The installed Engineering Governance plugin owns generic collaboration and task workflow. FloatTabs records only project-specific settings in [`AGENTS.md`](AGENTS.md), with current documentation authority routed through [`docs/README.md`](docs/README.md). Historical migration evidence: [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197) and merged [PR #199](https://github.com/Lost0rz/FloatTabs/pull/199).
 
 Older stage, design and release files are retained as historical records. Historical documents do not override current production behavior or current accepted contracts.

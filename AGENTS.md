@@ -9,13 +9,11 @@ ISSUE_APPROVERS: Lost0rz
 ISSUE_DELEGATED_APPROVAL: ENABLED
 ISSUE_WEB_SPEC_AUTHORING: ENABLED
 
-## Project authority and execution environments
+## Project-specific authority boundaries
 
-Engineering Governance owns reusable task authorization, Issue approval verification, Skill routing, handoff, verification cadence, and Git/PR/worktree lifecycle. This file owns FloatTabs-specific product, documentation, CI, runtime, and data-safety constraints.
+The installed Engineering Governance plugin is the sole owner of reusable engineering workflow. FloatTabs owns only its control-mode/approver opt-ins, product contracts, Domain boundaries, Runtime evidence needs, CI environment and data-safety policy. Do not copy generic approval, handoff, audit, Git/PR/worktree or verification procedures into this file; plugin updates must not require repeating those procedures in FloatTabs.
 
-Cloud and local are execution/evidence contexts, not fixed planning, implementation, or review roles. Do not require a particular assistant, model, CLI, or worker technology. Actual actions depend on current capabilities, permissions, approved task scope, and fresh host/workspace evidence. Local runtime, installed app, TCC and interaction claims require local evidence; a remote repository observation alone is insufficient.
-
-The declarations above select Issue Control and delegated-approval opt-in; they do not authorize self-approval or source/PR/merge actions. The selected approved Issue revision remains the execution authority under the installed Engineering Governance contract. Historical `CURRENT_TASK.md`/`CURRENT_STATUS.md` are not active task controls.
+Real macOS runtime, installed app, TCC, multi-display and interaction claims require evidence from the actual Mac. Remote repository inspection alone cannot prove local behavior. Historical `CURRENT_TASK.md` and `CURRENT_STATUS.md` files are not active project controls.
 
 ## Documentation authority
 
@@ -26,10 +24,10 @@ Consult `docs/README.md` before using historical plans/architecture/design/valid
 Use `docs/architecture/DOMAIN_MAP.md` for navigation. Key durable boundaries:
 
 - **Tabs** own Tab/Profile identity, selection, ordering, and configuration projection.
-- **Web** owns `WKWebView` runtime, navigation, residency, observer/task lifecycle, runtime health, and recovery.
+- **Web** owns `WKWebView` runtime, navigation, observer/task lifecycle, health and recovery. `SlotLifecycleCoordinator` is the sole lifecycle policy/reclaim decision writer; `WebViewPool` owns Runtime creation/retention/release/restore mechanisms, not an independent policy.
 - **Panel / Window / Fullscreen** own presentation and window synchronization.
 - **Focus / Input** own native/DOM focus and command/event routing.
-- **Persistence** owns durable user configuration and recovery data.
+- **Persistence** owns durable user configuration, Browser Profile/Session data and recovery material independently of WKWebView Runtime residence.
 - **Speech / Attention** consume bounded runtime/content signals; they do not become Tab/Web authorities.
 - **Diagnostics** record evidence; logs do not become product truth or root-cause authority.
 
@@ -59,8 +57,6 @@ Do not combine stale events from different runtime/navigation generations as one
 
 - Validate affected `WKWebView` lifecycle/navigation, observer cleanup, runtime recovery, window/fullscreen, focus/event monitoring, persistence/migration and canonical-writer boundaries with evidence appropriate to the risk. Routine changes do not by default demand all test suites.
 - Real macOS interaction/runtime acceptance is human-owned where the applicable product contract requires it. Deterministic browser automation, including Playwright, remains permitted, but AI-driven clicks/screenshots cannot replace required human UI acceptance.
-- An accepted multi-phase contract may defer human interaction acceptance to its final integrated gate; intermediate implementation still needs the phase's scoped machine validation and data-safety evidence.
-- A reference-derived performance default is a product assumption rather than an empirical result; defer tuning measurements only when the accepted contract permits it. Do not waive correctness, data-safety or required CI gates.
 
 ## CI execution
 
