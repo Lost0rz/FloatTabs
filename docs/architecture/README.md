@@ -12,6 +12,10 @@ Read [documentation authority](../README.md) and the effective `main` [AGENTS.md
 
 Other V1–V5, stage-numbered plans and historical phase reports remain evidence, **not** a new implementation mandate.
 
+## Prospective corrective notes
+
+- [Runtime Presentation Recovery Corrective V1](FloatTabs_Runtime_Presentation_Recovery_Corrective_V1.md): Issue #208's prospective selected-Slot runtime replacement, exact navigation-generation readiness, truthful Retry failure, and active recovery presentation correction; accepted lifecycle and recovery dispositions remain unchanged.
+
 ## Active work and authority at 2026-11-05
 
 `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` is carried into [Issue #198](https://github.com/Lost0rz/FloatTabs/issues/198). At this snapshot [PR #195](https://github.com/Lost0rz/FloatTabs/pull/195) is OPEN/DRAFT with the ChatGPT hibernated-runtime URL restore corrective on its branch. Head-aligned tests and CI are recorded in the branch Task; **real-Mac human UI acceptance remains PENDING**.

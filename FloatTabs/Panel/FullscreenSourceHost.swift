@@ -566,6 +566,18 @@ final class FullscreenSourceHostController {
         handleFullscreenStateChange(of: webView)
     }
 
+#if DEBUG
+    /// Drives the existing KVO transition handler with WebKit's public state
+    /// enum so panel lifecycle tests can exercise real source-lock callbacks.
+    func debugTransitionFullscreenState(
+        of webView: WKWebView,
+        to webKitState: WKWebView.FullscreenState
+    ) {
+        guard observedWebView === webView else { return }
+        handleFullscreenStateChange(of: webView, webKitState: webKitState)
+    }
+#endif
+
     static func sourceFrame(
         forShellFrame frame: NSRect,
         leadingInset: CGFloat = PanelMetrics.externalControlZoneWidth
@@ -614,10 +626,20 @@ final class FullscreenSourceHostController {
     }
 
     private func handleFullscreenStateChange(of webView: WKWebView) {
+        handleFullscreenStateChange(
+            of: webView,
+            webKitState: webView.fullscreenState
+        )
+    }
+
+    private func handleFullscreenStateChange(
+        of webView: WKWebView,
+        webKitState: WKWebView.FullscreenState
+    ) {
         let previous = sessionState
         let next = FullscreenSourceSessionState.next(
             from: sessionState,
-            webKitState: webView.fullscreenState
+            webKitState: webKitState
         )
         let wasLocked = isSessionLocked
         sessionState = next
