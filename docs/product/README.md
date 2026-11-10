@@ -2,9 +2,9 @@
 
 Read `../README.md` first. This directory contains a mixture of accepted feature contracts, amendments, construction plans, Stage documents, and old product baselines.
 
-## Current-use rule
+## Scope and validity
 
-No file in this directory is global task authority. The effective `main` `AGENTS.md` selects either historical FILE_CONTROL (`CURRENT_TASK.md`) or ISSUE_CONTROL (one selected exact-approved GitHub Issue/revision); an unmerged migration branch does not change the mode. Current production source/tests control implementation truth. Newer cross-cutting architecture/design contracts override older feature-contract statements where scopes overlap.
+These documents own bounded feature behavior and historical product decisions, not generic workflow, task authorization or PR status. Current Runtime retention is **Automatic / Keep Loaded**; the old Hot/Warm/Cold wording describes compatibility history. Consult the [architecture index](../architecture/README.md) for cross-cutting lifecycle contracts and production source/tests for implemented behavior.
 
 ## Bounded accepted feature references
 
@@ -24,11 +24,11 @@ Treat the following as historical by default:
 - `FloatTabs_v0.1.0_Release_Baseline.md`;
 - every `*_Construction_Plan_*` document after the corresponding feature closed.
 
-The Stage 5 Residency/Resource Lifecycle documents are especially important historical evidence because they explain why current Hot/Warm/Cold behavior exists. They are **not** the target lifecycle model for `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
+Stage 5 Residency/Resource Lifecycle documents explain former Hot/Warm/Cold behavior; they do not define current Automatic / Keep Loaded retention.
 
 ## Profile / lifecycle overlap
 
-Browser Profile persistence is independent from live Runtime lifetime. When an older Profile document says Slots follow Hot/Warm/Cold, preserve that statement as historical implementation context only. The current Runtime Lifecycle / Memory contract owns the target cross-cutting lifecycle direction.
+Browser Profile persistence is independent from live Runtime lifetime. When an older Profile document says Slots follow Hot/Warm/Cold, preserve that statement as historical implementation context only. Currently applicable architecture contracts and production source/tests determine Runtime lifecycle semantics.
 
 ## Attention / lifecycle overlap
 
