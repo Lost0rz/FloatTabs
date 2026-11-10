@@ -79,10 +79,16 @@ final class WebViewPool {
     typealias TrustedInteractionEventHandler = @MainActor (UUID, ChatGPTTrustedInteractionEvent) -> Void
     typealias CommittedURLChangeHandler = @MainActor (UUID, URL) -> Void
     typealias CommittedURLProvider = @MainActor (WKWebView) -> URL?
-    typealias SlotNavigationFinishProjectionHandler = @MainActor (
+    typealias SlotNavigationReadinessProjectionHandler = @MainActor (
+        UUID,
+        WebRuntimeDiagnosticIdentity,
+        UInt64
+    ) -> Void
+    typealias RuntimeRecoveryStartHandler = @MainActor (
         UUID,
         WebRuntimeDiagnosticIdentity
     ) -> Void
+    typealias RuntimeRecoveryUnavailableHandler = RuntimeRecoveryStartHandler
     typealias IncidentRequestHandler = @MainActor (
         UUID,
         RuntimeDiagnosticIncidentContext
@@ -101,6 +107,12 @@ final class WebViewPool {
         case hibernate
         case release
         case rebuild
+    }
+
+    private enum ExistingRuntimeRenderingDecision {
+        case noExistingRuntime
+        case reuse(WebRenderingProfile)
+        case rebuild(navigationURL: URL)
     }
 
     private var webViews: [UUID: WKWebView] = [:]
@@ -142,11 +154,16 @@ final class WebViewPool {
     /// only when the callback belongs to the exact currently resident Runtime
     /// of the Slot, together with that Runtime's immutable diagnostic identity.
     /// Read-only seam: the pool keeps no presentation or readiness state.
-    var onSlotNavigationFinish: SlotNavigationFinishProjectionHandler?
+    var onSlotNavigationStart: SlotNavigationReadinessProjectionHandler?
+    var onSlotNavigationFinish: SlotNavigationReadinessProjectionHandler?
     /// Bounded terminal-failure projection carrying the same exact-current-
     /// Runtime guard. A failed navigation must not leave presentation owners
     /// waiting forever; existing WebKit error/fallback behavior is unchanged.
-    var onSlotNavigationFailure: SlotNavigationFinishProjectionHandler?
+    var onSlotNavigationFailure: SlotNavigationReadinessProjectionHandler?
+    /// Bounded notification that the existing Runtime is about to reload
+    /// after WebContent termination. Panel owns any visible Restoring state.
+    var onRuntimeRecoveryStart: RuntimeRecoveryStartHandler?
+    var onRuntimeRecoveryUnavailable: RuntimeRecoveryUnavailableHandler?
 
     /// Cross-domain diagnostics callback. The pool only forwards a bounded
     /// request; PanelController owns the shared snapshot assembly.
@@ -226,68 +243,34 @@ final class WebViewPool {
     }
 
     func webView(for profile: WebAppProfile) throws -> WKWebView {
-        let desiredRendering = profile.renderingProfile.normalized()
-        let desiredBrowserProfileIdentity = BrowserProfileIdentity(
-            browserProfileID: profile.browserProfileID
-        )
-
-        if let existing = webViews[profile.id],
-           let appliedRendering = appliedRenderingProfiles[profile.id],
-           let appliedBrowserProfileIdentity = appliedBrowserProfileIdentities[profile.id] {
-            let compatibilityURL = Self.rebuildNavigationURL(
-                initialURL: nil,
-                visibleURL: existing.url,
-                storedCurrentURL: profile.currentURL,
-                homeURL: profile.homeURL
-            )
-            let desiredRuntimeRendering = SiteCompatibilityPolicy.runtimeRendering(
-                for: desiredRendering,
-                navigationURL: compatibilityURL
-            )
-
-            if appliedBrowserProfileIdentity != desiredBrowserProfileIdentity
-                || desiredRuntimeRendering.requiresWebViewRebuild(comparedTo: appliedRendering) {
-                let navigationURL = Self.rebuildNavigationURL(
-                    initialURL: existing.backForwardList.currentItem?.initialURL,
-                    visibleURL: existing.url,
-                    storedCurrentURL: profile.currentURL,
-                    homeURL: profile.homeURL
-                )
+        if let existing = webViews[profile.id] {
+            switch existingRuntimeRenderingDecision(for: profile) {
+            case .rebuild(let navigationURL):
                 return try rebuildWebView(
                     for: profile,
                     navigationURL: navigationURL
                 )
+
+            case .reuse(let desiredRuntimeRendering):
+                WebViewFactory.applyRuntimeRendering(desiredRuntimeRendering, to: existing)
+                appliedRenderingProfiles[profile.id] = desiredRuntimeRendering
+                recoverDeferredContentProcessIfNeeded(for: profile, in: existing)
+                var reuseFields = renderingDiagnosticFields(for: desiredRuntimeRendering)
+                reuseFields["slot_id"] = .string(profile.id.uuidString)
+                reuseFields.merge(runtimeDiagnosticIdentities[profile.id]?.fields ?? [:]) { current, _ in current }
+                diagnostics.record(
+                    event: "web_runtime.reused",
+                    level: .debug,
+                    subsystem: "web",
+                    fields: reuseFields
+                )
+                return existing
+
+            case .noExistingRuntime:
+                // The main-actor-owned pool cannot lose this Runtime between
+                // the dictionary lookup above and this compatibility decision.
+                preconditionFailure("existing WebView disappeared during compatibility check")
             }
-
-            // Reapply the effective runtime profile, not the persisted base profile.
-            // Narrow compatibility overrides such as ChatGPT Automatic+Mobile must
-            // remain stable when a warm WKWebView is detached and later reused.
-            WebViewFactory.applyRuntimeRendering(desiredRuntimeRendering, to: existing)
-            appliedRenderingProfiles[profile.id] = desiredRuntimeRendering
-            recoverDeferredContentProcessIfNeeded(for: profile, in: existing)
-            var reuseFields = renderingDiagnosticFields(for: desiredRuntimeRendering)
-            reuseFields["slot_id"] = .string(profile.id.uuidString)
-            reuseFields.merge(runtimeDiagnosticIdentities[profile.id]?.fields ?? [:]) { current, _ in current }
-            diagnostics.record(
-                event: "web_runtime.reused",
-                level: .debug,
-                subsystem: "web",
-                fields: reuseFields
-            )
-            return existing
-        }
-
-        if let existing = webViews[profile.id] {
-            let navigationURL = Self.rebuildNavigationURL(
-                initialURL: existing.backForwardList.currentItem?.initialURL,
-                visibleURL: existing.url,
-                storedCurrentURL: profile.currentURL,
-                homeURL: profile.homeURL
-            )
-            return try rebuildWebView(
-                for: profile,
-                navigationURL: navigationURL
-            )
         }
 
         let navigationURL = profile.currentURL ?? profile.homeURL
@@ -525,6 +508,43 @@ final class WebViewPool {
             allowed: allowHTTPEntryFallback
         )
         load(webView, URLRequest(url: url))
+    }
+
+    /// Whether this resident Runtime has a safe current URL that an explicit
+    /// user Retry can request again without changing its Browser Profile or
+    /// WebKit data store.
+    func canRetryNavigation(slotID: UUID) -> Bool {
+        retryNavigationURL(slotID: slotID) != nil
+    }
+
+    /// Starts one safe, user-requested navigation on the exact resident
+    /// Runtime. This is never scheduled automatically and does not mutate
+    /// persisted Slot, Profile, Cookie, or Session state.
+    @discardableResult
+    func retryNavigation(slotID: UUID) -> Bool {
+        guard let webView = webViews[slotID],
+              let url = retryNavigationURL(slotID: slotID) else {
+            return false
+        }
+
+        lastKnownURLs[slotID] = url
+        navigationObservers[slotID]?.configureHTTPEntryFallback(
+            for: url,
+            allowed: false
+        )
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString),
+            "retry_source": .string("explicit_user_action")
+        ]
+        fields.merge(runtimeDiagnosticIdentities[slotID]?.fields ?? [:]) { current, _ in current }
+        diagnostics.record(
+            event: "web_runtime.retry.requested",
+            level: .notice,
+            subsystem: "web",
+            fields: fields
+        )
+        load(webView, recoveryRequest(url: url))
+        return true
     }
 
     /// Whether the current entry load of a Slot is eligible for the one-shot
@@ -772,9 +792,15 @@ final class WebViewPool {
                     ]
                     .merging(incidentContext.fields(phase: .recovery)) { _, new in new }
                 )
+                if let identity = runtimeDiagnosticIdentities[slotID] {
+                    onRuntimeRecoveryUnavailable?(slotID, identity)
+                }
                 return
             }
             lastKnownURLs[slotID] = recoveryURL
+            if let identity = runtimeDiagnosticIdentities[slotID] {
+                onRuntimeRecoveryStart?(slotID, identity)
+            }
             loadRecovery(
                 webView,
                 slotID: slotID,
@@ -824,6 +850,64 @@ final class WebViewPool {
             }
         }
         return homeURL
+    }
+
+    /// Read-only projection of the exact compatibility decision used by
+    /// `webView(for:)`. Presentation owners can establish Restoring before a
+    /// visible selected Runtime is synchronously replaced, without duplicating
+    /// Website Mode, Browser Profile, URL, or site-compatibility policy.
+    func requiresWebViewRebuild(for profile: WebAppProfile) -> Bool {
+        if case .rebuild = existingRuntimeRenderingDecision(for: profile) {
+            return true
+        }
+        return false
+    }
+
+    private func existingRuntimeRenderingDecision(
+        for profile: WebAppProfile
+    ) -> ExistingRuntimeRenderingDecision {
+        guard let existing = webViews[profile.id] else {
+            return .noExistingRuntime
+        }
+        guard let appliedRendering = appliedRenderingProfiles[profile.id],
+              let appliedBrowserProfileIdentity = appliedBrowserProfileIdentities[profile.id] else {
+            return .rebuild(
+                navigationURL: Self.rebuildNavigationURL(
+                    initialURL: existing.backForwardList.currentItem?.initialURL,
+                    visibleURL: existing.url,
+                    storedCurrentURL: profile.currentURL,
+                    homeURL: profile.homeURL
+                )
+            )
+        }
+
+        let compatibilityURL = Self.rebuildNavigationURL(
+            initialURL: nil,
+            visibleURL: existing.url,
+            storedCurrentURL: profile.currentURL,
+            homeURL: profile.homeURL
+        )
+        let desiredRuntimeRendering = SiteCompatibilityPolicy.runtimeRendering(
+            for: profile.renderingProfile.normalized(),
+            navigationURL: compatibilityURL
+        )
+        let desiredBrowserProfileIdentity = BrowserProfileIdentity(
+            browserProfileID: profile.browserProfileID
+        )
+
+        if appliedBrowserProfileIdentity == desiredBrowserProfileIdentity,
+           !desiredRuntimeRendering.requiresWebViewRebuild(comparedTo: appliedRendering) {
+            return .reuse(desiredRuntimeRendering)
+        }
+
+        return .rebuild(
+            navigationURL: Self.rebuildNavigationURL(
+                initialURL: existing.backForwardList.currentItem?.initialURL,
+                visibleURL: existing.url,
+                storedCurrentURL: profile.currentURL,
+                homeURL: profile.homeURL
+            )
+        )
     }
 
     private func rebuildWebView(
@@ -1035,23 +1119,32 @@ final class WebViewPool {
                 }
                 self.onCommittedURLChange?(slotID, committedURL)
             },
-            onNavigationFinish: { [weak self, weak webView] slotID, _ in
+            onNavigationStart: { [weak self, weak webView] slotID, navigationGeneration in
                 guard let self,
                       let webView,
                       self.existingWebView(for: slotID) === webView,
                       let identity = self.runtimeDiagnosticIdentities[slotID] else {
                     return
                 }
-                self.onSlotNavigationFinish?(slotID, identity)
+                self.onSlotNavigationStart?(slotID, identity, navigationGeneration)
             },
-            onNavigationFailure: { [weak self, weak webView] slotID in
+            onNavigationFinish: { [weak self, weak webView] slotID, _, navigationGeneration in
                 guard let self,
                       let webView,
                       self.existingWebView(for: slotID) === webView,
                       let identity = self.runtimeDiagnosticIdentities[slotID] else {
                     return
                 }
-                self.onSlotNavigationFailure?(slotID, identity)
+                self.onSlotNavigationFinish?(slotID, identity, navigationGeneration)
+            },
+            onNavigationFailure: { [weak self, weak webView] slotID, navigationGeneration in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView,
+                      let identity = self.runtimeDiagnosticIdentities[slotID] else {
+                    return
+                }
+                self.onSlotNavigationFailure?(slotID, identity, navigationGeneration)
             },
             onInstantBackRequest: { [weak self, weak attentionBridge, weak webView] slotID, targetURL in
                 guard let self,
@@ -1353,6 +1446,9 @@ final class WebViewPool {
         let navigationURL = profile.currentURL.flatMap { WebAppURL.isSafe($0) ? $0 : nil }
             ?? profile.homeURL
         lastKnownURLs[profile.id] = navigationURL
+        if let identity = runtimeDiagnosticIdentities[profile.id] {
+            onRuntimeRecoveryStart?(profile.id, identity)
+        }
         loadRecovery(
             webView,
             slotID: profile.id,
@@ -1378,6 +1474,20 @@ final class WebViewPool {
 
     private func recoveryURL(slotID: UUID, webView: WKWebView) -> URL? {
         for candidate in [lastKnownURLs[slotID], webView.url] {
+            if let candidate, WebAppURL.isSafe(candidate) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    private func retryNavigationURL(slotID: UUID) -> URL? {
+        guard let webView = webViews[slotID] else { return nil }
+        for candidate in [
+            webView.url,
+            lastKnownURLs[slotID],
+            webView.backForwardList.currentItem?.url
+        ] {
             if let candidate, WebAppURL.isSafe(candidate) {
                 return candidate
             }

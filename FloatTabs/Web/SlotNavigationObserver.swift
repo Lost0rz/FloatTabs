@@ -463,8 +463,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     ) -> Void
     private let onIncidentRequest: @MainActor (UUID, RuntimeDiagnosticIncidentContext) -> Void
     private let onNavigationCommit: @MainActor (UUID, URL?) -> Void
-    private let onNavigationFinish: @MainActor (UUID, URL?) -> Void
-    private let onNavigationFailure: @MainActor (UUID) -> Void
+    private let onNavigationStart: @MainActor (UUID, UInt64) -> Void
+    private let onNavigationFinish: @MainActor (UUID, URL?, UInt64) -> Void
+    private let onNavigationFailure: @MainActor (UUID, UInt64) -> Void
     private let onInstantBackRequest: @MainActor (UUID, URL?) -> Void
     private let onInstantBackCancellation: @MainActor (UUID) -> Void
     private let onInstantBackActivation: @MainActor (UUID) -> Void
@@ -535,8 +536,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         ) -> Void = { _, _ in },
         onIncidentRequest: @escaping @MainActor (UUID, RuntimeDiagnosticIncidentContext) -> Void = { _, _ in },
         onNavigationCommit: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
-        onNavigationFinish: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
-        onNavigationFailure: @escaping @MainActor (UUID) -> Void = { _ in },
+        onNavigationStart: @escaping @MainActor (UUID, UInt64) -> Void = { _, _ in },
+        onNavigationFinish: @escaping @MainActor (UUID, URL?, UInt64) -> Void = { _, _, _ in },
+        onNavigationFailure: @escaping @MainActor (UUID, UInt64) -> Void = { _, _ in },
         onInstantBackRequest: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
         onInstantBackCancellation: @escaping @MainActor (UUID) -> Void = { _ in },
         onInstantBackActivation: @escaping @MainActor (UUID) -> Void = { _ in },
@@ -565,6 +567,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.onContentProcessTerminationWithContext = onContentProcessTerminationWithContext
         self.onIncidentRequest = onIncidentRequest
         self.onNavigationCommit = onNavigationCommit
+        self.onNavigationStart = onNavigationStart
         self.onNavigationFinish = onNavigationFinish
         self.onNavigationFailure = onNavigationFailure
         self.onInstantBackRequest = onInstantBackRequest
@@ -715,6 +718,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
         let ticket = navigation.map(beginDiagnosticNavigation)
+        if let ticket, ticket.phase == .provisional {
+            onNavigationStart(slotID, ticket.generation)
+        }
         let callbackFields = ticket.map(navigationFields(for:)) ?? staleNavigationFields
         diagnostics.record(
             event: "navigation.provisional_started",
@@ -733,7 +739,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
            currentNavigationTicket.phase == .terminated {
             invalidateDiagnosticNavigation(phase: nil)
         }
-        _ = beginDiagnosticNavigation(navigation)
+        let ticket = beginDiagnosticNavigation(navigation)
+        if ticket.phase == .provisional {
+            onNavigationStart(slotID, ticket.generation)
+        }
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
@@ -787,7 +796,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             ) { _, new in new }
         )
 
-        onNavigationFinish(slotID, webView.url)
+        if let ticket {
+            onNavigationFinish(slotID, webView.url, ticket.generation)
+        }
 
         if let url = webView.url, WebAppURL.isSafe(url) {
             confirmInstantBackActivation(in: webView, observedURL: url)
@@ -822,7 +833,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         if let incidentContext = activeIncidentContext, !incidentAwaitingRuntimeRecovery {
             closeIncident(incidentContext, outcome: "navigation_failed")
         }
-        onNavigationFailure(slotID)
+        if let ticket {
+            onNavigationFailure(slotID, ticket.generation)
+        }
     }
 
     func webView(
@@ -867,7 +880,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             loadHandler(webView, fallback)
         } else {
             pendingHTTPEntryFallback = nil
-            onNavigationFailure(slotID)
+            if let ticket {
+                onNavigationFailure(slotID, ticket.generation)
+            }
         }
     }
 
