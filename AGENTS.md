@@ -7,6 +7,7 @@ Do not expand governance, telemetry, or generic frameworks ahead of product need
 CONTROL_MODE: ISSUE_CONTROL
 ISSUE_APPROVERS: Lost0rz
 ISSUE_DELEGATED_APPROVAL: ENABLED
+ISSUE_WEB_SPEC_AUTHORING: ENABLED
 
 ## Project authority and execution environments
 
