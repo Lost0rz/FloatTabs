@@ -57,8 +57,6 @@ Do not combine stale events from different runtime/navigation generations as one
 
 - Validate affected `WKWebView` lifecycle/navigation, observer cleanup, runtime recovery, window/fullscreen, focus/event monitoring, persistence/migration and canonical-writer boundaries with evidence appropriate to the risk. Routine changes do not by default demand all test suites.
 - Real macOS interaction/runtime acceptance is human-owned where the applicable product contract requires it. Deterministic browser automation, including Playwright, remains permitted, but AI-driven clicks/screenshots cannot replace required human UI acceptance.
-- An accepted multi-phase contract may defer human interaction acceptance to its final integrated gate; intermediate implementation still needs the phase's scoped machine validation and data-safety evidence.
-- A reference-derived performance default is a product assumption rather than an empirical result; defer tuning measurements only when the accepted contract permits it. Do not waive correctness, data-safety or required CI gates.
 
 ## CI execution
 
