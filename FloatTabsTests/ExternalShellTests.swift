@@ -2703,10 +2703,15 @@ final class ExternalShellTests: XCTestCase {
     func testPendingModeReplacementSupersedesRuntimeCreatedForObsoleteRendering() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let preferencesStore = AppPreferencesStore(
+            defaults: try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        )
+        preferencesStore.windowSizeMode = .perWebApp
         var initialLoadURLs: [URL] = []
         let (store, pool, controller, profile) = try makePhase6Harness(
             slotName: "PendingModeSupersession",
             diagnostics: diagnostics,
+            preferencesStore: preferencesStore,
             initialLoad: { _, request in
                 if let url = request.url {
                     initialLoadURLs.append(url)
@@ -2749,13 +2754,26 @@ final class ExternalShellTests: XCTestCase {
             store.updateRenderingProfile(
                 id: profile.id,
                 renderingProfile: pendingMobileProfile.renderingProfile
-                    .settingZoom(1.25)
-                    .settingViewport(CGSize(width: 640, height: 900))
+                    .settingZoom(1.5)
+                    .settingViewport(CGSize(width: 640, height: 600))
             )
         )
         XCTAssertFalse(pool.requiresWebViewRebuild(for: try XCTUnwrap(store.activeProfile)))
         XCTAssertTrue(pool.existingWebView(for: profile.id) === mobileWebView)
         XCTAssertEqual(pool.runtimeDiagnosticIdentity(for: profile.id), mobileIdentity)
+        XCTAssertEqual(mobileWebView.pageZoom, 1.5, accuracy: 0.001)
+        let appliedViewport = PanelMetrics.viewportSize(
+            forPanelSize: controller.debugPanelFrame.size
+        )
+        XCTAssertEqual(appliedViewport.width, 640, accuracy: 0.01)
+        XCTAssertEqual(appliedViewport.height, 600, accuracy: 0.01)
+        controller.debugPresentedWebView?.window?.contentView?.layoutSubtreeIfNeeded()
+        let expectedLogicalViewport = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: appliedViewport,
+            websiteMode: .mobile
+        )
+        XCTAssertEqual(mobileWebView.frame.width, expectedLogicalViewport.width, accuracy: 1)
+        XCTAssertEqual(mobileWebView.frame.height, expectedLogicalViewport.height, accuracy: 1)
         XCTAssertEqual(
             initialLoadURLs.count,
             2,
@@ -2809,6 +2827,205 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(store.activeProfile?.renderingProfile.websiteMode, .desktop)
         XCTAssertEqual(store.activeProfile?.browserProfileID, profile.browserProfileID)
         XCTAssertEqual(store.activeProfile?.homeURL, profile.homeURL)
+    }
+
+    func testFullscreenCompanionPendingRenderingChangesConvergeToLatestRuntime() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var initialLoadURLs: [URL] = []
+        let preferencesStore = AppPreferencesStore(
+            defaults: try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        )
+        preferencesStore.windowSizeMode = .perWebApp
+        let (store, pool, controller, sourceProfile) = try makePhase6Harness(
+            slotName: "FullscreenSourceOwner",
+            diagnostics: diagnostics,
+            preferencesStore: preferencesStore,
+            initialLoad: { _, request in
+                if let url = request.url {
+                    initialLoadURLs.append(url)
+                }
+            }
+        )
+        let sourceWebView = try XCTUnwrap(pool.existingWebView(for: sourceProfile.id))
+        let sourceIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: sourceProfile.id))
+        controller.handleSlotNavigationFinish(
+            slotID: sourceProfile.id,
+            runtimeIdentity: sourceIdentity
+        )
+
+        let desktopRendering = WebRenderingProfile.canonicalDefault
+            .settingWebsiteMode(.desktop)
+        let companionProfile = try XCTUnwrap(
+            store.add(
+                name: "FullscreenPendingCompanion",
+                homeURL: URL(string: "https://fullscreen-pending.example.com")!,
+                renderingProfile: desktopRendering
+            )
+        )
+        let originalDesktopWebView = try XCTUnwrap(
+            pool.existingWebView(for: companionProfile.id)
+        )
+        let originalDesktopIdentity = try XCTUnwrap(
+            pool.runtimeDiagnosticIdentity(for: companionProfile.id)
+        )
+        let originalDataStore = originalDesktopWebView.configuration.websiteDataStore
+        controller.handleSlotNavigationFinish(
+            slotID: companionProfile.id,
+            runtimeIdentity: originalDesktopIdentity
+        )
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: companionProfile.id), "ready")
+        XCTAssertTrue(store.select(id: sourceProfile.id))
+
+        controller.handle(.togglePin)
+        controller.showFloatTabs()
+        XCTAssertTrue(controller.debugPresentedWebView === sourceWebView)
+        XCTAssertTrue(
+            controller.debugTransitionFullscreenSession(to: .enteringFullscreen),
+            "the accepted WebKit entering transition must lock the source owner"
+        )
+        XCTAssertTrue(
+            controller.debugTransitionFullscreenSession(to: .inFullscreen),
+            "the same source Runtime must remain owned through fullscreen"
+        )
+        XCTAssertEqual(
+            controller.runtimeDiagnosticSnapshot().fields["source_session_state"],
+            .string("fullscreen")
+        )
+        XCTAssertEqual(pool.runtimeDiagnosticIdentity(for: sourceProfile.id), sourceIdentity)
+        XCTAssertTrue(pool.existingWebView(for: sourceProfile.id) === sourceWebView)
+
+        XCTAssertTrue(store.select(id: companionProfile.id))
+        XCTAssertTrue(controller.debugFullscreenCompanionWebView === originalDesktopWebView)
+        XCTAssertFalse(controller.debugIsFullscreenCompanionShowingRestoringState)
+
+        func updateCompanion(_ renderingProfile: WebRenderingProfile) {
+            XCTAssertTrue(
+                store.updateRenderingProfile(
+                    id: companionProfile.id,
+                    renderingProfile: renderingProfile
+                )
+            )
+        }
+
+        updateCompanion(
+            try XCTUnwrap(store.profiles.first { $0.id == companionProfile.id })
+                .renderingProfile.settingWebsiteMode(.mobile)
+        )
+        XCTAssertTrue(controller.debugIsFullscreenCompanionShowingRestoringState)
+        XCTAssertTrue(pool.existingWebView(for: companionProfile.id) === originalDesktopWebView)
+        let deferredForCompanion = writer.events.filter {
+            $0.event == "panel.materialization.deferred"
+                && $0.fields["slot_id"] == .string(companionProfile.id.uuidString)
+        }
+        XCTAssertEqual(deferredForCompanion.count, 1)
+        let materializationGeneration = try XCTUnwrap(
+            deferredForCompanion.first?.fields["materialization_generation"]
+        )
+        drainMainThreadTurns()
+
+        let mobileWebView = try XCTUnwrap(pool.existingWebView(for: companionProfile.id))
+        let mobileIdentity = try XCTUnwrap(
+            pool.runtimeDiagnosticIdentity(for: companionProfile.id)
+        )
+        XCTAssertFalse(mobileWebView === originalDesktopWebView)
+        XCTAssertNotEqual(mobileIdentity, originalDesktopIdentity)
+        XCTAssertTrue(controller.debugFullscreenCompanionWebView === mobileWebView)
+        XCTAssertTrue(controller.debugIsFullscreenCompanionShowingRestoringState)
+        let loadsBeforeCompatibleChange = initialLoadURLs.count
+
+        let pendingRendering = try XCTUnwrap(
+            store.profiles.first { $0.id == companionProfile.id }
+        ).renderingProfile.settingZoom(1.5).settingViewport(
+            CGSize(width: 640, height: 600)
+        )
+        updateCompanion(pendingRendering)
+
+        XCTAssertEqual(mobileWebView.pageZoom, 1.5, accuracy: 0.001)
+        XCTAssertTrue(pool.existingWebView(for: companionProfile.id) === mobileWebView)
+        XCTAssertEqual(pool.runtimeDiagnosticIdentity(for: companionProfile.id), mobileIdentity)
+        XCTAssertEqual(initialLoadURLs.count, loadsBeforeCompatibleChange)
+        XCTAssertTrue(controller.debugIsFullscreenCompanionShowingRestoringState)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+
+        updateCompanion(
+            try XCTUnwrap(store.profiles.first { $0.id == companionProfile.id })
+                .renderingProfile.settingWebsiteMode(.desktop)
+        )
+
+        let latestDesktopWebView = try XCTUnwrap(
+            pool.existingWebView(for: companionProfile.id)
+        )
+        let latestDesktopIdentity = try XCTUnwrap(
+            pool.runtimeDiagnosticIdentity(for: companionProfile.id)
+        )
+        XCTAssertFalse(latestDesktopWebView === mobileWebView)
+        XCTAssertNotEqual(latestDesktopIdentity, mobileIdentity)
+        XCTAssertTrue(controller.debugIsFullscreenCompanionShowingRestoringState)
+        XCTAssertTrue(controller.debugFullscreenCompanionWebView === latestDesktopWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+        XCTAssertEqual(
+            writer.events.filter {
+                $0.event == "panel.materialization.deferred"
+                    && $0.fields["slot_id"] == .string(companionProfile.id.uuidString)
+            }.count,
+            1,
+            "replacement must stay inside the existing fullscreen Restoring transaction"
+        )
+
+        controller.handleSlotNavigationFinish(
+            slotID: companionProfile.id,
+            runtimeIdentity: mobileIdentity
+        )
+        controller.handleSlotNavigationFailure(
+            slotID: companionProfile.id,
+            runtimeIdentity: mobileIdentity
+        )
+
+        XCTAssertTrue(controller.debugIsFullscreenCompanionShowingRestoringState)
+        XCTAssertTrue(controller.debugFullscreenCompanionWebView === latestDesktopWebView)
+        XCTAssertNil(controller.debugCurrentWebFocusWebView)
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: companionProfile.id), "loading")
+
+        controller.handleSlotNavigationFinish(
+            slotID: companionProfile.id,
+            runtimeIdentity: latestDesktopIdentity
+        )
+
+        XCTAssertFalse(controller.debugIsFullscreenCompanionShowingRestoringState)
+        XCTAssertTrue(controller.debugFullscreenCompanionWebView === latestDesktopWebView)
+        XCTAssertTrue(controller.debugCurrentWebFocusWebView === latestDesktopWebView)
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: companionProfile.id), "ready")
+        XCTAssertEqual(store.activeProfile?.id, companionProfile.id)
+        XCTAssertEqual(store.activeProfile?.renderingProfile.websiteMode, .desktop)
+        XCTAssertEqual(
+            try XCTUnwrap(store.activeProfile?.renderingProfile.zoom),
+            1.5,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            store.activeProfile?.renderingProfile.viewportSize,
+            CGSize(width: 640, height: 600)
+        )
+        XCTAssertEqual(store.activeProfile?.browserProfileID, companionProfile.browserProfileID)
+        XCTAssertEqual(store.activeProfile?.homeURL, companionProfile.homeURL)
+        XCTAssertEqual(store.activeProfile?.currentURL, companionProfile.currentURL)
+        let readinessCompleted = try XCTUnwrap(
+            writer.events.last {
+                $0.event == "panel.materialization.readiness_completed"
+                    && $0.fields["slot_id"] == .string(companionProfile.id.uuidString)
+            }
+        )
+        XCTAssertEqual(
+            readinessCompleted.fields["materialization_generation"],
+            materializationGeneration
+        )
+        XCTAssertTrue(
+            latestDesktopWebView.configuration.websiteDataStore === originalDataStore
+        )
+        XCTAssertEqual(pool.runtimeDiagnosticIdentity(for: sourceProfile.id), sourceIdentity)
+        XCTAssertTrue(pool.existingWebView(for: sourceProfile.id) === sourceWebView)
+        XCTAssertEqual(pool.count, 2)
     }
 
     func testFullscreenCompanionDefersIncompatibleReadyRuntimeUnderRestoring() throws {

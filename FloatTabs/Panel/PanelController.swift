@@ -2996,6 +2996,28 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeFullscreenCompanionSlotState()
     }
 
+#if DEBUG
+    /// Test seam for driving the observed source Runtime through the same
+    /// fullscreen lock/state callbacks used by its public KVO observer.
+    @discardableResult
+    func debugTransitionFullscreenSession(
+        to webKitState: WKWebView.FullscreenState
+    ) -> Bool {
+        guard let webView = sourceHostController.diagnosticObservedWebView else {
+            return false
+        }
+        sourceHostController.debugTransitionFullscreenState(
+            of: webView,
+            to: webKitState
+        )
+        return sourceHostController.isSessionLocked
+    }
+#endif
+
+    var debugFullscreenCompanionWebView: WKWebView? {
+        sourceHostController.companionContainer.currentWebView
+    }
+
     var debugIsShowingLoadFailure: Bool {
         rootView.webPanelContainerView.isShowingLoadFailure
     }
@@ -3510,36 +3532,10 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         if let pending = pendingRuntimeMaterialization,
            pending.slotID == activeProfile.id {
-            if (requestedVisibility || panel.isVisible),
-               webViewPool.requiresWebViewRebuild(for: activeProfile) {
-                // The selected Slot's rendering configuration may change
-                // after a pending Runtime was attached. Keep the existing
-                // Restoring transaction and replace only through the Pool's
-                // current compatibility decision before accepting readiness.
-                do {
-                    let webView = try webViewForPanelController(activeProfile)
-                    guard pendingRuntimeMaterialization?.generation == pending.generation,
-                          webViewPool.existingWebView(for: activeProfile.id) === webView else {
-                        return
-                    }
-                    attachDeferredRuntime(
-                        webView: webView,
-                        profile: activeProfile,
-                        request: pending
-                    )
-                } catch {
-                    finishPendingRuntimeMaterializationAsFailed(
-                        profile: activeProfile,
-                        error: error
-                    )
-                    return
-                }
-            }
-            container(for: pending.surface).showRestoringState()
-            webFocusRouter.setCurrentWebView(nil)
-            if requestedVisibility || panel.isVisible {
-                _ = makeRestoringSurfaceActuallyVisible(for: pending)
-            }
+            synchronizePendingRuntimeMaterialization(
+                for: activeProfile,
+                request: pending
+            )
             return
         }
 
@@ -3771,8 +3767,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         if let pending = pendingRuntimeMaterialization,
            pending.slotID == profile.id,
            pending.surface == surface {
-            container(for: surface).showRestoringState()
-            recordRestoringSurfaceWindowVisibilityIfNeeded()
+            synchronizePendingRuntimeMaterialization(
+                for: profile,
+                request: pending
+            )
             return
         }
         if pendingRuntimeMaterialization != nil {
@@ -3823,6 +3821,82 @@ final class PanelController: NSObject, NSWindowDelegate {
         recordRestoringSurfaceWindowVisibilityIfNeeded()
         DispatchQueue.main.async { [weak self] in
             self?.performDeferredRuntimeMaterialization(request)
+        }
+    }
+
+    private func synchronizePendingRuntimeMaterialization(
+        for profile: WebAppProfile,
+        request: PendingRuntimeMaterialization
+    ) {
+        guard pendingRuntimeMaterialization?.generation == request.generation,
+              request.slotID == profile.id else {
+            return
+        }
+
+        container(for: request.surface).showRestoringState()
+        webFocusRouter.setCurrentWebView(nil)
+        recordRestoringSurfaceWindowVisibilityIfNeeded()
+        let selectedViewportPanelSize = PanelMetrics.clampedPanelSize(
+            PanelMetrics.panelSize(
+                forViewport: NSSize(
+                    width: profile.renderingProfile.viewportSize.width,
+                    height: profile.renderingProfile.viewportSize.height
+                )
+            )
+        )
+        if request.surface == .standard,
+           preferencesStore.windowSizeMode == .perWebApp,
+           preferredPanelSize != selectedViewportPanelSize {
+            applyPreferredViewport(profile.renderingProfile.viewportSize)
+        }
+
+        guard isPendingRuntimeMaterializationCurrent(request),
+              webViewPool.existingWebView(for: profile.id) != nil else {
+            return
+        }
+
+        let requiresRebuild = webViewPool.requiresWebViewRebuild(for: profile)
+        if requiresRebuild,
+           !makeRestoringSurfaceActuallyVisible(for: request) {
+            return
+        }
+
+        do {
+            // Going through the Pool also applies compatible rendering changes
+            // to an existing Runtime; the read-only check above keeps an
+            // incompatible synchronous replacement behind visible Restoring.
+            let webView = try webViewForPanelController(profile)
+            guard isPendingRuntimeMaterializationCurrent(request),
+                  pendingRuntimeMaterialization?.generation == request.generation,
+                  webViewPool.existingWebView(for: profile.id) === webView,
+                  let identity = webViewPool.runtimeDiagnosticIdentity(for: profile.id) else {
+                return
+            }
+
+            if container(for: request.surface).currentWebView === webView,
+               runtimeReadinessState(for: profile.id) == .ready {
+                // A same-turn rendering change can return to the exact ready
+                // Runtime that was visible before this deferred transaction.
+                // Keep Restoring/focus protection through the current model
+                // notification; the already-queued transaction will converge
+                // and complete presentation on the next main-queue turn.
+                pendingRuntimeMaterializationIdentity = identity
+                return
+            }
+
+            if pendingRuntimeMaterializationIdentity != identity
+                || container(for: request.surface).currentWebView !== webView {
+                attachDeferredRuntime(
+                    webView: webView,
+                    profile: profile,
+                    request: request
+                )
+            }
+        } catch {
+            finishPendingRuntimeMaterializationAsFailed(
+                profile: profile,
+                error: error
+            )
         }
     }
 

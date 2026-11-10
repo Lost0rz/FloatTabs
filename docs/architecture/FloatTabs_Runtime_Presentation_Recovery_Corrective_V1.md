@@ -31,7 +31,7 @@ Unsupported Browser Profile remains its own presentation and is not converted to
 
 For a visible selected Slot, Panel queries the Pool-owned compatibility decision before a synchronous replacement. If rebuilding is required, Panel starts its existing deferred materialization transaction, shows Restoring, and clears old Web focus first. The Pool then replaces the runtime using the same comparison. Panel attaches the new exact WebView beneath Restoring and reveals it only after the current runtime and navigation are Ready. Compatible resident reuse, including Zoom and Viewport updates, remains on the fast path.
 
-The fullscreen companion uses that same Pool decision. A ready but incompatible companion Runtime first enters deferred materialization on the companion surface, so native Restoring owns presentation and Web focus is cleared before Pool replacement.
+The fullscreen companion uses that same Pool decision for ready and loading Runtimes. When the same Slot changes rendering while its companion Runtime is pending, Panel preserves the current Restoring transaction and asks the Pool to reuse or replace the Runtime for the latest configuration. A required replacement stays behind the visible Restoring surface, updates exact Runtime identity/readiness ownership, and makes old navigation outcomes stale. Compatible pending updates use Pool reuse so Zoom takes effect without another Runtime or navigation. On the standard surface, a changed per-Slot Viewport is applied to the panel geometry while the Runtime remains pending.
 
 ### Navigation generations
 
@@ -47,8 +47,8 @@ The Pool preserves its accepted active/inactive `recoveryDisposition`. Before an
 
 ## Regression boundaries
 
-- Visible Desktop↔Mobile and Browser Profile replacement, including the fullscreen companion: Restoring precedes Pool replacement; the new runtime reveals without a tab round-trip.
-- Compatible Zoom/Viewport changes and ready resident reuse do not rebuild.
+- Visible Desktop↔Mobile and Browser Profile replacement, including Desktop→Mobile Loading→Desktop in a valid fullscreen companion session: Restoring precedes Pool replacement; the latest Runtime reveals without a tab round-trip; stale finish/failure cannot reveal or fail it.
+- Compatible Zoom/Viewport changes during pending materialization update actual WebKit `pageZoom` and logical viewport geometry without rebuilding or navigating again; ready resident reuse remains fast.
 - Rapid same-Slot toggles, A→B→A, hidden/visible surfaces, fullscreen companion, stale WebView identities, and old navigation callbacks cannot reveal or focus stale content.
 - Current navigation failure produces native Failure; explicit Retry preserves the safe URL, Browser Profile, runtime data store, and Slot configuration; repeated failure does not loop.
 - Active termination clears stale Ready/focus while recovering; inactive recovery remains deferred; existing recovery disposition is unchanged.
