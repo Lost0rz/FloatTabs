@@ -1,70 +1,36 @@
-# FloatTabs — Documentation Authority and Status Index
+# FloatTabs — Documentation Authority Index
 
-> Durable documentation router, **not** live task authorization. Resolve the accepted `main` `AGENTS.md` mode before any source-changing work.
+This file is a **project-document router**, not a workflow, task authorization or live progress database. [AGENTS.md](../AGENTS.md) owns FloatTabs-specific policy and declares `ISSUE_CONTROL`; the installed Engineering Governance plugin owns generic approval, handoff, verification and delivery procedures. The selected approved GitHub Issue owns an active task; GitHub source, PR, CI and release records establish observed delivery state.
 
-## Effective authority
+## Project document owners
 
-```text
-AGENTS.md (main): CONTROL_MODE + durable safety + ISSUE_APPROVERS
-  FILE_CONTROL → authorized CURRENT_TASK.md / verified CURRENT_STATUS.md
-  ISSUE_CONTROL → selected, verified, approved GitHub EXECUTION_SPEC_V1 Issue
-→ linked accepted design/architecture contract for bounded product semantics
-→ docs/architecture/README.md and docs/architecture/DOMAIN_MAP.md for navigation
-→ production source, regression tests, current Git/CI/runtime evidence
-```
-
-An Issue body is a task contract, not canonical code or design truth. An Issue comment is progress evidence, not implicit authorization. A handoff card does not add scope. The official Engineering Governance `project-governance` capability governs the migration and approval process. Older Task/Status files remain authority **only while main is in FILE_CONTROL**; after verified ISSUE_CONTROL cutover, they are retired rather than duplicated.
-
-## Migration transition history (snapshot dated 2026-11-05)
-
-The observations below describe the pre-approval state on November 5, not the current Issue approval status. On November 6, authenticated `Lost0rz` approved Issue #197 revision 1 (comment 6675731614) and Issue #198 revision 1 (comment 6675755704), both with matching canonical digests. The effective mode is still controlled by the `AGENTS.md` on merged `main`; see live PR/Issue/CI records for current state.
-
-- [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197): governance migration (pre-cutover planning, original `TASK_ID=FT-GOV-ISSUE-CONTROL-MIGRATION-001`).
-- [Issue #198](https://github.com/Lost0rz/FloatTabs/issues/198): carry-forward of active `FT-ADAPTIVE-LIFECYCLE-RESTORE-001` product task.
-- [Draft PR #199](https://github.com/Lost0rz/FloatTabs/pull/199): **the only governance migration PR**. Its branch contents do not activate ISSUE_CONTROL.
-- [Draft PR #195](https://github.com/Lost0rz/FloatTabs/pull/195): independent adaptive-lifecycle/cold-restore corrective. Its head-aligned Task evidence describes human UI acceptance **PENDING** at this observation; preserve the dirty local checkout and unique work.
-- PR #196 was already merged at `d64c9ec6`. Its older pending-merge snapshot must not control a new task.
-- As of this November 5 snapshot, official digests and local `gh` roundtrip were PASS, but human spec approval was still pending. Both revisions were subsequently approved on November 6; refresh the live bodies, digests and authenticated comments before executing.
-- Remaining cutover gates after the November 6 approvals: preserve #195's independent local unique work, verify the atomic `AGENTS.md` mode switch + Task/Status retirement and current host checks, and verify the actual merge to `main`. Product UI acceptance for #195 remains separate.
-
-**This dated snapshot can go stale.** For the current task/state always read live Issue, PR, commit and applicable authority; do not treat the historical observations here as HEAD locks.
-
-## Current accepted architecture and boundaries
-
-Read [architecture/README.md](architecture/README.md) for selected architectural contracts and [architecture/DOMAIN_MAP.md](architecture/DOMAIN_MAP.md) for source/test entry points. The accepted `FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md` is a bounded design contract; its former WP1 gate does **not** independently authorize new execution. The more recent #195 branch Task/CI evidence governs that *branch's* currently observed corrective until the Issue migration is complete. Source/tests remain implementation truth.
-
-Preserve:
-
-- Slot/Browser Profile persistence separate from disposable WKWebView runtimes;
-- `SlotLifecycleCoordinator` as sole lifecycle policy/reclaim writer; `WebViewPool` as runtime mechanism owner;
-- native restoring presentation and exact-current readiness before exposing an unready cold runtime;
-- generation protection, unread/notification exact-Slot behavior and human UI acceptance;
-- progressive warning/critical memory-pressure behavior;
-- Phase 8 public WebContent/GPU attribution limitation: do not replace a real RAM budget with Runtime count or private APIs.
-
-Do not classify `reload/reset/restart fixed it` as a proven root cause or destroy website/user data as recovery.
-
-## Directory status
-
-| Directory | Role |
+| Reference | Owns |
 | --- | --- |
-| `docs/architecture/` | Accepted bounded contracts, historical architecture decisions and current source routing |
-| `docs/architecture/archive/` | Historical snapshots; non-authoritative |
-| `docs/design/` | Bounded UI interaction contracts plus historical references |
-| `docs/product/` | Historical feature/Stage plans and bounded feature concepts |
-| `docs/diagnostics/` | Evidence, not product truth or root-cause authority |
-| `docs/performance/` | Historical benchmarks; phase-specific measurements only when newly accepted |
-| `docs/validation/` | Historical acceptance snapshots, never current UI verdict |
-| `docs/release/` | Historical version-specific evidence; GitHub current releases are host truth |
-| `docs/superpowers/` | Legacy plans, never a live execution framework |
-| `docs/uiux/` | Visual references, not live interaction or task authority |
+| [Architecture contracts](architecture/README.md) | Currently applicable bounded architecture contracts and supersession |
+| [Domain map](architecture/DOMAIN_MAP.md) | Source/test navigation, canonical writers and Domain boundaries |
+| [Product contracts](product/README.md) | Feature behavior and historical feature/Stage plans |
+| [UI/interaction design](design/README.md) | Bounded accepted visual behavior and superseded versions |
+| [Runtime diagnostics](diagnostics/README.md) | Historical audits and diagnostic evidence, not causal truth |
+| [Performance](performance/README.md) | Historical measurements and WebKit attribution limitations |
+| [Validation](validation/README.md) | Stage-specific historical acceptance evidence |
+| [Release records](release/README.md) | Version-scoped release evidence |
+| [Legacy plans](superpowers/README.md) | Historical workflow/implementation plans only |
+| [UI/UX reference](uiux/README.md) | Non-authoritative generated visual references |
 
-Historical contracts, Stage documents, plans and audits are **retained intact** as evidence. Their terms `CURRENT`, `LOCKED`, `IMPLEMENTED`, `ACCEPTED` and `NEXT` refer to the time/phase when authored, unless accepted current authority explicitly says otherwise. Do not bulk-delete or rewrite them to retroactively change history.
+## Durable FloatTabs invariants
 
-## Conflict and continuation
+- Persistent Slots, Browser Profiles and website Sessions are separate from disposable `WKWebView` Runtime residency.
+- `SlotLifecycleCoordinator` is the sole Runtime lifecycle/reclaim policy writer; `WebViewPool` implements runtime creation, reuse, release and restoration.
+- Window/presentation, Focus, navigation readiness and Attention remain bound to the exact selected Slot and current Runtime/navigation generation.
+- Do not clear Profile, Cookie, Session or user configuration to conceal a Runtime fault. Diagnostics and reload/restart recovery do not establish root cause.
+- Public WebKit/macOS APIs cannot reliably attribute all app-owned WebContent/GPU RAM; Runtime count is not an exact GiB budget.
 
-1. Use the mode-selected Task/approved Issue for execution *permission*, accepted bounded design for semantics, and fresh source/tests/host facts for what is actually true.
-2. If a historic WP claim contradicts current code/branch evidence, treat it as superseded, not as new permission.
-3. Preserve independent PR #195 and any local uncommitted/unique files. Never clean a worktree to simplify governance.
-4. Keep non-approved Issues design-only; no `SPEC_APPROVAL_V1` comment may be fabricated through an agent using the approver's account.
-5. A verified merge of the migration PR is the sole control-mode cutover. Until then, maintain FILE_CONTROL; afterwards do not resurrect legacy root controls.
+The [Adaptive Lifecycle Restore V2](architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md), [Phase 8 Pressure/Efficiency Rescope V1](architecture/FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md) and other architecture-indexed documents own **bounded technical semantics**, not present task permission. Check their applicability against more recent accepted contracts and actual production source/tests.
+
+## Historical evidence and supersession
+
+Historical contracts, Stage/WP plans, audits, releases and all `docs/superpowers/` plans remain available as evidence. `CURRENT`, `LOCKED`, `APPROVED`, `IMPLEMENTED` and `NEXT` in those materials are relative to their original scope and date, not current executable instructions. Do not rewrite history to make it look current.
+
+The FILE_CONTROL → ISSUE_CONTROL migration is recorded in historical [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197) and merged [PR #199](https://github.com/Lost0rz/FloatTabs/pull/199). Carry-forward [PR #195](https://github.com/Lost0rz/FloatTabs/pull/195) was also merged. Do not resurrect historical `CURRENT_TASK.md` or `CURRENT_STATUS.md` as parallel active controls.
+
+When behavior changes, update the current applicable index or publish a bounded amendment; do not treat an old execution card, dated PR status or historical design file as new authorization.
