@@ -3,6 +3,7 @@ import CoreImage
 import Foundation
 import KeyboardShortcuts
 import QuartzCore
+import WebKit
 
 struct BrowserProfileMenuOption: Equatable {
     let id: UUID?
@@ -1983,26 +1984,57 @@ final class WebsiteFaviconProvider {
     typealias RetryWaiter = @MainActor @Sendable (TimeInterval) async -> Void
     typealias Completion = (NSImage?) -> Void
 
+    private struct ConsumerDemand {
+        let originKey: String
+        var url: URL
+        var automaticallyRetries: Bool
+        var completion: Completion
+    }
+
     private struct InFlightRequest {
         let id: UUID
-        var completions: [Completion]
+        let task: Task<Void, Never>
+    }
+
+    private struct ScheduledRetry {
+        let id: UUID
+        let fireAt: TimeInterval
+        let task: Task<Void, Never>
     }
 
     static let shared = WebsiteFaviconProvider()
     private static let automaticRetryDelay: TimeInterval = 15
-    private static let failureCooldown: TimeInterval = 120
+    private static let retryBackoff: [TimeInterval] = [120, 240, 480, 900]
+    private static let maximumDeclaredCandidates = 8
+    private static let maximumDiscoveryPages = 2
+    private static let maximumCachedOrigins = 256
+    private static let maximumDOMCandidateOrigins = 128
+    private static let requestTimeout: TimeInterval = 8
+    private static let requestBudget: TimeInterval = 25
+    private static let faviconSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieAcceptPolicy = .never
+        return URLSession(configuration: configuration)
+    }()
 
     private let dataLoader: DataLoader
     private let monotonicClock: MonotonicClock
     private let retryWaiter: RetryWaiter
     private var cache: [String: NSImage] = [:]
-    private var failedUntil: [String: TimeInterval] = [:]
+    private var cacheOrder: [String] = []
+    private var domCandidates: [String: [URL]] = [:]
+    private var domCandidateOrder: [String] = []
+    private var demands: [UUID: ConsumerDemand] = [:]
+    private var oneShotCompletions: [String: [Completion]] = [:]
+    private var failureCycles: [String: Int] = [:]
+    private var cooldownUntil: [String: TimeInterval] = [:]
     private var inFlight: [String: InFlightRequest] = [:]
+    private var scheduledRetries: [String: ScheduledRetry] = [:]
 
     init(
-        dataLoader: @escaping DataLoader = { request in
-            try await URLSession.shared.data(for: request)
-        },
+        dataLoader: DataLoader? = nil,
         monotonicClock: @escaping MonotonicClock = {
             ProcessInfo.processInfo.systemUptime
         },
@@ -2011,16 +2043,49 @@ final class WebsiteFaviconProvider {
             try? await Task.sleep(nanoseconds: nanoseconds)
         }
     ) {
-        self.dataLoader = dataLoader
+        self.dataLoader = dataLoader ?? { request in
+            try await Self.faviconSession.data(for: request)
+        }
         self.monotonicClock = monotonicClock
         self.retryWaiter = retryWaiter
     }
 
     static func originKey(for url: URL) -> String? {
         guard let scheme = url.scheme?.lowercased(),
-              let host = url.host?.lowercased() else { return nil }
+              scheme == "http" || scheme == "https",
+              let host = url.host?.lowercased(),
+              URLComponents(url: url, resolvingAgainstBaseURL: false)?.user == nil,
+              URLComponents(url: url, resolvingAgainstBaseURL: false)?.password == nil else {
+            return nil
+        }
         let port = url.port.map { ":\($0)" } ?? ""
         return "\(scheme)://\(host)\(port)"
+    }
+
+    /// Reads only icon link declarations from the loaded main document. The
+    /// isolated WebKit client world prevents this helper from calling any
+    /// page-provided JavaScript and returns no page content.
+    static func readDOMFaviconCandidates(
+        from webView: WKWebView,
+        completion: @escaping ([URL]) -> Void
+    ) {
+        let script = #"""
+        (() => Array.from(document.querySelectorAll("link[rel]"))
+          .filter(link => {
+            const tokens = (link.getAttribute("rel") || "").toLowerCase().split(/\s+/);
+            return tokens.includes("icon") || tokens.includes("apple-touch-icon")
+              || tokens.includes("apple-touch-icon-precomposed") || tokens.includes("mask-icon");
+          })
+          .map(link => link.href)
+          .filter(href => /^https?:\/\//i.test(href))
+          .slice(0, 8))()
+        """#
+        webView.evaluateJavaScript(script, in: nil, in: .defaultClient) { result in
+            let values = (try? result.get()) as? [String] ?? []
+            let candidates = values.compactMap { URL(string: $0) }
+                .filter { Self.originKey(for: $0) != nil }
+            completion(Array(candidates.prefix(maximumDeclaredCandidates)))
+        }
     }
 
     static func faviconURL(for url: URL) -> URL? {
@@ -2042,8 +2107,10 @@ final class WebsiteFaviconProvider {
     /// link elements and http(s) URLs; it never executes page content.
     static func discoveredFaviconURLs(
         in html: String,
-        baseURL: URL
+        baseURL: URL,
+        limit: Int = 8
     ) -> [URL] {
+        guard limit > 0 else { return [] }
         let linkPattern = #"(?is)<link\b[^>]*>"#
         let attributePattern = #"(?i)([A-Za-z][A-Za-z0-9:_-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
         guard let linkRegex = try? NSRegularExpression(pattern: linkPattern),
@@ -2084,88 +2151,309 @@ final class WebsiteFaviconProvider {
             let key = candidate.absoluteString
             guard seen.insert(key).inserted else { continue }
             result.append(candidate)
+            if result.count == limit { break }
         }
         return result
     }
 
+    /// One stable subscriber per UI consumer. Repeating the call for the same
+    /// consumer replaces its callback instead of accumulating stale waiters.
+    func subscribe(
+        for url: URL,
+        consumerID: UUID,
+        automaticallyRetries: Bool = true,
+        completion: @escaping Completion
+    ) {
+        guard let key = Self.originKey(for: url) else {
+            cancel(consumerID: consumerID)
+            completion(nil)
+            return
+        }
+
+        if demands[consumerID]?.originKey != key,
+           demands[consumerID] != nil {
+            cancel(consumerID: consumerID)
+        }
+        if let cached = cachedImage(for: key) {
+            demands.removeValue(forKey: consumerID)
+            completion(cached)
+            return
+        }
+        demands[consumerID] = ConsumerDemand(
+            originKey: key,
+            url: url,
+            automaticallyRetries: automaticallyRetries,
+            completion: completion
+        )
+        ensureRequest(for: key, fallbackURL: url)
+    }
+
+    func setAutomaticRetryDemand(consumerID: UUID, enabled: Bool) {
+        guard var demand = demands[consumerID] else { return }
+        guard demand.automaticallyRetries != enabled else { return }
+        demand.automaticallyRetries = enabled
+        demands[consumerID] = demand
+        if enabled {
+            ensureRequest(for: demand.originKey, fallbackURL: demand.url)
+        } else if !hasAutomaticRetryDemand(for: demand.originKey) {
+            scheduledRetries.removeValue(forKey: demand.originKey)?.task.cancel()
+        }
+    }
+
+    /// Compatibility entry point for finite, non-UI callers and tests. These
+    /// callbacks do not establish background retry demand after a failure.
     func load(for url: URL, completion: @escaping Completion) {
         guard let key = Self.originKey(for: url) else {
             completion(nil)
             return
         }
-        let now = monotonicClock()
-        failedUntil = failedUntil.filter { $0.value > now }
-        if let cached = cache[key] {
+        if let cached = cachedImage(for: key) {
             completion(cached)
             return
         }
-        if var active = inFlight[key] {
-            active.completions.append(completion)
-            inFlight[key] = active
-            return
-        }
-
-        if failedUntil[key] != nil {
+        if let until = cooldownUntil[key], until > monotonicClock() {
             completion(nil)
             return
         }
+        oneShotCompletions[key, default: []].append(completion)
+        ensureRequest(for: key, fallbackURL: url)
+    }
 
+    func cancel(consumerID: UUID) {
+        guard let demand = demands.removeValue(forKey: consumerID) else { return }
+        guard !hasDemand(for: demand.originKey),
+              oneShotCompletions[demand.originKey]?.isEmpty != false else {
+            return
+        }
+        inFlight.removeValue(forKey: demand.originKey)?.task.cancel()
+        scheduledRetries.removeValue(forKey: demand.originKey)?.task.cancel()
+    }
+
+    /// Called only after PanelController has revalidated the exact Slot,
+    /// Runtime, committed URL and navigation generation for the DOM result.
+    func setDOMCandidates(_ candidates: [URL], for committedURL: URL) {
+        guard let key = Self.originKey(for: committedURL) else { return }
+        let normalized = Self.uniqueHTTPURLs(candidates).prefix(Self.maximumDeclaredCandidates)
+        let next = Array(normalized)
+        guard domCandidates[key] != next else { return }
+        storeDOMCandidates(next, for: key)
+
+        guard cache[key] == nil,
+              hasDemand(for: key) || oneShotCompletions[key]?.isEmpty == false else {
+            return
+        }
+        // A newly committed DOM declaration is a better, identity-checked
+        // source. Replace an in-flight fallback fetch once for this change.
+        inFlight.removeValue(forKey: key)?.task.cancel()
+        scheduledRetries.removeValue(forKey: key)?.task.cancel()
+        cooldownUntil.removeValue(forKey: key)
+        startRequest(for: key, fallbackURL: committedURL)
+    }
+
+    private func ensureRequest(for key: String, fallbackURL: URL) {
+        guard inFlight[key] == nil else { return }
+        if let retry = scheduledRetries[key] {
+            if retry.fireAt > monotonicClock() { return }
+            scheduledRetries.removeValue(forKey: key)?.task.cancel()
+        }
+        if let until = cooldownUntil[key] {
+            let remaining = until - monotonicClock()
+            guard remaining <= 0 else {
+                if hasAutomaticRetryDemand(for: key) {
+                    scheduleRetry(for: key, fallbackURL: fallbackURL, after: remaining)
+                }
+                return
+            }
+            cooldownUntil.removeValue(forKey: key)
+        }
+        startRequest(for: key, fallbackURL: fallbackURL)
+    }
+
+    private func startRequest(for key: String, fallbackURL: URL) {
+        guard inFlight[key] == nil else { return }
         let requestID = UUID()
-        inFlight[key] = InFlightRequest(id: requestID, completions: [completion])
-        Task { [weak self] in
+        let initialURL = demands.values.first(where: { $0.originKey == key })?.url ?? fallbackURL
+        let hints = domCandidates[key] ?? []
+        let task = Task { @MainActor [weak self] in
             guard let self else { return }
-            let cachedImage = await self.fetchFavicon(for: url, cachePolicy: .returnCacheDataElseLoad)
+            let cachedImage = await self.fetchFavicon(
+                for: initialURL,
+                iconURLHints: hints,
+                cachePolicy: .returnCacheDataElseLoad
+            )
+            guard !Task.isCancelled,
+                  self.inFlight[key]?.id == requestID else { return }
             if let cachedImage {
                 self.finish(cachedImage, for: key, requestID: requestID)
                 return
             }
 
             await self.retryWaiter(Self.automaticRetryDelay)
-            guard !Task.isCancelled else {
-                self.finish(nil, for: key, requestID: requestID)
-                return
-            }
-
-            let freshImage = await self.fetchFavicon(for: url, cachePolicy: .reloadIgnoringLocalCacheData)
+            guard !Task.isCancelled,
+                  self.inFlight[key]?.id == requestID else { return }
+            let freshImage = await self.fetchFavicon(
+                for: initialURL,
+                iconURLHints: self.domCandidates[key] ?? hints,
+                cachePolicy: .reloadIgnoringLocalCacheData
+            )
+            guard !Task.isCancelled,
+                  self.inFlight[key]?.id == requestID else { return }
             self.finish(freshImage, for: key, requestID: requestID)
         }
+        inFlight[key] = InFlightRequest(id: requestID, task: task)
     }
 
     private func finish(_ image: NSImage?, for key: String, requestID: UUID) {
-        guard let request = inFlight[key], request.id == requestID else { return }
+        guard inFlight[key]?.id == requestID else { return }
         inFlight.removeValue(forKey: key)
-        if let image {
-            cache[key] = image
-            failedUntil.removeValue(forKey: key)
-        } else {
-            failedUntil[key] = monotonicClock() + Self.failureCooldown
+        let callbacks = demands.compactMap { id, demand in
+            demand.originKey == key ? (id, demand.completion) : nil
         }
-        request.completions.forEach { $0(image) }
+        let oneShots = oneShotCompletions.removeValue(forKey: key) ?? []
+        if let image {
+            storeImage(image, for: key)
+            failureCycles.removeValue(forKey: key)
+            cooldownUntil.removeValue(forKey: key)
+            scheduledRetries.removeValue(forKey: key)?.task.cancel()
+            callbacks.forEach { demands.removeValue(forKey: $0.0) }
+        } else {
+            let failureIndex = failureCycles[key, default: 0]
+            let delay = Self.retryBackoff[min(failureIndex, Self.retryBackoff.count - 1)]
+            failureCycles[key] = failureIndex + 1
+            cooldownUntil[key] = monotonicClock() + delay
+            if hasAutomaticRetryDemand(for: key) {
+                let retryURL = callbacks.first.flatMap {
+                    demands[$0.0]?.url
+                } ?? URL(string: key)
+                if let retryURL {
+                    scheduleRetry(for: key, fallbackURL: retryURL, after: delay)
+                }
+            }
+        }
+        callbacks.forEach { $0.1(image) }
+        oneShots.forEach { $0(image) }
+    }
+
+    private func hasDemand(for key: String) -> Bool {
+        demands.values.contains { $0.originKey == key }
+    }
+
+    private func cachedImage(for key: String) -> NSImage? {
+        guard let image = cache[key] else { return nil }
+        cacheOrder.removeAll { $0 == key }
+        cacheOrder.append(key)
+        return image
+    }
+
+    private func storeImage(_ image: NSImage, for key: String) {
+        cache[key] = image
+        cacheOrder.removeAll { $0 == key }
+        cacheOrder.append(key)
+        while cacheOrder.count > Self.maximumCachedOrigins {
+            cache.removeValue(forKey: cacheOrder.removeFirst())
+        }
+    }
+
+    private func storeDOMCandidates(_ candidates: [URL], for key: String) {
+        if candidates.isEmpty {
+            domCandidates.removeValue(forKey: key)
+            domCandidateOrder.removeAll { $0 == key }
+            return
+        }
+        domCandidates[key] = candidates
+        domCandidateOrder.removeAll { $0 == key }
+        domCandidateOrder.append(key)
+        while domCandidateOrder.count > Self.maximumDOMCandidateOrigins {
+            domCandidates.removeValue(forKey: domCandidateOrder.removeFirst())
+        }
+    }
+
+    private func hasAutomaticRetryDemand(for key: String) -> Bool {
+        demands.values.contains { $0.originKey == key && $0.automaticallyRetries }
+    }
+
+    private func scheduleRetry(for key: String, fallbackURL: URL, after delay: TimeInterval) {
+        guard hasAutomaticRetryDemand(for: key), scheduledRetries[key] == nil else { return }
+        let id = UUID()
+        let fireAt = monotonicClock() + max(0, delay)
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.retryWaiter(delay)
+            guard !Task.isCancelled,
+                  self.scheduledRetries[key]?.id == id else { return }
+            self.scheduledRetries.removeValue(forKey: key)
+            guard self.hasAutomaticRetryDemand(for: key), self.inFlight[key] == nil else { return }
+            self.cooldownUntil.removeValue(forKey: key)
+            self.startRequest(for: key, fallbackURL: fallbackURL)
+        }
+        scheduledRetries[key] = ScheduledRetry(id: id, fireAt: fireAt, task: task)
+    }
+
+    private static func uniqueHTTPURLs(_ urls: [URL]) -> [URL] {
+        var seen = Set<String>()
+        return urls.filter { url in
+            guard originKey(for: url) != nil else { return false }
+            return seen.insert(url.absoluteString).inserted
+        }
     }
 
     private func fetchFavicon(
         for url: URL,
+        iconURLHints: [URL],
         cachePolicy: URLRequest.CachePolicy
     ) async -> NSImage? {
-        // Preserve the inexpensive conventional endpoint, then inspect the
-        // origin's root document before a bounded path-specific discovery.
+        let deadline = monotonicClock() + Self.requestBudget
+        var seen = Set<String>()
+        var declaredCount = 0
+
+        for candidate in Self.uniqueHTTPURLs(iconURLHints).prefix(Self.maximumDeclaredCandidates) {
+            guard monotonicClock() < deadline else { return nil }
+            seen.insert(candidate.absoluteString)
+            if let image = await fetchImage(
+                from: candidate,
+                cachePolicy: cachePolicy,
+                deadline: deadline
+            ) {
+                return image
+            }
+            declaredCount += 1
+        }
+
+        // Keep the original conventional endpoint before URLSession HTML
+        // discovery when the loaded page supplied no working icon.
         if let faviconURL = Self.faviconURL(for: url),
-           let image = await fetchImage(from: faviconURL, cachePolicy: cachePolicy) {
+           seen.insert(faviconURL.absoluteString).inserted,
+           monotonicClock() < deadline,
+           let image = await fetchImage(
+            from: faviconURL,
+            cachePolicy: cachePolicy,
+            deadline: deadline
+           ) {
             return image
         }
 
-        let discoveryPages = Self.pageDiscoveryURLs(for: url)
-        for pageURL in discoveryPages {
+        for pageURL in Self.pageDiscoveryURLs(for: url).prefix(Self.maximumDiscoveryPages) {
+            guard monotonicClock() < deadline,
+                  declaredCount < Self.maximumDeclaredCandidates else { break }
             guard let (html, response) = await fetchPageHTML(
                 for: pageURL,
-                cachePolicy: cachePolicy
+                cachePolicy: cachePolicy,
+                deadline: deadline
             ) else { continue }
             let candidates = Self.discoveredFaviconURLs(
                 in: html,
-                baseURL: response.url ?? pageURL
+                baseURL: response.url ?? pageURL,
+                limit: Self.maximumDeclaredCandidates - declaredCount
             )
-            for candidate in candidates {
-                if let image = await fetchImage(from: candidate, cachePolicy: cachePolicy) {
+            for candidate in Self.uniqueHTTPURLs(candidates) {
+                guard monotonicClock() < deadline else { return nil }
+                guard seen.insert(candidate.absoluteString).inserted else { continue }
+                declaredCount += 1
+                if let image = await fetchImage(
+                    from: candidate,
+                    cachePolicy: cachePolicy,
+                    deadline: deadline
+                ) {
                     return image
                 }
             }
@@ -2173,8 +2461,14 @@ final class WebsiteFaviconProvider {
 
         // Keep legacy conventional names after HTML discovery so an
         // unreachable optional endpoint cannot delay declared site icons.
-        for candidate in Self.fallbackFaviconURLs(for: url).dropFirst() {
-            if let image = await fetchImage(from: candidate, cachePolicy: cachePolicy) {
+        for candidate in Self.fallbackFaviconURLs(for: url).dropFirst()
+            where seen.insert(candidate.absoluteString).inserted {
+            guard monotonicClock() < deadline else { return nil }
+            if let image = await fetchImage(
+                from: candidate,
+                cachePolicy: cachePolicy,
+                deadline: deadline
+            ) {
                 return image
             }
         }
@@ -2270,18 +2564,21 @@ final class WebsiteFaviconProvider {
 
     private func fetchImage(
         from url: URL,
-        cachePolicy: URLRequest.CachePolicy
+        cachePolicy: URLRequest.CachePolicy,
+        deadline: TimeInterval
     ) async -> NSImage? {
-        guard Self.isHTTPURL(url) else { return nil }
+        guard Self.isHTTPURL(url),
+              let timeout = effectiveTimeout(until: deadline) else { return nil }
         var request = URLRequest(url: url)
         request.cachePolicy = cachePolicy
-        request.timeoutInterval = 8
+        request.timeoutInterval = timeout
+        request.httpShouldHandleCookies = false
         request.setValue(
             "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
             forHTTPHeaderField: "Accept"
         )
         do {
-            let (data, response) = try await dataLoader(request)
+            let (data, response) = try await loadDataWithTimeout(request)
             if let http = response as? HTTPURLResponse,
                !(200..<300).contains(http.statusCode) {
                 return nil
@@ -2296,7 +2593,8 @@ final class WebsiteFaviconProvider {
 
     private func fetchPageHTML(
         for url: URL,
-        cachePolicy: URLRequest.CachePolicy
+        cachePolicy: URLRequest.CachePolicy,
+        deadline: TimeInterval
     ) async -> (String, URLResponse)? {
         guard Self.isHTTPURL(url) else { return nil }
         guard var components = URLComponents(
@@ -2311,15 +2609,17 @@ final class WebsiteFaviconProvider {
         components.query = nil
         components.fragment = nil
         guard let pageURL = components.url else { return nil }
+        guard let timeout = effectiveTimeout(until: deadline) else { return nil }
         var request = URLRequest(url: pageURL)
         request.cachePolicy = cachePolicy
-        request.timeoutInterval = 8
+        request.timeoutInterval = timeout
+        request.httpShouldHandleCookies = false
         request.setValue(
             "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
             forHTTPHeaderField: "Accept"
         )
         do {
-            let (data, response) = try await dataLoader(request)
+            let (data, response) = try await loadDataWithTimeout(request)
             if let http = response as? HTTPURLResponse,
                !(200..<300).contains(http.statusCode) {
                 return nil
@@ -2330,6 +2630,30 @@ final class WebsiteFaviconProvider {
             return nil
         }
     }
+
+    private func effectiveTimeout(until deadline: TimeInterval) -> TimeInterval? {
+        let remaining = deadline - monotonicClock()
+        guard remaining > 0 else { return nil }
+        return min(Self.requestTimeout, remaining)
+    }
+
+    private func loadDataWithTimeout(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
+            group.addTask {
+                try await self.dataLoader(request)
+            }
+            group.addTask {
+                let nanoseconds = UInt64(max(request.timeoutInterval, 0) * 1_000_000_000)
+                try await Task.sleep(nanoseconds: nanoseconds)
+                throw URLError(.timedOut)
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else {
+                throw URLError(.unknown)
+            }
+            return result
+        }
+    }
 }
 
 @MainActor
@@ -2338,6 +2662,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         URL,
         @escaping (NSImage?) -> Void
     ) -> Void
+    typealias FaviconCancelHandler = @MainActor (UUID) -> Void
 
     let slotID: UUID
 
@@ -2364,6 +2689,8 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         geometry: .railTab
     )
     private let requestFavicon: FaviconLoadHandler
+    private let cancelFavicon: FaviconCancelHandler
+    private let faviconConsumerID: UUID
     private let iconView = NSImageView()
     private let unreadDotView = ClassicUnreadDotView()
     private let label = NSTextField(labelWithString: "")
@@ -2387,6 +2714,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     private var browserProfileDuplicationEnabled = true
     private var faviconOriginKey: String?
     private var loadedFaviconOriginKey: String?
+    private var subscribedFaviconOriginKey: String?
     private var faviconRequestGeneration: UInt64 = 0
     private var sourceIcon: NSImage?
     private var grayscaleIcon: NSImage?
@@ -2441,10 +2769,24 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         attentionSurfaceView.isReduceMotionEnabled
     }
 
-    init(slotID: UUID, faviconLoader: FaviconLoadHandler? = nil) {
+    init(
+        slotID: UUID,
+        faviconLoader: FaviconLoadHandler? = nil,
+        faviconCanceller: FaviconCancelHandler? = nil
+    ) {
         self.slotID = slotID
+        let faviconConsumerID = UUID()
+        self.faviconConsumerID = faviconConsumerID
         self.requestFavicon = faviconLoader ?? { url, completion in
-            WebsiteFaviconProvider.shared.load(for: url, completion: completion)
+            WebsiteFaviconProvider.shared.subscribe(
+                for: url,
+                consumerID: faviconConsumerID,
+                automaticallyRetries: false,
+                completion: completion
+            )
+        }
+        self.cancelFavicon = faviconCanceller ?? {
+            WebsiteFaviconProvider.shared.cancel(consumerID: $0)
         }
         super.init(frame: .zero)
 
@@ -2967,15 +3309,23 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
 
     private func loadFaviconIfNeeded(from url: URL) {
         let key = WebsiteFaviconProvider.originKey(for: url)
+        WebsiteFaviconProvider.shared.setAutomaticRetryDemand(
+            consumerID: faviconConsumerID,
+            enabled: isActive
+        )
         if key != faviconOriginKey {
+            cancelFavicon(faviconConsumerID)
             faviconOriginKey = key
             loadedFaviconOriginKey = nil
+            subscribedFaviconOriginKey = nil
             faviconRequestGeneration &+= 1
             setSourceIcon(Self.fallbackIcon())
         }
-        guard let key, loadedFaviconOriginKey != key else { return }
+        guard let key,
+              loadedFaviconOriginKey != key,
+              subscribedFaviconOriginKey != key else { return }
 
-        faviconRequestGeneration &+= 1
+        subscribedFaviconOriginKey = key
         let requestGeneration = faviconRequestGeneration
         requestFavicon(url) { [weak self] image in
             guard let self,
@@ -2986,6 +3336,19 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
             }
             self.setSourceIcon(image ?? Self.fallbackIcon())
         }
+        WebsiteFaviconProvider.shared.setAutomaticRetryDemand(
+            consumerID: faviconConsumerID,
+            enabled: isActive
+        )
+    }
+
+    override func viewWillMove(toSuperview newSuperview: NSView?) {
+        if newSuperview == nil {
+            cancelFavicon(faviconConsumerID)
+            subscribedFaviconOriginKey = nil
+            faviconRequestGeneration &+= 1
+        }
+        super.viewWillMove(toSuperview: newSuperview)
     }
 
     private func updateAppearance() {

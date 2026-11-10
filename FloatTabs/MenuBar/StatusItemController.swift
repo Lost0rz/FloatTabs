@@ -61,6 +61,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         URL,
         @escaping (NSImage?) -> Void
     ) -> Void
+    typealias FaviconCancelHandler = @MainActor (UUID) -> Void
 
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
@@ -83,11 +84,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let onQuit: () -> Void
     private let preferencesStore: AppPreferencesStore
     private let loadFavicon: FaviconLoadHandler
+    private let cancelFavicon: FaviconCancelHandler
+    private let faviconConsumerID: UUID
     private let diagnostics: any RuntimeDiagnosticRecording
     private let onToggleWithTrace: ((RuntimeDiagnosticTrace) -> Void)?
     private var selectedFaviconOriginKey: String?
     private var selectedFaviconImage: NSImage?
     private var selectedFaviconLoaded = false
+    private var selectedFaviconRequested = false
     private var selectedFaviconRequestGeneration: UInt64 = 0
     private var latestActiveWebAppName: String?
     private(set) var attentionPresentation = StatusItemAttentionPresentation.resolve(
@@ -135,6 +139,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         onQuit: @escaping () -> Void,
         preferencesStore: AppPreferencesStore = AppPreferencesStore(),
         faviconLoader: FaviconLoadHandler? = nil,
+        faviconCanceller: FaviconCancelHandler? = nil,
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         onToggleWithTrace: ((RuntimeDiagnosticTrace) -> Void)? = nil
     ) {
@@ -147,8 +152,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         self.preferencesStore = preferencesStore
         self.diagnostics = diagnostics
         self.onToggleWithTrace = onToggleWithTrace
+        let faviconConsumerID = UUID()
+        self.faviconConsumerID = faviconConsumerID
         self.loadFavicon = faviconLoader ?? { url, completion in
-            WebsiteFaviconProvider.shared.load(for: url, completion: completion)
+            WebsiteFaviconProvider.shared.subscribe(
+                for: url,
+                consumerID: faviconConsumerID,
+                completion: completion
+            )
+        }
+        self.cancelFavicon = faviconCanceller ?? {
+            WebsiteFaviconProvider.shared.cancel(consumerID: $0)
         }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -216,10 +230,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         guard let faviconURL,
               let originKey = Self.faviconOriginKey(for: faviconURL) else {
+            cancelFavicon(faviconConsumerID)
             selectedFaviconRequestGeneration &+= 1
             selectedFaviconOriginKey = nil
             selectedFaviconImage = nil
             selectedFaviconLoaded = false
+            selectedFaviconRequested = false
             redrawStatusImage()
             return
         }
@@ -229,16 +245,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             selectedFaviconOriginKey = originKey
             selectedFaviconImage = nil
             selectedFaviconLoaded = false
+            selectedFaviconRequested = false
             // Do not leave the previous site's image visible while this
             // origin's favicon is loading.
             redrawStatusImage()
         }
 
-        // Success remains stable for same-origin navigation. A failed or
-        // pending origin stays eligible for a normal update to re-enter the
-        // provider, which owns in-flight coalescing and failure cooldown.
-        guard !selectedFaviconLoaded else { return }
-        selectedFaviconRequestGeneration &+= 1
+        // A stable consumer subscription remains attached through failure
+        // cooldowns. Provider retries no longer depend on this UI method being
+        // called again by an unrelated status or badge update.
+        guard !selectedFaviconLoaded, !selectedFaviconRequested else { return }
+        selectedFaviconRequested = true
         let requestGeneration = selectedFaviconRequestGeneration
         loadFavicon(faviconURL) { [weak self] image in
             guard let self,

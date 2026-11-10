@@ -1,12 +1,13 @@
 import AppKit
 import Foundation
 import XCTest
+import WebKit
 @testable import FloatTabs
 
 @MainActor
 final class FaviconRecoveryTests: XCTestCase {
     func testRootHTMLDiscoveryRecoversChatGPTAndKeepsWWWAsSeparateOrigin() async throws {
-        let imageData = try fixtureImageData(color: .systemBlue)
+        let imageData = fixtureSVGData()
         let loader = FaviconTestLoader { request, _ in
             let path = request.url?.path
             if path == "/favicon.ico" {
@@ -186,7 +187,200 @@ final class FaviconRecoveryTests: XCTestCase {
         XCTAssertEqual(loader.requests.count, 15)
     }
 
-    func testTabAndMenuBarRetrySameOriginAndRejectAtoBtoAStaleCallbacks() throws {
+    func testActiveDemandUsesBoundedProgressiveCooldownThrough900Seconds() async throws {
+        let retryGate = FaviconRetryGate()
+        let loader = FaviconTestLoader { request, _ in
+            (Data(), Self.response(for: request, status: 404))
+        }
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            retryWaiter: { await retryGate.wait(for: $0) }
+        )
+        let url = try XCTUnwrap(URL(string: "https://chatgpt.example.test/c/123"))
+        let consumerID = UUID()
+        provider.subscribe(for: url, consumerID: consumerID, automaticallyRetries: true) { _ in }
+
+        let expectedDelays: [TimeInterval] = [15, 120, 15, 240, 15, 480, 15, 900, 15, 900]
+        for index in expectedDelays.indices {
+            await retryGate.waitUntilScheduled(index + 1)
+            XCTAssertEqual(retryGate.delays[index], expectedDelays[index])
+            retryGate.resumeNext()
+        }
+
+        provider.cancel(consumerID: consumerID)
+        retryGate.resumeNext()
+        XCTAssertEqual(retryGate.delays, expectedDelays)
+        XCTAssertEqual(loader.requests.count, 70)
+    }
+
+    func testInactiveConsumerDoesNotScheduleAnotherCooldownPoll() async throws {
+        let retryGate = FaviconRetryGate()
+        let loader = FaviconTestLoader { request, _ in
+            (Data(), Self.response(for: request, status: 404))
+        }
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            retryWaiter: { await retryGate.wait(for: $0) }
+        )
+        let url = try XCTUnwrap(URL(string: "https://chatgpt.example.test/c/123"))
+        let consumerID = UUID()
+        let failed = expectation(description: "inactive consumer receives the bounded fresh retry result")
+        provider.subscribe(for: url, consumerID: consumerID, automaticallyRetries: false) { image in
+            XCTAssertNil(image)
+            failed.fulfill()
+        }
+
+        await retryGate.waitUntilScheduled()
+        XCTAssertEqual(retryGate.delays, [15])
+        retryGate.resumeNext()
+        await fulfillment(of: [failed], timeout: 2)
+
+        XCTAssertEqual(loader.requests.count, 14)
+        XCTAssertEqual(retryGate.delays, [15])
+        provider.cancel(consumerID: consumerID)
+    }
+
+    func testDOMDeclaredCrossOriginIconPrecedesURLSessionDiscoveryAndUsesNoCookies() async throws {
+        let imageData = try fixtureImageData(color: .systemBlue)
+        let loader = FaviconTestLoader { request, _ in
+            if request.url?.host == "cdn.example.test" {
+                return (imageData, Self.response(for: request, status: 200, mimeType: "image/png"))
+            }
+            return (Data(), Self.response(for: request, status: 404))
+        }
+        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let pageURL = try XCTUnwrap(URL(string: "https://chatgpt.example.test/c/123"))
+        let iconURL = try XCTUnwrap(URL(string: "https://cdn.example.test/brand/icon.png?v=4"))
+        provider.setDOMCandidates(
+            [
+                iconURL,
+                iconURL,
+                URL(string: "javascript:alert(1)")!,
+                URL(string: "data:image/png;base64,AA==")!,
+            ],
+            for: pageURL
+        )
+
+        let image = await load(provider, from: pageURL)
+
+        XCTAssertNotNil(image)
+        XCTAssertEqual(loader.requests.count, 1)
+        XCTAssertEqual(loader.requests[0].url, iconURL)
+        XCTAssertFalse(loader.requests[0].httpShouldHandleCookies)
+        XCTAssertEqual(loader.requests[0].timeoutInterval, 8)
+    }
+
+    func testICOFixtureDecodesAsAnActualICOFile() async throws {
+        let icoData = try fixtureICOData(color: .systemPurple)
+        let loader = FaviconTestLoader { request, _ in
+            if request.url?.path == "/favicon.ico" {
+                return (icoData, Self.response(for: request, status: 200, mimeType: "image/vnd.microsoft.icon"))
+            }
+            return (Data(), Self.response(for: request, status: 404))
+        }
+        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let url = try XCTUnwrap(URL(string: "https://icons.example.test/"))
+
+        let image = await load(provider, from: url)
+
+        XCTAssertNotNil(image)
+        XCTAssertEqual(loader.requests.count, 1)
+        XCTAssertEqual(loader.requests[0].url?.path, "/favicon.ico")
+    }
+
+    func testWebKitDOMReaderResolvesOnlyHTTPIconDeclarations() async throws {
+        let webView = WKWebView(frame: .zero)
+        let window = NSWindow(
+            contentRect: NSRect(x: -2_000, y: -2_000, width: 300, height: 300),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = webView
+        window.orderOut(nil)
+        let html = """
+        <base href="https://chatgpt.example.test/unauth-mweb/">
+        <link rel="stylesheet" href="/site.css">
+        <link rel="mask-icon" href="https://cdn.example.test/brand.svg">
+        <link rel="apple-touch-icon" href="icons/apple.png">
+        <link rel="shortcut icon" href="/icons/favicon.svg">
+        <link rel="icon" href="javascript:alert(1)">
+        <link rel="icon" href="data:image/png;base64,AA==">
+        """
+        let htmlLiteral = String(
+            data: try JSONSerialization.data(withJSONObject: html, options: .fragmentsAllowed),
+            encoding: .utf8
+        )!
+        let injected = expectation(description: "synthetic DOM fixture installed")
+        webView.evaluateJavaScript(
+            "document.head.innerHTML = \(htmlLiteral)",
+            in: nil,
+            in: .page
+        ) { result in
+            if case let .failure(error) = result {
+                XCTFail("Could not install synthetic DOM fixture: \(error)")
+            }
+            injected.fulfill()
+        }
+        await fulfillment(of: [injected], timeout: 5)
+
+        let candidates = await withCheckedContinuation { continuation in
+            WebsiteFaviconProvider.readDOMFaviconCandidates(from: webView) {
+                continuation.resume(returning: $0)
+            }
+        }
+        XCTAssertEqual(candidates.map(\.absoluteString), [
+            "https://cdn.example.test/brand.svg",
+            "https://chatgpt.example.test/unauth-mweb/icons/apple.png",
+            "https://chatgpt.example.test/icons/favicon.svg",
+        ])
+    }
+
+    func testActiveConsumerRetriesAfterCooldownWithoutAnotherUIUpdate() async throws {
+        let imageData = try fixtureImageData(color: .systemTeal)
+        let retryGate = FaviconRetryGate()
+        let loader = FaviconTestLoader { request, count in
+            if count > 14 {
+                return (imageData, Self.response(for: request, status: 200, mimeType: "image/png"))
+            }
+            return (Data(), Self.response(for: request, status: 404))
+        }
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            retryWaiter: { await retryGate.wait(for: $0) }
+        )
+        let url = try XCTUnwrap(URL(string: "https://chatgpt.example.test/c/654"))
+        let consumerID = UUID()
+        let firstFailure = expectation(description: "initial retry cycle fails")
+        let recovered = expectation(description: "scheduled retry succeeds")
+        var results: [NSImage?] = []
+        provider.subscribe(for: url, consumerID: consumerID) { image in
+            results.append(image)
+            if image == nil {
+                firstFailure.fulfill()
+            } else {
+                recovered.fulfill()
+            }
+        }
+
+        await retryGate.waitUntilScheduled(1)
+        XCTAssertEqual(retryGate.delays, [15])
+        retryGate.resumeNext()
+        await fulfillment(of: [firstFailure], timeout: 2)
+        XCTAssertEqual(loader.requests.count, 14)
+
+        await retryGate.waitUntilScheduled(2)
+        XCTAssertEqual(retryGate.delays, [15, 120])
+        retryGate.resumeNext()
+        await fulfillment(of: [recovered], timeout: 2)
+
+        XCTAssertEqual(loader.requests.count, 15)
+        XCTAssertEqual(results.count, 2)
+        XCTAssertNotNil(results.last ?? nil)
+        provider.cancel(consumerID: consumerID)
+    }
+
+    func testTabAndMenuBarKeepSameOriginSubscriptionsAndRejectAtoBtoAStaleCallbacks() throws {
         var tabCompletions: [(NSImage?) -> Void] = []
         let tab = ExternalWebAppTabView(slotID: UUID(), faviconLoader: { _, completion in
             tabCompletions.append(completion)
@@ -198,12 +392,12 @@ final class FaviconRecoveryTests: XCTestCase {
 
         profile.homeURL = URL(string: "https://chatgpt.com/c/two")!
         tab.update(profile: profile, isActive: true, isResident: true)
-        XCTAssertEqual(tabCompletions.count, 2)
+        XCTAssertEqual(tabCompletions.count, 1)
         let tabImage = fixtureImage(color: .systemBlue)
-        tabCompletions[1](tabImage)
+        tabCompletions[0](tabImage)
         let successfulTabImage = tab.displayedIcon?.tiffRepresentation
         tab.update(profile: profile, isActive: true, isResident: true)
-        XCTAssertEqual(tabCompletions.count, 2)
+        XCTAssertEqual(tabCompletions.count, 1)
         XCTAssertEqual(tab.displayedIcon?.tiffRepresentation, successfulTabImage)
 
         var staleTabCompletions: [(NSImage?) -> Void] = []
@@ -242,12 +436,12 @@ final class FaviconRecoveryTests: XCTestCase {
         statusItem.setActiveWebApp(name: "ChatGPT", faviconURL: siteA)
         menuCompletions[0](nil)
         statusItem.setActiveWebApp(name: "ChatGPT", faviconURL: URL(string: "https://chatgpt.com/c/three")!)
-        XCTAssertEqual(menuCompletions.count, 2)
+        XCTAssertEqual(menuCompletions.count, 1)
         let menuImage = fixtureImage(color: .systemGreen)
-        menuCompletions[1](menuImage)
+        menuCompletions[0](menuImage)
         let successfulMenuImage = statusItem.debugStatusButtonImageTIFF
         statusItem.setActiveWebApp(name: "ChatGPT", faviconURL: siteA)
-        XCTAssertEqual(menuCompletions.count, 2)
+        XCTAssertEqual(menuCompletions.count, 1)
         XCTAssertEqual(statusItem.debugStatusButtonImageTIFF, successfulMenuImage)
 
         var staleCompletions: [(NSImage?) -> Void] = []
@@ -298,7 +492,31 @@ final class FaviconRecoveryTests: XCTestCase {
     }
 
     private func fixtureImageData(color: NSColor) throws -> Data {
-        try XCTUnwrap(fixtureImage(color: color).tiffRepresentation)
+        let tiff = try XCTUnwrap(fixtureImage(color: color).tiffRepresentation)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: tiff))
+        return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+    }
+
+    private func fixtureSVGData() -> Data {
+        Data(
+            ##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="#2563eb"/></svg>"##.utf8
+        )
+    }
+
+    private func fixtureICOData(color: NSColor) throws -> Data {
+        let png = try fixtureImageData(color: color)
+        var data = Data([0, 0, 1, 0, 1, 0])
+        data.append(contentsOf: [16, 16, 0, 0, 1, 0, 32, 0])
+        let byteCount = UInt32(png.count)
+        let imageOffset = UInt32(22)
+        for value in [byteCount, imageOffset] {
+            data.append(UInt8(value & 0xff))
+            data.append(UInt8((value >> 8) & 0xff))
+            data.append(UInt8((value >> 16) & 0xff))
+            data.append(UInt8((value >> 24) & 0xff))
+        }
+        data.append(png)
+        return data
     }
 
     private static func response(
