@@ -24,10 +24,10 @@ Consult `docs/README.md` before using historical plans/architecture/design/valid
 Use `docs/architecture/DOMAIN_MAP.md` for navigation. Key durable boundaries:
 
 - **Tabs** own Tab/Profile identity, selection, ordering, and configuration projection.
-- **Web** owns `WKWebView` runtime, navigation, residency, observer/task lifecycle, runtime health, and recovery.
+- **Web** owns `WKWebView` runtime, navigation, observer/task lifecycle, health and recovery. `SlotLifecycleCoordinator` is the sole lifecycle policy/reclaim decision writer; `WebViewPool` owns Runtime creation/retention/release/restore mechanisms, not an independent policy.
 - **Panel / Window / Fullscreen** own presentation and window synchronization.
 - **Focus / Input** own native/DOM focus and command/event routing.
-- **Persistence** owns durable user configuration and recovery data.
+- **Persistence** owns durable user configuration, Browser Profile/Session data and recovery material independently of WKWebView Runtime residence.
 - **Speech / Attention** consume bounded runtime/content signals; they do not become Tab/Web authorities.
 - **Diagnostics** record evidence; logs do not become product truth or root-cause authority.
 
