@@ -9,13 +9,11 @@ ISSUE_APPROVERS: Lost0rz
 ISSUE_DELEGATED_APPROVAL: ENABLED
 ISSUE_WEB_SPEC_AUTHORING: ENABLED
 
-## Project authority and execution environments
+## Project-specific authority boundaries
 
-Engineering Governance owns reusable task authorization, Issue approval verification, Skill routing, handoff, verification cadence, and Git/PR/worktree lifecycle. This file owns FloatTabs-specific product, documentation, CI, runtime, and data-safety constraints.
+The installed Engineering Governance plugin is the sole owner of reusable engineering workflow. FloatTabs owns only its control-mode/approver opt-ins, product contracts, Domain boundaries, Runtime evidence needs, CI environment and data-safety policy. Do not copy generic approval, handoff, audit, Git/PR/worktree or verification procedures into this file; plugin updates must not require repeating those procedures in FloatTabs.
 
-Cloud and local are execution/evidence contexts, not fixed planning, implementation, or review roles. Do not require a particular assistant, model, CLI, or worker technology. Actual actions depend on current capabilities, permissions, approved task scope, and fresh host/workspace evidence. Local runtime, installed app, TCC and interaction claims require local evidence; a remote repository observation alone is insufficient.
-
-The declarations above select Issue Control and delegated-approval opt-in; they do not authorize self-approval or source/PR/merge actions. The selected approved Issue revision remains the execution authority under the installed Engineering Governance contract. Historical `CURRENT_TASK.md`/`CURRENT_STATUS.md` are not active task controls.
+Real macOS runtime, installed app, TCC, multi-display and interaction claims require evidence from the actual Mac. Remote repository inspection alone cannot prove local behavior. Historical `CURRENT_TASK.md` and `CURRENT_STATUS.md` files are not active project controls.
 
 ## Documentation authority
 
