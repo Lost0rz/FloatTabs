@@ -360,6 +360,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func applyStatusImage(_ favicon: NSImage?) {
         selectedFaviconImage = favicon
         redrawStatusImage()
+        let outcome: WebsiteFaviconProvider.ProjectionOutcome = {
+            guard statusItem.button?.image != nil else { return .noImageDisplayed }
+            return favicon == nil ? .fallbackDisplayed : .iconDisplayed
+        }()
+        diagnostics.record(
+            event: "favicon.ui_projection",
+            level: outcome == .noImageDisplayed ? .warning : .notice,
+            subsystem: "favicon",
+            fields: [
+                "surface": .string("menu_bar"),
+                "outcome": .string(outcome.rawValue)
+            ]
+        )
     }
 
     private func redrawStatusImage() {

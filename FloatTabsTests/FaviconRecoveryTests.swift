@@ -384,6 +384,298 @@ final class FaviconRecoveryTests: XCTestCase {
         provider.cancel(consumerID: menuConsumerID)
     }
 
+    func testSamePriorityDOMResourceChangeUpdatesOnlyStillActiveConsumers() async throws {
+        let oldData = try fixtureImageData(color: .systemRed)
+        let newData = try fixtureImageData(color: .systemBlue)
+        let gate = FaviconFetchGate()
+        let pageURL = try XCTUnwrap(URL(string: "https://same-priority.example.test/page"))
+        let oldURL = try XCTUnwrap(URL(string: "https://same-priority.example.test/old.png"))
+        let newURL = try XCTUnwrap(URL(string: "https://same-priority.example.test/new.png"))
+        let loader = FaviconTestLoader { request, _ in
+            if request.url == newURL {
+                await gate.suspend()
+                return (newData, Self.response(for: request, status: 200, mimeType: "image/png"))
+            }
+            return (
+                oldData,
+                Self.response(for: request, status: 200, mimeType: "image/png")
+            )
+        }
+        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let tabID = UUID()
+        let menuID = UUID()
+        let initial = expectation(description: "both current consumers receive the cached icon")
+        initial.expectedFulfillmentCount = 2
+        let updated = expectation(description: "remaining consumer receives the new same-rank resource")
+        var tabImages: [NSImage?] = []
+        var menuImages: [NSImage?] = []
+
+        provider.setDOMCandidates([.declared(oldURL)], for: pageURL)
+        provider.subscribe(for: pageURL, consumerID: tabID) { image in
+            tabImages.append(image)
+            initial.fulfill()
+        }
+        provider.subscribe(for: pageURL, consumerID: menuID) { image in
+            menuImages.append(image)
+            if menuImages.count == 1 {
+                initial.fulfill()
+            } else {
+                updated.fulfill()
+            }
+        }
+        await fulfillment(of: [initial], timeout: 2)
+
+        XCTAssertEqual(
+            WebsiteFaviconProvider.Candidate.declared(oldURL).priority,
+            WebsiteFaviconProvider.Candidate.declared(newURL).priority
+        )
+        provider.setDOMCandidates([.declared(newURL)], for: pageURL)
+        await gate.waitUntilSuspended()
+        provider.cancel(consumerID: tabID)
+        gate.resumeNext()
+        await fulfillment(of: [updated], timeout: 2)
+
+        XCTAssertEqual(loader.requests.compactMap(\.url), [oldURL, newURL])
+        XCTAssertEqual(tabImages.count, 1)
+        XCTAssertEqual(menuImages.count, 2)
+        XCTAssertNotEqual(
+            tabImages[0]?.tiffRepresentation,
+            menuImages[1]?.tiffRepresentation
+        )
+        provider.cancel(consumerID: menuID)
+    }
+
+    func testRemovingUncachedDOMCandidateFallsBackWithoutStrandingConsumer() async throws {
+        let declaredData = try fixtureImageData(color: .systemRed)
+        let fallbackData = try fixtureImageData(color: .systemBlue)
+        let gate = FaviconFetchGate()
+        let pageURL = try XCTUnwrap(URL(string: "https://empty-dom.example.test/page"))
+        let declaredURL = try XCTUnwrap(URL(string: "https://empty-dom.example.test/declared.png"))
+        let loader = FaviconTestLoader { request, _ in
+            if request.url == declaredURL {
+                await gate.suspend()
+                return (declaredData, Self.response(for: request, status: 200, mimeType: "image/png"))
+            }
+            if request.url?.path == "/favicon.ico" {
+                return (fallbackData, Self.response(for: request, status: 200, mimeType: "image/png"))
+            }
+            return (Data(), Self.response(for: request, status: 404))
+        }
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            retryWaiter: { _ in }
+        )
+        let consumerID = UUID()
+        let iconLoaded = expectation(description: "the still-active consumer receives the fallback icon")
+        var delivered: [NSImage?] = []
+
+        provider.setDOMCandidates([.declared(declaredURL)], for: pageURL)
+        provider.subscribe(for: pageURL, consumerID: consumerID) { image in
+            delivered.append(image)
+            iconLoaded.fulfill()
+        }
+        await gate.waitUntilSuspended()
+
+        provider.setDOMCandidates([WebsiteFaviconProvider.Candidate](), for: pageURL)
+        gate.resumeNext()
+        await fulfillment(of: [iconLoaded], timeout: 2)
+
+        let result = try XCTUnwrap(delivered.first ?? nil)
+        let expected = try XCTUnwrap(NSImage(data: fallbackData)?.tiffRepresentation)
+        XCTAssertEqual(result.tiffRepresentation, expected)
+        XCTAssertEqual(loader.requests.filter { $0.url == declaredURL }.count, 1)
+        XCTAssertTrue(loader.requests.contains { $0.url?.path == "/favicon.ico" })
+        provider.cancel(consumerID: consumerID)
+    }
+
+    func testSameResourceWithChangedMetadataDoesNotDownloadTwice() async throws {
+        let imageData = try fixtureImageData(color: .systemOrange)
+        let pageURL = try XCTUnwrap(URL(string: "https://same-resource.example.test/"))
+        let iconURL = try XCTUnwrap(URL(string: "https://same-resource.example.test/icon.png"))
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let loader = FaviconTestLoader { request, _ in
+            (imageData, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            diagnosticRecorder: diagnostics
+        )
+        let consumerID = UUID()
+        var images: [NSImage?] = []
+        let initial = expectation(description: "same resource is fetched")
+        let refreshed = expectation(description: "same resource metadata reuses the cache")
+        let compact = WebsiteFaviconProvider.Candidate(
+            url: iconURL,
+            kind: .icon,
+            sizes: "16x16",
+            type: "image/x-icon",
+            mediaSpecific: false,
+            sourceOrder: 0
+        )
+        let preferred = WebsiteFaviconProvider.Candidate(
+            url: iconURL,
+            kind: .icon,
+            sizes: "32x32",
+            type: "image/png",
+            mediaSpecific: false,
+            sourceOrder: 0
+        )
+        provider.setDOMCandidates([compact], for: pageURL)
+        provider.subscribe(for: pageURL, consumerID: consumerID) { image in
+            images.append(image)
+            (images.count == 1 ? initial : refreshed).fulfill()
+        }
+        await fulfillment(of: [initial], timeout: 2)
+        provider.setDOMCandidates([preferred], for: pageURL)
+        await fulfillment(of: [refreshed], timeout: 2)
+
+        XCTAssertEqual(compact.priority, 11)
+        XCTAssertEqual(preferred.priority, 0)
+        XCTAssertEqual(loader.requests.compactMap(\.url), [iconURL])
+        XCTAssertEqual(images.count, 2)
+        XCTAssertTrue(writer.events.contains { event in
+            guard event.event == "favicon.cache_update",
+                  case .string("reused_same_resource") = event.fields["outcome"] else {
+                return false
+            }
+            return true
+        })
+        provider.cancel(consumerID: consumerID)
+    }
+
+    func testFailedSamePriorityResourceKeepsCachedIconAndReportsDecodeStage() async throws {
+        let oldData = try fixtureImageData(color: .systemPurple)
+        let pageURL = try XCTUnwrap(URL(string: "https://retained.example.test/"))
+        let oldURL = try XCTUnwrap(URL(string: "https://retained.example.test/old.png"))
+        let brokenURL = try XCTUnwrap(URL(string: "https://retained.example.test/broken.png"))
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let retryGate = FaviconRetryGate()
+        let loader = FaviconTestLoader { request, _ in
+            if request.url == oldURL {
+                return (oldData, Self.response(for: request, status: 200, mimeType: "image/png"))
+            }
+            if request.url == brokenURL {
+                return (Data("not an image".utf8), Self.response(for: request, status: 200))
+            }
+            return (Data(), Self.response(for: request, status: 404))
+        }
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            retryWaiter: { await retryGate.wait(for: $0) },
+            diagnosticRecorder: diagnostics
+        )
+        let consumerID = UUID()
+        var delivered: [NSImage?] = []
+        let loaded = expectation(description: "existing valid icon arrives")
+        provider.setDOMCandidates([.declared(oldURL)], for: pageURL)
+        provider.subscribe(for: pageURL, consumerID: consumerID) { image in
+            delivered.append(image)
+            loaded.fulfill()
+        }
+        await fulfillment(of: [loaded], timeout: 2)
+        let originalImage = try XCTUnwrap(delivered.first ?? nil)
+
+        provider.setDOMCandidates([.declared(brokenURL)], for: pageURL)
+        await retryGate.waitUntilScheduled()
+        retryGate.resumeNext()
+        await waitForDiagnostic(writer) { events in
+            events.contains { event in
+                event.event == "favicon.cache_update"
+                    && event.fields["outcome"] == .string("retained_previous")
+            }
+        }
+
+        provider.cancel(consumerID: consumerID)
+        retryGate.resumeNext()
+
+        let retainedImage = await load(provider, from: pageURL)
+        XCTAssertTrue(retainedImage === originalImage)
+        XCTAssertEqual(delivered.count, 1)
+        XCTAssertTrue(writer.events.contains { event in
+            guard event.event == "favicon.fetch_attempt",
+                  case let .string(stages) = event.fields["failure_stages"] else { return false }
+            return stages.contains("image_decode_failed")
+        })
+        provider.cancel(consumerID: consumerID)
+    }
+
+    func testDOMAndNetworkFailureStagesAreDistinctAndPrivacySafe() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let transparentData = try fixtureTransparentImageData()
+        let pageURL = try XCTUnwrap(URL(string: "https://failure-stages.example.test/"))
+        let candidates = [
+            URL(string: "https://failure-stages.example.test/http.png")!,
+            URL(string: "https://failure-stages.example.test/timeout.png")!,
+            URL(string: "https://failure-stages.example.test/broken.png?token=private-favicon-token")!,
+            URL(string: "https://failure-stages.example.test/transparent.png")!,
+        ].enumerated().map { index, url in
+            WebsiteFaviconProvider.Candidate(
+                url: url,
+                kind: .icon,
+                sizes: "",
+                type: "image/png",
+                mediaSpecific: false,
+                sourceOrder: index
+            )
+        }
+        let loader = FaviconTestLoader { request, _ in
+            switch request.url?.path {
+            case "/http.png":
+                return (Data(), Self.response(for: request, status: 403))
+            case "/timeout.png":
+                throw URLError(.timedOut)
+            case "/broken.png":
+                return (Data("invalid image".utf8), Self.response(for: request, status: 200))
+            case "/transparent.png":
+                return (transparentData, Self.response(for: request, status: 200))
+            default:
+                return (Data(), Self.response(for: request, status: 404))
+            }
+        }
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            retryWaiter: { _ in },
+            diagnosticRecorder: diagnostics
+        )
+        provider.setDOMCandidates(candidates, for: pageURL)
+        let image = await load(provider, from: pageURL)
+        XCTAssertNil(image)
+
+        let fetchEvents = writer.events.filter { $0.event == "favicon.fetch_attempt" }
+        let failureStages = fetchEvents.compactMap { event -> String? in
+            guard case let .string(value) = event.fields["failure_stages"] else { return nil }
+            return value
+        }.joined(separator: ",")
+        XCTAssertTrue(failureStages.contains("http_status"))
+        XCTAssertTrue(failureStages.contains("request_timed_out"))
+        XCTAssertTrue(failureStages.contains("image_decode_failed"))
+        XCTAssertTrue(failureStages.contains("no_visible_pixels"))
+        let loggedBytes = writer.lines.reduce(into: Data()) { $0.append($1) }
+        let loggedText = String(decoding: loggedBytes, as: UTF8.self)
+        XCTAssertFalse(loggedText.contains("private-favicon-token"))
+        XCTAssertFalse(loggedText.contains("broken.png"))
+
+        XCTAssertEqual(
+            WebsiteFaviconProvider.parseDOMCandidateReadResult(.success("[]")),
+            .noCandidates
+        )
+        XCTAssertEqual(
+            WebsiteFaviconProvider.parseDOMCandidateReadResult(
+                .failure(URLError(.cannotParseResponse))
+            ),
+            .readFailed
+        )
+        XCTAssertEqual(
+            WebsiteFaviconProvider.parseDOMCandidateReadResult(
+                .success("[{\"href\":\"https://failure-stages.example.test/icon.png\",\"kind\":\"icon\"}]")
+            ),
+            .candidates([.declared(URL(string: "https://failure-stages.example.test/icon.png")!)])
+        )
+    }
+
     func testICOFixtureDecodesAsAnActualICOFile() async throws {
         let icoData = try fixtureICOData(color: .systemPurple)
         let loader = FaviconTestLoader { request, _ in
@@ -439,10 +731,13 @@ final class FaviconRecoveryTests: XCTestCase {
         }
         await fulfillment(of: [injected], timeout: 5)
 
-        let candidates: [WebsiteFaviconProvider.Candidate] = await withCheckedContinuation { continuation in
+        let readResult: WebsiteFaviconProvider.DOMCandidateReadResult = await withCheckedContinuation { continuation in
             WebsiteFaviconProvider.readDOMFaviconCandidates(from: webView) {
                 continuation.resume(returning: $0)
             }
+        }
+        guard case let .candidates(candidates) = readResult else {
+            return XCTFail("Expected declared DOM candidates, got \(readResult)")
         }
         XCTAssertEqual(candidates.map { $0.url.absoluteString }, [
             "https://chatgpt.example.test/icons/favicon.svg",
@@ -621,6 +916,17 @@ final class FaviconRecoveryTests: XCTestCase {
         }
     }
 
+    private func waitForDiagnostic(
+        _ writer: RuntimeDiagnosticInMemoryWriter,
+        matching predicate: ([RuntimeDiagnosticEvent]) -> Bool
+    ) async {
+        for _ in 0..<200 {
+            if predicate(writer.events) { return }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTFail("Timed out waiting for the expected favicon diagnostic event")
+    }
+
     private func makeProfile(url: String) -> WebAppProfile {
         WebAppProfile(
             order: 0,
@@ -747,6 +1053,31 @@ private final class FaviconRetryGate {
     func waitUntilScheduled(_ count: Int = 1) async {
         guard delays.count < count else { return }
         await withCheckedContinuation { scheduleWaiters.append((count, $0)) }
+    }
+
+    func resumeNext() {
+        guard !continuations.isEmpty else { return }
+        continuations.removeFirst().resume()
+    }
+}
+
+@MainActor
+private final class FaviconFetchGate {
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func suspend() async {
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+            let ready = waiters
+            waiters.removeAll()
+            ready.forEach { $0.resume() }
+        }
+    }
+
+    func waitUntilSuspended() async {
+        guard continuations.isEmpty else { return }
+        await withCheckedContinuation { waiters.append($0) }
     }
 
     func resumeNext() {

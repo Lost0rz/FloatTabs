@@ -1264,6 +1264,8 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         super.init()
 
+        WebsiteFaviconProvider.shared.setDiagnosticRecorder(diagnostics)
+
         webViewPool.attentionStateQuery = { [weak attentionCoordinator] slotID in
             attentionCoordinator?.state(for: slotID) ?? .idle
         }
@@ -4367,7 +4369,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
         faviconDOMReadBySlot[slotID] = read
 
-        WebsiteFaviconProvider.readDOMFaviconCandidates(from: webView) { [weak self, weak webView] candidates in
+        WebsiteFaviconProvider.readDOMFaviconCandidates(from: webView) { [weak self, weak webView] result in
             guard let self,
                   let webView,
                   self.tabStore.activeTabID == slotID,
@@ -4384,10 +4386,42 @@ final class PanelController: NSObject, NSWindowDelegate {
                 }
                 return
             }
-            WebsiteFaviconProvider.shared.setDOMCandidates(
-                candidates,
-                for: committedURL
-            )
+            var fields = runtimeIdentity.fields
+            fields["slot_id"] = .string(slotID.uuidString)
+            fields["navigation_generation"] = .integer(Int64(navigationGeneration))
+            switch result {
+            case let .candidates(candidates):
+                fields["result"] = .string("candidates_found")
+                fields["candidate_count"] = .integer(Int64(candidates.count))
+                self.diagnostics.record(
+                    event: "favicon.dom_candidates",
+                    level: .info,
+                    subsystem: "favicon",
+                    fields: fields
+                )
+                WebsiteFaviconProvider.shared.setDOMCandidates(candidates, for: committedURL)
+            case .noCandidates:
+                fields["result"] = .string("no_candidates")
+                fields["candidate_count"] = .integer(0)
+                self.diagnostics.record(
+                    event: "favicon.dom_candidates",
+                    level: .notice,
+                    subsystem: "favicon",
+                    fields: fields
+                )
+                WebsiteFaviconProvider.shared.setDOMCandidates(
+                    [WebsiteFaviconProvider.Candidate](),
+                    for: committedURL
+                )
+            case .readFailed:
+                fields["result"] = .string("read_failed")
+                self.diagnostics.record(
+                    event: "favicon.dom_candidates",
+                    level: .warning,
+                    subsystem: "favicon",
+                    fields: fields
+                )
+            }
         }
     }
 
