@@ -8,7 +8,6 @@
 
 Current routing:
 
-- `CURRENT_STATUS.md` / `CURRENT_TASK.md` for live state/authorization;
 - [`../architecture/README.md`](../architecture/README.md) and [`../architecture/DOMAIN_MAP.md`](../architecture/DOMAIN_MAP.md) for current diagnostics/runtime ownership;
 - current source/tests and fresh incident evidence for present facts.
 

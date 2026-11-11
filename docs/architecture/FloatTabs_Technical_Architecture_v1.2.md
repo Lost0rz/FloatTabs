@@ -10,9 +10,8 @@ Current routing:
 
 - [`../README.md`](../README.md) — repository documentation authority/status index;
 - [`README.md`](README.md) — current architecture-document routing;
-- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md) — accepted Runtime Lifecycle / Memory program contract;
+- [`README.md`](README.md) — applicable current lifecycle contracts and supersession;
 - [`DOMAIN_MAP.md`](DOMAIN_MAP.md) — source/Domain/test navigation only;
-- `CURRENT_STATUS.md` / `CURRENT_TASK.md` — current state and execution authorization;
 - current production source/tests — implementation truth.
 
 The v1.2 document remains useful as historical rationale for the native AppKit/WebKit architecture, but every claim must be revalidated against current source/contracts before use.

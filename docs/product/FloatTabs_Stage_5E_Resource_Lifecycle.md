@@ -8,8 +8,7 @@
 
 Use instead:
 
-- `CURRENT_STATUS.md` / `CURRENT_TASK.md`;
-- [`../architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](../architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md);
+- [`../architecture/README.md`](../architecture/README.md) for current Runtime contract applicability and supersession;
 - current source/tests for present production behavior.
 
 Historical Stage 5E evidence remains valid only for the version/implementation it originally described.
