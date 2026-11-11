@@ -4535,6 +4535,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 if read.isManualReloadRefresh {
                     WebsiteFaviconProvider.shared.refreshAfterManualReload(
                         candidateReadResult: .candidates(candidates),
+                        committedURL: committedURL,
                         for: [committedURL, activeProfile.homeURL]
                     )
                 } else {
@@ -4553,6 +4554,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 if read.isManualReloadRefresh {
                     provider.refreshAfterManualReload(
                         candidateReadResult: .noCandidates,
+                        committedURL: committedURL,
                         for: [committedURL, activeProfile.homeURL]
                     )
                 } else {
@@ -4572,6 +4574,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 if read.isManualReloadRefresh {
                     WebsiteFaviconProvider.shared.refreshAfterManualReload(
                         candidateReadResult: .readFailed,
+                        committedURL: committedURL,
                         for: [committedURL, activeProfile.homeURL]
                     )
                 }

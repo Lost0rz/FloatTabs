@@ -68,6 +68,29 @@ final class FaviconRecoveryTests: XCTestCase {
         XCTAssertEqual(candidates.last?.kind, .mask)
     }
 
+    func testDeclaredDOMCandidatesAreScopedToCommittedOrigin() async throws {
+        let imageData = try fixtureImageData(color: .systemPurple)
+        let pageURL = try XCTUnwrap(URL(string: "https://committed.example.test/page"))
+        let foreignIconURL = try XCTUnwrap(URL(string: "https://cdn.example.test/foreign.png"))
+        let sameOriginIconURL = try XCTUnwrap(URL(string: "https://committed.example.test/icon.png"))
+        let loader = FaviconTestLoader { request, _ in
+            (imageData, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        provider.setDOMCandidates(
+            [
+                .declared(foreignIconURL, sourceOrder: 0),
+                .declared(sameOriginIconURL, sourceOrder: 1),
+            ],
+            for: pageURL
+        )
+
+        let image = await load(provider, from: pageURL)
+
+        XCTAssertNotNil(image)
+        XCTAssertEqual(loader.requests.compactMap(\.url), [sameOriginIconURL])
+    }
+
     func testTransparentDeclaredIconIsSkippedForNextVisibleCandidate() async throws {
         let transparentData = try fixtureTransparentImageData()
         let visibleData = try fixtureImageData(color: .systemBlue)
@@ -285,7 +308,7 @@ final class FaviconRecoveryTests: XCTestCase {
         provider.cancel(consumerID: consumerID)
     }
 
-    func testDOMDeclaredCrossOriginIconPrecedesURLSessionDiscoveryAndUsesNoCookies() async throws {
+    func testCrossOriginDOMIconIsRejectedAndFallbackRequestsRemainCookieLess() async throws {
         let imageData = try fixtureImageData(color: .systemBlue)
         let loader = FaviconTestLoader { request, _ in
             if request.url?.host == "cdn.example.test" {
@@ -308,11 +331,14 @@ final class FaviconRecoveryTests: XCTestCase {
 
         let image = await load(provider, from: pageURL)
 
-        XCTAssertNotNil(image)
-        XCTAssertEqual(loader.requests.count, 1)
-        XCTAssertEqual(loader.requests[0].url, iconURL)
-        XCTAssertFalse(loader.requests[0].httpShouldHandleCookies)
-        XCTAssertEqual(loader.requests[0].timeoutInterval, 8)
+        XCTAssertNil(image)
+        XCTAssertFalse(loader.requests.isEmpty)
+        XCTAssertFalse(loader.requests.contains { $0.url == iconURL })
+        XCTAssertTrue(loader.requests.allSatisfy {
+            $0.url?.host == "chatgpt.example.test"
+                && !$0.httpShouldHandleCookies
+                && $0.timeoutInterval == 8
+        })
     }
 
     func testLateDOMCandidateReplacesFallbackAndMenuConsumerSurvivesTabDetach() async throws {
@@ -492,6 +518,7 @@ final class FaviconRecoveryTests: XCTestCase {
         provider.cancel(consumerID: staleConsumer)
         provider.refreshAfterManualReload(
             candidateReadResult: .candidates([.declared(iconURL)]),
+            committedURL: pageURL,
             for: [pageURL, sameOriginURL]
         )
         await fulfillment(of: [refreshed], timeout: 2)
@@ -514,13 +541,23 @@ final class FaviconRecoveryTests: XCTestCase {
     }
 
     func testManualReloadRefreshesTabAndCommittedOriginsSeparately() async throws {
-        let oldData = try fixtureImageData(color: .systemOrange)
-        let newData = try fixtureImageData(color: .systemTeal)
+        let homeOldData = try fixtureImageData(color: .systemOrange)
+        let homeNewData = try fixtureImageData(color: .systemTeal)
+        let committedOldData = try fixtureImageData(color: .systemBlue)
+        let committedNewData = try fixtureImageData(color: .systemRed)
         let tabHomeURL = try XCTUnwrap(URL(string: "https://bare-origin.example.test/home"))
         let committedURL = try XCTUnwrap(URL(string: "https://www.example.test/page"))
-        let sharedIconURL = try XCTUnwrap(URL(string: "https://cdn.example.test/favicon.png"))
+        let homeIconURL = try XCTUnwrap(URL(string: "https://bare-origin.example.test/home-icon.png"))
+        let committedIconURL = try XCTUnwrap(URL(string: "https://www.example.test/committed-icon.png"))
+        let foreignIconURL = try XCTUnwrap(URL(string: "https://cdn.example.test/shared-icon.png"))
         let loader = FaviconTestLoader { request, _ in
-            let data = request.cachePolicy == .reloadIgnoringLocalCacheData ? newData : oldData
+            let isFresh = request.cachePolicy == .reloadIgnoringLocalCacheData
+            let data: Data
+            switch request.url?.host {
+            case "bare-origin.example.test": data = isFresh ? homeNewData : homeOldData
+            case "www.example.test": data = isFresh ? committedNewData : committedOldData
+            default: data = committedNewData
+            }
             return (data, Self.response(for: request, status: 200, mimeType: "image/png"))
         }
         let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
@@ -532,8 +569,8 @@ final class FaviconRecoveryTests: XCTestCase {
         refreshed.expectedFulfillmentCount = 2
         var tabImages: [NSImage?] = []
         var menuImages: [NSImage?] = []
-        provider.setDOMCandidates([.declared(sharedIconURL)], for: tabHomeURL)
-        provider.setDOMCandidates([.declared(sharedIconURL)], for: committedURL)
+        provider.setDOMCandidates([.declared(homeIconURL)], for: tabHomeURL)
+        provider.setDOMCandidates([.declared(committedIconURL)], for: committedURL)
         provider.subscribe(for: tabHomeURL, consumerID: tabConsumer) { image in
             tabImages.append(image)
             (tabImages.count == 1 ? initial : refreshed).fulfill()
@@ -545,20 +582,70 @@ final class FaviconRecoveryTests: XCTestCase {
         await fulfillment(of: [initial], timeout: 2)
 
         provider.refreshAfterManualReload(
-            candidateReadResult: .candidates([.declared(sharedIconURL)]),
+            candidateReadResult: .candidates([
+                .declared(committedIconURL),
+                .declared(foreignIconURL, sourceOrder: 1),
+            ]),
+            committedURL: committedURL,
             for: [committedURL, tabHomeURL]
         )
         await fulfillment(of: [refreshed], timeout: 2)
 
         XCTAssertEqual(loader.requests.count, 4)
         XCTAssertEqual(loader.requests.filter { $0.cachePolicy == .returnCacheDataElseLoad }.count, 2)
-        XCTAssertEqual(loader.requests.filter { $0.cachePolicy == .reloadIgnoringLocalCacheData }.count, 2)
+        let freshRequests = loader.requests.filter {
+            $0.cachePolicy == .reloadIgnoringLocalCacheData
+        }
+        XCTAssertEqual(freshRequests.count, 2)
+        XCTAssertEqual(Set(freshRequests.compactMap(\.url)), Set([homeIconURL, committedIconURL]))
+        XCTAssertFalse(loader.requests.contains { $0.url == foreignIconURL })
         XCTAssertEqual(tabImages.count, 2)
         XCTAssertEqual(menuImages.count, 2)
         XCTAssertNotEqual(tabImages[0]?.tiffRepresentation, tabImages[1]?.tiffRepresentation)
         XCTAssertNotEqual(menuImages[0]?.tiffRepresentation, menuImages[1]?.tiffRepresentation)
+        XCTAssertNotEqual(tabImages[1]?.tiffRepresentation, menuImages[1]?.tiffRepresentation)
         provider.cancel(consumerID: tabConsumer)
         provider.cancel(consumerID: menuConsumer)
+    }
+
+    func testManualReloadWithNoCommittedDOMCandidatesRetainsHomeOriginCandidates() async throws {
+        let oldData = try fixtureImageData(color: .systemOrange)
+        let newData = try fixtureImageData(color: .systemTeal)
+        let homeURL = try XCTUnwrap(URL(string: "https://home-a.example.test/"))
+        let committedURL = try XCTUnwrap(URL(string: "https://committed-b.example.test/page"))
+        let homeIconURL = try XCTUnwrap(URL(string: "https://home-a.example.test/icon.png"))
+        let loader = FaviconTestLoader { request, _ in
+            guard request.url == homeIconURL else {
+                return (Data(), Self.response(for: request, status: 404))
+            }
+            let data = request.cachePolicy == .reloadIgnoringLocalCacheData ? newData : oldData
+            return (data, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let tabConsumer = UUID()
+        let initial = expectation(description: "home origin has a validated cached candidate")
+        let refreshed = expectation(description: "home origin refresh uses its own candidate")
+        var images: [NSImage?] = []
+        provider.setDOMCandidates([.declared(homeIconURL)], for: homeURL)
+        provider.subscribe(for: homeURL, consumerID: tabConsumer) { image in
+            images.append(image)
+            (images.count == 1 ? initial : refreshed).fulfill()
+        }
+        await fulfillment(of: [initial], timeout: 2)
+
+        provider.refreshAfterManualReload(
+            candidateReadResult: .noCandidates,
+            committedURL: committedURL,
+            for: [committedURL, homeURL]
+        )
+        await fulfillment(of: [refreshed], timeout: 2)
+
+        XCTAssertEqual(images.count, 2)
+        XCTAssertNotEqual(images[0]?.tiffRepresentation, images[1]?.tiffRepresentation)
+        XCTAssertTrue(loader.requests.contains {
+            $0.url == homeIconURL && $0.cachePolicy == .reloadIgnoringLocalCacheData
+        })
+        provider.cancel(consumerID: tabConsumer)
     }
 
     func testFailedManualReloadRefreshRetainsExistingImage() async throws {
@@ -589,6 +676,7 @@ final class FaviconRecoveryTests: XCTestCase {
 
         provider.refreshAfterManualReload(
             candidateReadResult: .candidates([.declared(iconURL)]),
+            committedURL: pageURL,
             for: [pageURL]
         )
         await retryGate.waitUntilScheduled()
@@ -964,11 +1052,10 @@ final class FaviconRecoveryTests: XCTestCase {
         XCTAssertEqual(candidates.last?.kind, .mask)
     }
 
-    func testTabIconAppearanceUsesActiveStateAcrossRuntimeResidencyMatrix() {
+    func testTabIconAppearanceUsesResidencyAcrossSelectionMatrix() {
         let icon = fixtureImage(color: .systemOrange)
         let profile = makeProfile(url: "https://www.google.com/")
-        var activeImages: [Bool: Data] = [:]
-        var inactiveImages: [Bool: Data] = [:]
+        var imagesByResidency: [Bool: [Data]] = [:]
 
         for isActive in [false, true] {
             for isResident in [false, true] {
@@ -978,20 +1065,66 @@ final class FaviconRecoveryTests: XCTestCase {
 
                 let displayed = try! XCTUnwrap(tab.displayedIcon)
                 let data = try! XCTUnwrap(displayed.tiffRepresentation)
-                XCTAssertEqual(tab.displayedIconAlpha, isActive ? 1 : 0.38, accuracy: 0.001)
-                if isActive {
+                XCTAssertEqual(tab.displayedIconAlpha, isResident ? 1 : 0.38, accuracy: 0.001)
+                XCTAssertEqual(tab.isShowingLabel, isActive)
+                if isResident {
                     XCTAssertTrue(displayed === icon)
-                    activeImages[isResident] = data
                 } else {
                     XCTAssertFalse(displayed === icon)
                     XCTAssertNotEqual(data, icon.tiffRepresentation)
-                    inactiveImages[isResident] = data
                 }
+                imagesByResidency[isResident, default: []].append(data)
             }
         }
 
-        XCTAssertEqual(activeImages[false], activeImages[true])
-        XCTAssertEqual(inactiveImages[false], inactiveImages[true])
+        XCTAssertEqual(imagesByResidency[false]?.count, 2)
+        XCTAssertEqual(imagesByResidency[true]?.count, 2)
+        XCTAssertEqual(imagesByResidency[false]?[0], imagesByResidency[false]?[1])
+        XCTAssertEqual(imagesByResidency[true]?[0], imagesByResidency[true]?[1])
+    }
+
+    func testMultipleUnselectedResidentsStayBrightAndReleasedHoverStaysSubdued() {
+        let profile = makeProfile(url: "https://resident.example.test/")
+        let firstIcon = fixtureImage(color: .black)
+        let secondIcon = fixtureImage(color: .systemBlue)
+        let firstResident = ExternalWebAppTabView(slotID: UUID(), faviconLoader: { _, _ in })
+        let secondResident = ExternalWebAppTabView(slotID: UUID(), faviconLoader: { _, _ in })
+        firstResident.update(profile: profile, isActive: false, isResident: true)
+        secondResident.update(profile: profile, isActive: false, isResident: true)
+        firstResident.setSourceIcon(firstIcon)
+        secondResident.setSourceIcon(secondIcon)
+        firstResident.setHovered(true)
+
+        XCTAssertTrue(firstResident.displayedIcon === firstIcon)
+        XCTAssertTrue(secondResident.displayedIcon === secondIcon)
+        XCTAssertEqual(firstResident.displayedIconAlpha, 1, accuracy: 0.001)
+        XCTAssertEqual(secondResident.displayedIconAlpha, 1, accuracy: 0.001)
+
+        let releasedSelected = ExternalWebAppTabView(slotID: UUID(), faviconLoader: { _, _ in })
+        releasedSelected.update(profile: profile, isActive: true, isResident: false)
+        releasedSelected.setSourceIcon(firstIcon)
+        XCTAssertFalse(releasedSelected.displayedIcon === firstIcon)
+        XCTAssertEqual(releasedSelected.displayedIconAlpha, 0.38, accuracy: 0.001)
+        releasedSelected.setHovered(true)
+        XCTAssertFalse(releasedSelected.displayedIcon === firstIcon)
+        XCTAssertEqual(releasedSelected.displayedIconAlpha, 0.60, accuracy: 0.001)
+        XCTAssertLessThan(releasedSelected.displayedIconAlpha, 1)
+
+        let templateIcon = fixtureImage(color: .systemPurple)
+        templateIcon.isTemplate = true
+        let templateResident = ExternalWebAppTabView(slotID: UUID(), faviconLoader: { _, _ in })
+        templateResident.update(profile: profile, isActive: false, isResident: true)
+        templateResident.setSourceIcon(templateIcon)
+        XCTAssertTrue(templateResident.displayedIcon === templateIcon)
+        XCTAssertEqual(templateResident.displayedIconTintColor, .labelColor)
+        templateResident.setUnreadResponse(true)
+        XCTAssertEqual(
+            templateResident.displayedIconTintColor,
+            TabAttentionStyle.dot.configuration(for: .red).foregroundColor
+        )
+        templateResident.update(profile: profile, isActive: true, isResident: false)
+        XCTAssertEqual(templateResident.displayedIconTintColor, .tertiaryLabelColor)
+        XCTAssertTrue(templateResident.isShowingUnreadResponse)
     }
 
     func testActiveIconContrastBackgroundAdaptsToAppearanceWithoutChangingBrandOrGeometry() {
@@ -1013,21 +1146,31 @@ final class FaviconRecoveryTests: XCTestCase {
 
         tab.update(profile: profile, isActive: false, isResident: true)
         tab.layoutSubtreeIfNeeded()
+        XCTAssertNotNil(tab.displayedIconContrastBackgroundColor)
+        XCTAssertEqual(tab.displayedIconAlpha, 1, accuracy: 0.001)
+        XCTAssertTrue(tab.displayedIcon === blackBrandIcon)
+        XCTAssertEqual(tab.iconFrame, darkIconFrame)
+        let inactiveWidth = tab.preferredWidth
+        XCTAssertNotEqual(activeWidth, inactiveWidth)
+
+        tab.setResident(false)
         XCTAssertNil(tab.displayedIconContrastBackgroundColor)
         XCTAssertEqual(tab.displayedIconAlpha, 0.38, accuracy: 0.001)
         XCTAssertFalse(tab.displayedIcon === blackBrandIcon)
-        XCTAssertEqual(tab.iconFrame, darkIconFrame)
         tab.setHovered(true)
         XCTAssertEqual(tab.displayedIconAlpha, 0.60, accuracy: 0.001)
         XCTAssertLessThan(tab.displayedIconAlpha, 1)
+        XCTAssertFalse(tab.displayedIcon === blackBrandIcon)
 
         tab.setHovered(false)
-        tab.update(profile: profile, isActive: true, isResident: true)
-        XCTAssertEqual(tab.preferredWidth, activeWidth)
+        tab.setResident(true)
+        XCTAssertTrue(tab.displayedIcon === blackBrandIcon)
+        XCTAssertEqual(tab.displayedIconAlpha, 1, accuracy: 0.001)
+        XCTAssertNotNil(tab.displayedIconContrastBackgroundColor)
 
         let lightTab = ExternalWebAppTabView(slotID: UUID(), faviconLoader: { _, _ in })
         lightTab.appearance = NSAppearance(named: .aqua)
-        lightTab.update(profile: profile, isActive: true, isResident: false)
+        lightTab.update(profile: profile, isActive: false, isResident: true)
         lightTab.setSourceIcon(blackBrandIcon)
         XCTAssertNil(lightTab.displayedIconContrastBackgroundColor)
         let whiteBrandIcon = fixtureImage(color: .white)
@@ -1043,7 +1186,7 @@ final class FaviconRecoveryTests: XCTestCase {
         NSRect(x: 8, y: 0, width: 8, height: 16).fill()
         multicolorIcon.unlockFocus()
         tab.setSourceIcon(multicolorIcon)
-        tab.update(profile: profile, isActive: true, isResident: false)
+        tab.update(profile: profile, isActive: false, isResident: true)
         XCTAssertTrue(tab.displayedIcon === multicolorIcon)
         XCTAssertEqual(tab.displayedIconAlpha, 1, accuracy: 0.001)
 
@@ -1054,7 +1197,8 @@ final class FaviconRecoveryTests: XCTestCase {
         })
         noRefetchTab.update(profile: profile, isActive: false, isResident: false)
         noRefetchTab.update(profile: profile, isActive: true, isResident: true)
-        XCTAssertEqual(faviconRequests, 1, "Active state changes must not request another favicon")
+        noRefetchTab.update(profile: profile, isActive: false, isResident: false)
+        XCTAssertEqual(faviconRequests, 1, "selection and residency changes must not request another favicon")
     }
 
     func testActiveConsumerRetriesAfterCooldownWithoutAnotherUIUpdate() async throws {

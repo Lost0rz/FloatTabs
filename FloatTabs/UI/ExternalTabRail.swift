@@ -2512,7 +2512,9 @@ final class WebsiteFaviconProvider {
     /// Runtime, committed URL and navigation generation for the DOM result.
     func setDOMCandidates(_ candidates: [Candidate], for committedURL: URL) {
         guard let key = Self.originKey(for: committedURL) else { return }
-        let normalized = Self.orderedCandidates(candidates).prefix(Self.maximumDeclaredCandidates)
+        let normalized = Self.orderedCandidates(candidates)
+            .filter { Self.originKey(for: $0.url) == key }
+            .prefix(Self.maximumDeclaredCandidates)
         let next = Array(normalized)
         guard domCandidates[key] != next else { return }
         storeDOMCandidates(next, for: key)
@@ -2569,8 +2571,10 @@ final class WebsiteFaviconProvider {
     /// visible-pixel validation; `finish` then notifies only current demands.
     func refreshAfterManualReload(
         candidateReadResult: DOMCandidateReadResult,
+        committedURL: URL,
         for targetURLs: [URL]
     ) {
+        let committedOriginKey = Self.originKey(for: committedURL)
         var refreshedOrigins = Set<String>()
         for targetURL in targetURLs {
             guard let key = Self.originKey(for: targetURL),
@@ -2578,17 +2582,23 @@ final class WebsiteFaviconProvider {
                 continue
             }
 
-            switch candidateReadResult {
-            case let .candidates(candidates):
-                let normalized = Self.orderedCandidates(candidates)
-                    .prefix(Self.maximumDeclaredCandidates)
-                storeDOMCandidates(Array(normalized), for: key)
-            case .noCandidates:
-                storeDOMCandidates([], for: key)
-            case .readFailed:
-                // A transient DOM read failure must not discard declarations
-                // which were validated for this origin on an earlier page.
-                break
+            // The DOM read belongs only to the current committed page origin.
+            // A different Tab home origin retains its own validated declarations
+            // and discovers its own resources through the bounded URLSession path.
+            if key == committedOriginKey {
+                switch candidateReadResult {
+                case let .candidates(candidates):
+                    let normalized = Self.orderedCandidates(candidates)
+                        .filter { Self.originKey(for: $0.url) == key }
+                        .prefix(Self.maximumDeclaredCandidates)
+                    storeDOMCandidates(Array(normalized), for: key)
+                case .noCandidates:
+                    storeDOMCandidates([], for: key)
+                case .readFailed:
+                    // A transient DOM read failure must not discard declarations
+                    // which were validated for this origin on an earlier page.
+                    break
+                }
             }
 
             // A manual refresh may need to update the Tab identity cache even
@@ -3946,26 +3956,26 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         let base = sourceIcon ?? Self.fallbackIcon()
         if base?.isTemplate == true {
             iconView.image = base
-            iconView.contentTintColor = isActive
+            iconView.contentTintColor = isResident
                 ? (isUnreadResponse
                     ? (attentionForeground ?? attentionStyle.configuration(for: attentionPalette).foregroundColor)
                     : .labelColor)
                 : .tertiaryLabelColor
         } else {
-            iconView.image = isActive ? base : (grayscaleIcon ?? base)
+            iconView.image = isResident ? base : (grayscaleIcon ?? base)
             iconView.contentTintColor = nil
         }
-        let contrastBackground = activeIconContrastBackgroundColor()
+        let contrastBackground = residentIconContrastBackgroundColor()
         iconView.layer?.backgroundColor = contrastBackground?.cgColor
         iconView.layer?.borderColor = contrastBackground.map {
             $0.withAlphaComponent(0.28).cgColor
         }
         iconView.layer?.borderWidth = contrastBackground == nil ? 0 : 0.5
-        iconView.alphaValue = isActive ? 1 : (isHovered ? 0.60 : 0.38)
+        iconView.alphaValue = isResident ? 1 : (isHovered ? 0.60 : 0.38)
     }
 
-    private func activeIconContrastBackgroundColor() -> NSColor? {
-        guard isActive,
+    private func residentIconContrastBackgroundColor() -> NSColor? {
+        guard isResident,
               sourceIcon?.isTemplate != true,
               let sourceIconLuminance else {
             return nil
