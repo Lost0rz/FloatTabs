@@ -1,15 +1,12 @@
 # FloatTabs Runtime Lifecycle Policy V7 — Staged Automatic Lifecycle
 
-**Status:** FROZEN / WP2 POLICY AUTHORITY; SOURCE IMPLEMENTATION ACTIVE
-**Task:** FT-ADAPTIVE-LIFECYCLE-RESTORE-001
-**Execution card:** FT-ADAPTIVE-LIFECYCLE-RESTORE-001-WP2-001
+**Status:** ACCEPTED TECHNICAL POLICY / CURRENT APPLICABILITY CHECKED AGAINST SOURCE AND TESTS
 **Date:** 2026-11-02
 **Baseline:** main@2a52800f770266f7c901eb612a0b319ddca142df
-**Branch:** codex/adaptive-lifecycle-wp2-policy
 **Scope:** healthy-state Automatic lifecycle and warning/critical reclaim eligibility
-**Mutation boundary:** WP2 policy only; WP1 restore/presentation, WP3 scheduling, and WP4 integration remain separate.
+**Technical scope:** Automatic lifecycle and reclaim eligibility, separate from restore/presentation, scheduling, and other subsystems.
 
-This document is the durable WP2 policy authority. The user-supplied WP2-001 card carries the execution and delivery gates. CURRENT_TASK.md is the active task authorization. The accepted WP1 contract V2 remains authoritative for exact-Runtime presentation/readiness semantics and is a required regression boundary.
+This document records the bounded FloatTabs Runtime policy and supersedes earlier conflicting Phase 8 fixed-count / Keep Loaded-critical behavior. Restore/presentation readiness remains separately defined by Adaptive Lifecycle Restore Contract V2. Task permission and delivery gates are not defined here.
 
 ## 1. Purpose and observed basis
 
@@ -139,7 +136,7 @@ WP2 may change the lifecycle policy and narrowly necessary diagnostic projection
 - aggregate/per-Slot GiB budgeting or Runtime-count-derived RAM estimates;
 - WebKit private SPI, helper-process termination, or reload/reset/restart workarounds.
 
-## 9. Required focused regression matrix
+## 9. Product-specific regression matrix
 
 1. Five Automatic resident Runtime under normal pressure: reconcile does not hibernate because of count.
 2. Automatic inactive at 29s: remains RECENT and resident.
@@ -157,12 +154,10 @@ WP2 may change the lifecycle policy and narrowly necessary diagnostic projection
 14. Old inactive token cannot reclaim a new/current lifecycle generation.
 15. WP1 cold restore, A→B→A, focus, unread, and notification regressions remain green.
 
-## 10. Verification and stop boundary
+## 10. Related product regressions and real-Mac observations
 
-Required focused verification covers lifecycle suites, WebAttentionLifecycleTests, WebAttentionCrossFeatureTests, WebViewPool reclaim regressions, ExternalShell/WP1 presentation regressions, and affected runtime diagnostic/privacy tests.
+Relevant coverage includes lifecycle suites, `WebAttentionLifecycleTests`, `WebAttentionCrossFeatureTests`, `WebViewPool` reclaim regressions, ExternalShell/restore presentation behavior and affected diagnostic/privacy tests.
 
-Then run full XCTest, Debug arm64, Release arm64, native arm64 verification, package-lock check, exact-head self-hosted macOS CI, exact-head QA DMG, and a fresh independent exact-diff / ownership / data-safety audit. CI must use the repository's established [self-hosted, macOS, ARM64, mac-mini-ci] runner; do not silently fall back to a hosted macOS runner.
+Real-Mac observations should cover frequent multi-Slot use, long-idle restore through the exact Runtime readiness boundary, Keep Loaded retention, generation protection, and intact login/session/conversation data.
 
-Stop after machine evidence and independent audit. Do not merge WP2 or release. HUMAN_UI_ACCEPTANCE=PENDING / USER-OWNED until the user validates the integrated real-Mac behavior, including frequent multi-Slot use, long-idle restore through the WP1 gate, pinned retention, generation protection, and intact login/session/conversation.
-
-WP3 scheduling mutation and WP4 other mutation remain NOT_STARTED.
+This section defines product-specific behavior to preserve, **not** an instruction to run the entire XCTest suite or a CI/QA DMG workflow on every change. Task selection, test scope, approval, merge and release are owned outside the product contract.

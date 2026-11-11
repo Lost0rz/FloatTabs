@@ -234,7 +234,7 @@ The one-shot preview request happens only after a newly hidden completion become
 
 After completion, existing lifecycle policy may reclaim the Runtime. A later notification tap must continue to restore/materialize through existing ownership.
 
-## 7. Authorized production scope
+## 7. Expected product component boundaries
 
 Expected production paths:
 
@@ -246,9 +246,9 @@ Expected production paths:
 
 `FloatTabs/Web/WebViewPool.swift` may change only if a minimal read-only response-bridge projection seam is genuinely missing; no Runtime lifecycle semantics may change.
 
-No other production path is authorized without task reconciliation.
+Additional touchpoints require a demonstrated product dependency; this contract does not grant or restrict repository write permission.
 
-## 8. Authorized tests
+## 8. Relevant product test owners
 
 Expected focused tests:
 
@@ -258,9 +258,9 @@ Expected focused tests:
 4. `FloatTabsTests/WebAttentionCrossFeatureTests.swift`
 5. a narrowly necessary diagnostics/privacy test only if new diagnostics fields require it.
 
-## 9. Required verification
+## 9. Product regression scenarios
 
-### Gate N1 — preview extraction
+### Scenario N1 — preview extraction
 
 Prove:
 
@@ -272,7 +272,7 @@ Prove:
 6. runtime/navigation invalidation prevents stale preview completion from being admitted;
 7. status snapshots remain body-free.
 
-### Gate N2 — notification content + settings
+### Scenario N2 — notification content + settings
 
 Prove:
 
@@ -288,7 +288,7 @@ Prove:
 10. foreground recognized notification remains banner/list without notification sound;
 11. diagnostics contain no Slot name or response preview text.
 
-### Gate N3 — production composition / routing
+### Scenario N3 — production composition / routing
 
 Prove:
 
@@ -302,7 +302,7 @@ Prove:
 8. unread acknowledgement remains presentation-aware and is not cleared merely by system submission;
 9. existing completion sound semantics remain unchanged.
 
-### Gate N4 — background/lifecycle regression
+### Scenario N4 — background/lifecycle regression
 
 Prove:
 
@@ -312,17 +312,7 @@ Prove:
 - pressure-ladder semantics are unchanged;
 - no notification-specific polling, second lifecycle writer or persistent response-content store is added.
 
-### Gate N5 — broad repository gate
-
-- focused notification/preview tests PASS;
-- full XCTest PASS;
-- Debug arm64 build PASS;
-- Release arm64 build PASS;
-- native arm64 architecture PASS;
-- package lock unchanged unless a separately authorized dependency change is required;
-- exact changed-path / privacy / ownership audit PASS;
-- literal-head required `Build & Test (Apple Silicon arm64)` PASS on `[self-hosted, macOS, ARM64, mac-mini-ci]`;
-- QA DMG PASS if the workflow is automatically triggered.
+The scenario coverage above defines notification-specific correctness and privacy expectations. Full-suite selection, build/CI invocation, independent review and merge gates are not defined by this technical contract.
 
 ## 10. Human acceptance
 
@@ -338,7 +328,7 @@ After machine gates and independent review, stop for human validation of at leas
 6. disabling macOS notification previews can hide the body without being treated as an app failure;
 7. disabling alert banners is reflected by diagnostics rather than misreported as successful visible presentation.
 
-`HUMAN_UI_ACCEPTANCE` remains `PENDING` until the user explicitly passes or fails the real notification behavior.
+These real-Mac observations are required product evidence; this document does not set or imply a human-acceptance verdict.
 
 ## 11. Explicit non-scope
 
@@ -358,9 +348,9 @@ Do not add:
 - aggregate memory-budget work;
 - Browser Profile/session/cache resets.
 
-## 12. STOP conditions
+## 12. Product design incompatibilities
 
-STOP and reconcile if implementation requires:
+The following behaviors are outside this product contract and require a separate technical decision:
 
 - a second completion/unread/Tab/Runtime writer;
 - periodic response-preview polling;
@@ -372,30 +362,13 @@ STOP and reconcile if implementation requires:
 - private APIs or an unsupported Focus-state claim;
 - changing lifecycle timers, pressure ordering or generation protection;
 - destructive user/session data mutation;
-- required tests/build/CI failure.
 
-## 13. Implementation sequence
+## 13. Technical dependency order
 
-```text
-focused source reconciliation
-→ add one-shot preview snapshot + extraction tests
-→ extend notification request content + system-settings preflight diagnostics
-→ wire hidden .marked completion projection with Slot name + optional preview
-→ preserve exact-Slot click route
-→ focused gates N1-N4
-→ full XCTest + Debug/Release arm64 + architecture
-→ push existing task branch / Draft PR
-→ literal-head self-hosted CI + QA DMG
-→ independent exact-diff / ownership / privacy review
-→ HUMAN_UI_ACCEPTANCE = PENDING
-→ user validates native notification UX
-→ merge decision
-```
+Notification content depends on a one-shot, current-document assistant-preview snapshot; the native projection then combines it with exact Slot identity, current macOS notification settings, and the existing hidden `.marked` completion route. Exact-Slot tap routing and durable-unread acknowledgement remain independent. No notification preview is persisted or logged.
 
-## 14. Design reconciliation
+This dependency description is not a Git branch, PR, CI, audit or release workflow.
 
-```text
-TASK_RECONCILIATION_REQUIRED=YES
-REASON=the user changed the previously frozen Phase 3 generic-content/privacy projection requirement and requested a new standalone notification task
-DURABLE_DOCUMENT=docs/architecture/FloatTabs_Native_Completion_Notification_Reliability_Rich_Preview_Contract_V1.md
-```
+## 14. Historical design context
+
+The user changed the earlier Phase 3 generic notification-content requirement to allow a bounded assistant-response preview and target Slot name, while retaining the existing privacy and exact-Slot routing restrictions. This records the product decision only; no present task approval or change permission is created.

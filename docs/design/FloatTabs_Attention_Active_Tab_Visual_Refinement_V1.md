@@ -247,92 +247,33 @@ Explicitly out of scope:
 - new diagnostics/telemetry;
 - release/version bump.
 
-## 16. Verification gates
+## 16. Product regression cases
 
-### Gate 0 — Authority / baseline
+These are **FloatTabs behavior and compatibility requirements**, not test-tier/CI scheduling or task authorization rules.
 
-- fresh `origin/main` and task branch identity established;
-- read `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md` and this frozen design;
-- no unknown overlapping writer/unique work;
-- task branch remains scoped to this task.
+Check the actual current source/test owners for active width/label, Attention renderer, Settings previews, and preference migration. Relevant product regression cases:
 
-### Gate 1 — Source/test mapping
+- selected Tab resting width stays at the expanded 76 pt baseline; its label remains visible after pointer exit;
+- inactive resting Tab width remains 40 pt and retains the prior hover expansion, drag, ordering, folding, and click targets;
+- the canonical exposed styles remain Dot / Beacon / Orbit / Pulse in the approved order;
+- old stored `halo` and `sweep` values resolve compatibly to `pulse` and `orbit`;
+- Pulse reaches a visibly full-strength peak and remains representative under Reduce Motion;
+- Orbit renders inside the Tab rather than under the outer shell frame;
+- Settings displays the four current previews; overflow reuses the same rendering behavior.
 
-Read the current implementations/tests for active width/label, Attention renderer, Settings previews, and preference compatibility before mutation. If actual ownership materially differs from the expected touch points, stop and reconcile instead of spreading edits.
+## 17. Real-Mac visual observations
 
-### Gate 2 — Active presentation
+The product should be observed in a running macOS build for:
 
-Implement persistent 76 pt active width and persistent active label without changing inactive Dock magnification behavior, click targets, drag/reorder behavior, fold behavior, or rail ownership.
+1. persistent expansion/label of the active Tab versus ordinary inactive Dock magnification;
+2. legible Orbit and stronger Pulse on the actual dark shell/background;
+3. recognizable Beacon and unchanged Dot;
+4. selected + unread coexistence, including overflow;
+5. coherent four-style Settings previews;
+6. meaningful static Attention when Reduce Motion is enabled.
 
-### Gate 3 — Canonical style reduction / compatibility
+Machine checks and user visual judgment provide different evidence. This document defines what visual behavior matters; it does not set an approval state or prescribe PR/merge/release gates.
 
-Expose only Dot / Beacon / Orbit / Pulse; preserve old stored values with the mappings in Section 5; update Settings and tests.
+## 18. Design compatibility boundary
 
-### Gate 4 — Renderer refinement
-
-Implement internal Orbit and stronger whole-surface Pulse; preserve Dot and Beacon semantics; remove dead Halo/Sweep production paths where safe.
-
-### Gate 5 — Focused verification
-
-Run the narrowest relevant test targets first. Add/update regression coverage for:
-
-- active resting width = expanded width;
-- active label remains visible after hover exit;
-- inactive resting width remains 40 pt;
-- canonical style list contains exactly four styles in frozen order;
-- `halo -> pulse` and `sweep -> orbit` compatibility;
-- Pulse full-opacity peak configuration and reduced-motion representative state;
-- Orbit internal geometry / renderer selection;
-- Settings four-preview presentation;
-- overflow shared renderer behavior.
-
-### Gate 6 — Broader verification
-
-Because this changes persistent preferences and real macOS rail interaction/presentation:
-
-- relevant full XCTest suite;
-- Debug arm64 build;
-- Release arm64 build;
-- existing repository CI required by branch protection.
-
-Do not promote automated UI/render evidence into human product acceptance.
-
-### Gate 7 — Human UI acceptance
-
-`HUMAN_UI_ACCEPTANCE=PENDING` until the user explicitly evaluates the installed/running build.
-
-Human acceptance should check at minimum:
-
-1. active Tab stays expanded and labelled after pointer exit;
-2. inactive Tabs still collapse and Dock-expand normally;
-3. Orbit is clearly visible and no longer lost under the shell border;
-4. Pulse is clearly brighter, reaches a full-strength peak, and is not muddy on dark surfaces;
-5. Beacon remains clear without becoming excessive;
-6. Dot remains unchanged and clear;
-7. Settings shows only four coherent previews;
-8. unread + active combinations remain legible;
-9. Reduce Motion leaves meaningful static attention.
-
-The AI may use automated tests or rendered inspection for debugging/internal review, but only the user's explicit decision can set human UI acceptance to PASS/FAIL.
-
-## 17. Merge / release boundary
-
-Implementation is expected to remain in one Draft PR until verification and human acceptance are complete.
-
-No merge and no release are authorized by this design freeze alone.
-
-## 18. Frozen-change rule
-
-The decisions in Sections 2–13 are frozen for this task. Implementation may make small numeric/layout corrections only when required to satisfy the frozen behavior and tests without changing the interaction model.
-
-Any material change to:
-
-- the four-style set;
-- migration mappings;
-- active 76 pt persistent expansion;
-- active label persistence;
-- Orbit-inside-the-Tab strategy;
-- Pulse full-opacity peak;
-- human acceptance ownership;
-
-requires explicit user scope reconciliation and an update to `CURRENT_TASK.md` / this contract before implementation continues.
+The accepted FloatTabs-specific interaction choices remain the four-style set, migration mappings, persistent 76 pt active width/label, internal Orbit, and full-strength Pulse. A different product design requires an updated bounded design decision. Execution authorization, change escalation, test tiers and delivery belong outside this design contract.
