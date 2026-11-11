@@ -2,11 +2,11 @@
 
 **Program:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Phase:** `1 — Safe Hibernate + Restore`  
-**Status:** `ACCEPTED / FROZEN IMPLEMENTATION PLAN`  
+**Status:** `HISTORICAL ACCEPTED PHASE 1 PLAN; NOT CURRENT EXECUTION AUTHORITY`  
 **Audit baseline:** `main @ 1ba0ec7fe70c3d8a6fd42d586dcc813ed87d9088`  
-**Product mutation:** authorized only after this plan/control reconciliation merges  
+**Historical mutation condition:** depended on the original phase's accepted plan; no present task permission  
 
-This document is the concrete Phase 1 implementation contract under the parent [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md). It does not authorize Phase 2+ semantics.
+This is the original Phase 1 implementation and evidence plan under [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md). Its Task/Status, build/CI/PR and approval instructions describe the original phase only. Current behavior and permissions are not inferred from this historical plan.
 
 ## 1. Phase objective
 
@@ -336,9 +336,9 @@ Diagnostics remains observational and must not make the restore decision.
 
 8. `tools/benchmark/README.md` only to document the accepted Phase 1 benchmark invocation/output.
 
-### Control/design files
+### Historical documentation scope
 
-`CURRENT_STATUS.md`, `CURRENT_TASK.md`, this plan, and architecture routing may be updated for phase state/evidence.
+The original phase's Task/Status reconciliation and handoff records are historical. Only the technical Runtime, benchmark and user-data boundaries in this document are relevant as product evidence.
 
 ## 10. Explicitly out of scope
 
@@ -548,8 +548,6 @@ The rollback is bounded:
 
 Therefore a Phase 1 rollback must never require clearing Browser Profiles, cookies, sessions, Slot configuration, backups or unread state.
 
-## 17. Construction handoff rule
+## 17. Historical phase handoff
 
-After this plan and the reconciled `CURRENT_STATUS.md` / `CURRENT_TASK.md` merge, local construction may start under one bounded execution card.
-
-The card must reference this plan rather than duplicating it, must preserve one canonical writer, and must stop at `WAITING_FOR_INDEPENDENT_WEB_AUDIT` after implementation/tests/benchmark evidence are pushed. Merge/release are separate web-audit decisions.
+The original Phase 1 plan closed with an execution-card/independent-review handoff. That task-control procedure is retired; this document provides no present construction or merge authority. The Phase 1 technical rollback and data-safety observations above remain historical engineering evidence.

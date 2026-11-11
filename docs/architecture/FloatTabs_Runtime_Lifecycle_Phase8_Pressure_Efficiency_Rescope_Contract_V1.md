@@ -2,7 +2,7 @@
 
 **Program:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Re-scope:** `Phase 8 measurement-independent continuation`  
-**Status:** `ACCEPTED / FROZEN / IMPLEMENTATION AUTHORIZED AFTER PR #190 CLOSEOUT MERGE`  
+**Status:** `HISTORICAL RE-SCOPE / TECHNICAL EVIDENCE; SUPERSEDED WHERE POLICY V7 DIFFERS`  
 **User decision:** `D_COMBINE = B now + A later`  
 **Parent design authority:** `FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md`  
 **Gate 0 evidence:** `FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md`
@@ -21,7 +21,7 @@ A later = revisit aggregate memory budget only if a supported deterministic
           attribution capability becomes available
 ```
 
-This contract authorizes only the measurement-independent continuation. It does not weaken the Gate 0 determinism requirement and does not authorize best-effort process attribution.
+The original decision limited the design to measurement-independent improvements; it did not relax the deterministic WebContent attribution requirement. It is historical design evidence, not present implementation permission.
 
 ## 2. Long-term budget track disposition
 
@@ -38,7 +38,7 @@ Reopen that track only when a supported production-safe mechanism can determinis
 
 ## 3. Current production policy preserved during this re-scope
 
-Until a future budget track is separately authorized and proven feasible, healthy/normal memory conditions retain the merged Phase 7 normal policy:
+At the original re-scope baseline, healthy/normal memory conditions used the Phase 7 policy:
 
 ```text
 runtimeRetentionPreference = Automatic | Keep Loaded
@@ -46,11 +46,13 @@ normal Automatic resident target = 2
 Automatic inactive release path = 30s
 ```
 
-This re-scope MUST NOT retire or redesign that normal policy.
+This was a constraint of the original re-scope, **not current product truth**. Current normal and pressure behavior is defined by [Runtime Lifecycle Policy V7](FloatTabs_Runtime_Lifecycle_Policy_V7.md) and current source/tests.
 
-The only lifecycle-policy mutation authorized here is replacement of the Phase 7 `warning target = 1 / critical target = 0` count targets with a progressive system-memory-pressure ladder.
+The original proposed change replaced Phase 7 `warning target = 1 / critical target = 0` count targets with progressive memory-pressure reclaim.
 
-## 4. Package R1 / original WP3 — progressive system-pressure ladder
+## 4. Historical Package R1 / original WP3 — progressive system-pressure ladder
+
+This section records the **pre-WP2** proposal. Its Critical fallback to Keep Loaded is superseded by Policy V7; Keep Loaded is not a current pressure-reclaim candidate.
 
 **Primary owner:** `FloatTabs/Web/SlotLifecycleCoordinator.swift`.
 
@@ -144,7 +146,7 @@ FloatTabs/Web/WebViewPool.swift
 FloatTabs/Web/ChatGPTAttentionBridge.swift
 ```
 
-Mechanically related Web/Attention/runtime files may change only when the focused source audit proves the dependency. `PanelController.swift` may be touched only for an exact wiring/ownership dependency already proven by the audit; it is not a new lifecycle writer.
+Other Web/Attention/runtime dependencies are product-specific only when they contribute to the verified lifecycle behavior. `PanelController.swift` is not a lifecycle-policy writer.
 
 Expected tests to inspect/update/add include the current equivalents of:
 
@@ -156,117 +158,25 @@ FloatTabsTests/ChatGPTAttentionBridgeTests.swift
 
 Add focused coordinator/pressure tests in the existing appropriate test owner if current coverage is elsewhere.
 
-No Settings, memory-budget preference, backup schema, Browser Profile, or website-data migration change is authorized.
+This historical design did not require Settings, memory-budget preference, backup schema, Browser Profile or website-data migration changes.
 
-## 7. Verification gates
+## 7. Product evidence and supersession
 
-### Gate R0 — focused source reconciliation
+The original R1/R2 work emphasized deterministic warning/critical pressure injection, single in-flight reclaim, generation-safe continuation, hidden-generation scheduling bounds, and unchanged session/unread/restore semantics. That evidence remains useful for current product regressions.
 
-Before product mutation, confirm against fresh main after PR #190 merge:
+The **current** FloatTabs pressure behavior is governed by [Policy V7](FloatTabs_Runtime_Lifecycle_Policy_V7.md) and the implementation in `SlotLifecycleCoordinator`:
 
-- `SlotLifecycleCoordinator` is still the sole lifecycle writer;
-- current pressure source and its normal/warning/critical state path;
-- current candidate/protection facts and `WebViewPool` reclaim boundary;
-- current hidden generation observer/task owners;
-- exact affected tests.
+- Warning: reclaim only eligible inactive, unprotected Automatic Runtime in IDLE / LONG_IDLE.
+- Critical: reclaim eligible inactive, unprotected Automatic Runtime; **never Keep Loaded**, even at critical pressure.
+- Pressure normalizes: cancel not-yet-started reclaim continuation; do not mass-restore.
+- Any claim of exact app-owned WebContent/GPU memory usage requires an independently supported attribution capability. Runtime count is not a measured GiB budget.
+- Efficiency evidence must measure actual affected host-side scheduling/probe work, without implying WebContent memory reclamation.
+- Runtime ownership, stale-callback rejection, Browser Profile/session durability, and generating/Attention protection remain intact.
 
-If the owner map materially differs from the WP0 report, update Authority before implementation.
+These are product-specific regression expectations. This historical document no longer defines CI breadth, task authorization, PR construction order, release decisions, or merge gates.
 
-### Gate R1 — pressure ladder tests
+## 8. Original re-scope record
 
-Deterministically inject pressure states and prove:
+The 2026-11-02 decision was `D_COMBINE = B now + A later`. The aggregate memory-budget track remained blocked by public WebKit process-attribution limitations. The original normal fixed-count and critical Keep Loaded behaviors have since been superseded; the original text remains available in `archive/FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1_Pre_WP2_2026-11-02.md`.
 
-- warning reclaims eligible Automatic progressively, not by fixed target count;
-- warning preserves Keep Loaded;
-- critical orders Automatic before inactive/unprotected Keep Loaded;
-- active/hard-protected Runtime is never selected;
-- only one reclaim transaction is in flight;
-- each continuation revalidates latest pressure/ownership;
-- normal pressure cancels pending continuation and does not mass-restore.
-
-Unsafe real system-pressure forcing is not required.
-
-### Gate R2 — background-efficiency tests
-
-Prove for each changed cost center:
-
-- task/observer lifecycle is bounded to current document/runtime ownership;
-- stale callbacks/tasks are cancelled or harmless;
-- generation continuity and completion routing remain intact;
-- hidden fallback work is no worse and, where the change is intended to reduce work, observable scheduling/probe counts are lower or bounded by deterministic tests.
-
-### Gate R3 — broad machine verification
-
-Required:
-
-- full XCTest PASS;
-- Debug arm64 build PASS;
-- Release arm64 build PASS;
-- native arm64 architecture verification PASS;
-- package lock unchanged unless separately authorized.
-
-### Gate R4 — repository host
-
-Literal PR head passes required `Build & Test (Apple Silicon arm64)` on the established self-hosted runner labels `[self-hosted, macOS, ARM64, mac-mini-ci]`.
-
-### Gate R5 — fresh exact-diff / ownership audit
-
-Before merge readiness, verify:
-
-- no aggregate/best-effort memory attribution was introduced;
-- no second lifecycle writer;
-- no private WebKit SPI;
-- no healthy-state normal target=2 / 30s policy change;
-- no destructive session/cache coupling;
-- Phase 6 restore and generation protection remain intact;
-- any efficiency claim is limited to the host-side work actually measured/tested.
-
-Human final runtime/UI acceptance remains owned by the broader lifecycle program unless a later task explicitly requires an earlier human gate.
-
-## 8. Construction order
-
-```text
-1. merge/close PR #190 after its literal new head is green
-2. start from fresh main containing this contract/control reconciliation
-3. create one bounded implementation branch/PR for this re-scope
-4. Gate R0 focused source reconciliation
-5. implement R1 pressure ladder + focused tests
-6. verify R1
-7. implement R2 background lifecycle efficiency + focused tests
-8. verify R2
-9. Gate R3 broad machine verification
-10. Gate R4 literal-head self-hosted macOS CI
-11. Gate R5 fresh exact-diff / ownership audit
-12. merge-readiness decision
-```
-
-Do not create a parallel aggregate-memory-budget implementation branch while this re-scope is active.
-
-## 9. STOP conditions
-
-STOP and reconcile before further mutation if:
-
-- a supported deterministic aggregate memory capability is claimed but not independently proven;
-- implementation needs private WebKit SPI, root, restricted entitlement, or guessed process attribution;
-- current source no longer has a single clear lifecycle writer;
-- pressure progression cannot be made one-at-a-time with current-state revalidation;
-- normal target=2 / 30s policy must change to make R1 work;
-- generation correctness requires provider-semantic redesign;
-- Browser Profile/session/site data would be reset, migrated or destructively cleaned;
-- a required machine or repository-host gate fails.
-
-## 10. Frozen re-scope state
-
-```text
-USER_DECISION=D_COMBINE
-BUDGET_TRACK=DEFERRED_PLATFORM_BLOCKED
-BEST_EFFORT_ATTRIBUTION=FORBIDDEN
-CURRENT_IMPLEMENTATION_SCOPE=PRESSURE_LADDER_PLUS_BACKGROUND_EFFICIENCY
-NORMAL_POLICY=PHASE7_TARGET2_PLUS_30S_PRESERVED
-PRESSURE_POLICY=PROGRESSIVE_ONE_AT_A_TIME
-WARNING_KEEP_LOADED=PRESERVED
-CRITICAL_ORDER=AUTOMATIC_THEN_INACTIVE_UNPROTECTED_KEEP_LOADED
-PRODUCT_UI_CHANGE=NONE
-PRODUCT_DATA_MIGRATION=NONE
-FIRST_PRODUCT_GATE=R0_FOCUSED_SOURCE_RECONCILIATION
-```
+This historical decision does not grant present task permission or prescribe repository delivery.

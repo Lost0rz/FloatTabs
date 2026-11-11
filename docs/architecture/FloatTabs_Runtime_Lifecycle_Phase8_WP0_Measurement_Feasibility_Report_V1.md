@@ -107,5 +107,5 @@ Not measurement-dependent (candidates for re-scope, require a new accepted contr
 ## 8. Disposition
 
 - No `FloatTabs/**` file changed. Probes lived in `/tmp/wkprobe/` (scratch, outside repo).
-- Control files (`CURRENT_STATUS.md`, `CURRENT_TASK.md`) and doc routing updated to reflect WP0 outcome on the implementation branch.
+- The original implementation branch recorded the WP0 outcome in its then-current control/doc files; those records are historical, not present task authority.
 - Phase 8 budget construction is **STOPPED** at Gate 0. Next gate is the user's reconciliation decision, not an implementation step.

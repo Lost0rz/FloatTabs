@@ -1,8 +1,10 @@
 # FloatTabs Runtime Lifecycle — Phase 5 Background Generation Thrift Plan V1
 
-**Status:** `ACTIVE / ACCEPTED / FROZEN FOR PHASE 5 EXECUTION`  
+**Status:** `HISTORICAL ACCEPTED PHASE 5 PLAN; NOT CURRENT EXECUTION AUTHORITY`  
 **Program:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Program contract:** `FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md`
+
+> Original Task/Status, test/CI, PR and phase-transition language is historical implementation evidence. Product specifics below do not authorize present work or prescribe global governance procedures.
 
 ## 1. Objective
 
@@ -109,14 +111,11 @@ Tests:
 
 - `FloatTabsTests/ChatGPTAttentionBridgeTests.swift`
 
-Control/documentation:
+Historical technical references:
 
-- `CURRENT_STATUS.md`
-- `CURRENT_TASK.md`
-- `docs/README.md`
 - `docs/architecture/README.md`
 - `docs/architecture/DOMAIN_MAP.md`
-- current V4 contract / this Phase 5 plan
+- the original V4 phase contract and this archived-in-place Phase 5 design
 
 No `WebViewPool`, `SlotLifecycleCoordinator`, persistence, Browser Profile, settings UI or release/version mutation is expected.
 

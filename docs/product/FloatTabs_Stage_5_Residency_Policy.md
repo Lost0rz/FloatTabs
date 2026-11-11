@@ -8,8 +8,7 @@
 
 Current Runtime Lifecycle authority:
 
-- `CURRENT_STATUS.md` / `CURRENT_TASK.md`;
-- [`../architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](../architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md);
+- [`../architecture/README.md`](../architecture/README.md) for current Runtime contract applicability and supersession;
 - current `WebViewPool` / `SlotLifecycleCoordinator` source and regression tests.
 
 Do not use this Stage document to override the current phase contract, benchmark gate, or future accepted Auto/Runtime-Budget design.

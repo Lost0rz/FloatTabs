@@ -224,15 +224,8 @@ WP1 does not add explicit `WKPreferences.inactiveSchedulingPolicy` overrides. Ex
 
 No production aggregate/per-Slot GiB budget may be reconstructed from Runtime count, root-only development tooling, private SPI, or unsupported correlation heuristics.
 
-## 11. Closeout
+## 11. Historical WP1 acceptance evidence
 
-WP1 is complete after machine gate, fresh independent audit and user-owned human acceptance.
+At the recorded WP1 revision, machine verification, an independent review, and user-owned Real-Mac interaction acceptance were reported complete. The original WP1 record contains `HUMAN_UI_ACCEPTANCE=PASS` for that **historical** product head only.
 
-```text
-WP1=COMPLETE
-HUMAN_UI_ACCEPTANCE=PASS
-TASK_RECONCILIATION_REQUIRED=NO_FOR_WP1
-WP2_REQUIRES_SEPARATE_POST_MERGE_AUTHORITY=YES
-```
-
-PR #194 may proceed through final control-head checks and normal merge closeout. Do not add WP2 implementation to this PR.
+Its old PR #194 closeout and WP2 task-transition language is historical delivery evidence, not a current permission or merge instruction. Present restore behavior is established by this bounded product design together with newer contracts and actual source/tests.

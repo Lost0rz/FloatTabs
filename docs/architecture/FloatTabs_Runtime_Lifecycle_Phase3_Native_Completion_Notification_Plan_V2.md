@@ -1,10 +1,12 @@
 # FloatTabs Runtime Lifecycle — Phase 3 Native ChatGPT Completion Notification Plan V2
 
-**Status:** `ACCEPTED / FROZEN FOR PHASE 3 EXECUTION`  
+**Status:** `HISTORICAL PHASE 3 IMPLEMENTATION PLAN; NOT CURRENT TASK AUTHORIZATION`  
 **Program:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Program contract:** `FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md`  
-**Supersedes for active execution:** `FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V1.md`  
+**Historical successor to:** `FloatTabs_Runtime_Lifecycle_Phase3_Native_Completion_Notification_Plan_V1.md`  
 **Baseline:** Phase 2 merged on `main`; persistent unread is independent from Runtime residency.
+
+> Historical execution-card language, file-level STOP/reconciliation rules, broad test/CI gates and PR/merge order in this dated plan are **not operative instructions**. Present notification behavior is covered by [Native Completion Notification Reliability + Rich Preview Contract V1](FloatTabs_Native_Completion_Notification_Reliability_Rich_Preview_Contract_V1.md) and current source/tests.
 
 ## 1. Objective
 
@@ -123,7 +125,7 @@ Add an App-layer coordinator, expected path:
 
 `FloatTabs/App/ChatGPTCompletionNotificationCoordinator.swift`
 
-The same file may contain the small backend protocol and system implementation if that keeps the surface bounded; a separate production file requires STOP/reconciliation unless `CURRENT_TASK.md` is updated first.
+The same file may contain the small backend protocol and system implementation if that keeps the surface bounded; a separate production file was outside the original phase's expected touchpoints (not a present Task/Status gate).
 
 The coordinator owns only:
 
@@ -262,18 +264,18 @@ route result = unavailable/stale
 → diagnostic evidence only
 ```
 
-## 5. Authorized production scope
+## 5. Original production touchpoints
 
 Expected production paths:
 
-1. **NEW** `FloatTabs/App/ChatGPTCompletionNotificationCoordinator.swift` — coordinator + bounded backend protocol/system backend are authorized here;
+1. **NEW** `FloatTabs/App/ChatGPTCompletionNotificationCoordinator.swift` — original coordinator + bounded backend protocol/system backend plan;
 2. `FloatTabs/App/AppCoordinator.swift`;
 3. `FloatTabs/Panel/PanelController.swift`;
 4. `FloatTabs.xcodeproj/project.pbxproj` — source/test membership only, plus a system-framework link entry only if the compiler/linker actually requires one.
 
-No other production file is authorized without STOP/reconciliation.
+This dated file map is original implementation context, not a present restriction on repository changes.
 
-## 6. Authorized test scope
+## 6. Original test owners
 
 Expected tests:
 
@@ -281,7 +283,7 @@ Expected tests:
 2. `FloatTabsTests/WebAttentionCrossFeatureTests.swift`;
 3. `FloatTabs.xcodeproj/project.pbxproj` — new test membership.
 
-A narrowly necessary adjacent existing test may be added only when it directly proves the frozen Phase 3 route and does not change its production scope. Otherwise STOP/reconcile.
+A narrowly necessary adjacent existing test may be added only when it directly proves the frozen Phase 3 route and does not change its production scope. Other coverage depends on actual product/test ownership, not this historical scope gate.
 
 ## 7. Explicit non-scope
 
@@ -389,22 +391,8 @@ Phase 3 rollback removes only native notification projection/routing wiring. It 
 
 unchanged.
 
-## 11. Implementation sequence
+## 11. Historical technical dependency map
 
-```text
-add backend protocol + system backend + recording test backend
-→ add notification coordinator
-→ wire AppCoordinator
-→ add durable-unread-marked callback in PanelController
-→ add exact Slot notification-presentation route
-→ prove same-Slot explicit withdrawal/replacement
-→ focused notification/composition/routing tests
-→ full XCTest
-→ Debug / Release arm64
-→ exact scope/data-safety audit
-→ commit / push / one Phase 3 implementation PR
-→ literal-head required self-hosted CI PASS
-→ merge
-→ Phase 3 control alignment
-→ continue to Phase 4
-```
+The original technical dependency was: inject a recording/system notification backend, project durable unread `.marked` to a single native notification, preserve exact-Slot tap routing, and leave Runtime restoration and unread acknowledgement to their existing owners.
+
+Old per-phase branch/PR, full-test, CI, merge and control-alignment instructions have no current force. Product regression behavior is defined by the later notification contract and current source/tests.

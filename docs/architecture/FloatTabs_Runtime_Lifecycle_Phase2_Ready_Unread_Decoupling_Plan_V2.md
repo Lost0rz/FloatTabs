@@ -2,8 +2,8 @@
 
 **Program:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Phase:** `2 — Ready / Unread Decoupling`  
-**Status:** `ACCEPTED / FROZEN IMPLEMENTATION PLAN`  
-**Supersedes for current execution:** `FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md`  
+**Status:** `HISTORICAL PHASE 2 V2 PLAN / NOT CURRENT WORKFLOW AUTHORITY`  
+**Original historical successor to:** `FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md`  
 **Parent contract:** `FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`
 
 ## 1. Objective
@@ -131,17 +131,8 @@ STOP/reconcile if:
 
 A missing AI-driven live smoke is **not** a STOP condition under V2.
 
-## 8. Merge readiness
+## 8. Historical acceptance context
 
-Phase 2 merge readiness requires:
+The Phase 2 work originally separated machine regression evidence from user-owned macOS interaction acceptance. This record does not define present PR merge readiness, required CI breadth, or approval state.
 
-- implementation inside frozen scope;
-- focused/full tests PASS;
-- Debug/Release arm64 builds PASS;
-- exact-head required CI PASS;
-- independent web audit PASS;
-- human runtime/UI acceptance PASS.
-
-Construction itself stops after machine gates and audit at `WAITING_FOR_HUMAN_UI_ACCEPTANCE`; the user owns final interactive acceptance.
-
-No release is authorized by this plan.
+Current product regressions remain: generating Runtime protection, durable unread commit before reclaim, no second canonical unread/lifecycle writer, and preservation of Browser Profile/session data.

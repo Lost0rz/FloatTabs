@@ -2,14 +2,12 @@
 
 **Program:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Phase:** `6 — Perceived-fast Restore`  
-**Status:** `ACCEPTED / FROZEN / IMPLEMENTATION NOT STARTED`  
+**Status:** `HISTORICAL PHASE 6 IMPLEMENTATION CONTRACT; IMPLEMENTATION STATE MUST BE READ FROM CURRENT SOURCE`  
 **Parent contract:** `FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md`  
 **Audit basis:** `FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`  
 **Freeze baseline:** `main@ac6ca739a2d6e84af8e99fe5cc6623519b727a39`
 
-This document is the durable Phase 6 implementation contract. It freezes the selected architecture, ownership, bounded source/test scope, evidence gates, acceptance criteria and STOP conditions for the next execution session.
-
-This freeze does **not** perform product implementation. Product source/test mutation remains held until the user gives a future explicit start instruction.
+This document preserves the selected Phase 6 architecture, source/test observations and product acceptance scenarios from its original session. Its previous 'implementation not started', task-start, gate/STOP, CI and PR instructions are historical and do not describe today's executable task. Current Runtime behavior is established by later accepted contracts and source/tests.
 
 ## 1. Objective
 

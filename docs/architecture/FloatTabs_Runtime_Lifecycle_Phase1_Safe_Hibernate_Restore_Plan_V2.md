@@ -2,7 +2,7 @@
 
 **Program:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Phase:** `1 — Safe Hibernate + Restore`  
-**Status:** `ACCEPTED / FROZEN IMPLEMENTATION PLAN`  
+**Status:** `HISTORICAL PHASE 1 V2 PLAN / NOT CURRENT WORKFLOW AUTHORITY`  
 **Supersedes for current execution:** `FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`  
 **Parent contract:** `FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`
 
@@ -286,36 +286,8 @@ Do **not** STOP merely because:
 - large-scale memory gain is not yet statistically quantified;
 - the final Runtime budget is unknown.
 
-## 13. Delivery sequence
+## 13. Historical delivery context
 
-The local executor should preserve the current uncommitted implementation and continue in place if it remains inside this V2 boundary.
+The original Phase 1 V2 revision was accompanied by focused/full tests, Debug/Release builds, a bounded Runtime smoke, PR CI and independent review before its phase closeout. Those are historical evidence expectations, not standing requirements for future tasks.
 
-```text
-refresh new Authority
-→ inspect existing dirty diff against V2 scope
-→ preserve valid implementation; correct only actual V2 mismatches
-→ run focused tests
-→ run full tests
-→ Debug + Release build
-→ bounded 1–2 Slot live Runtime smoke
-→ update factual STATUS/TASK evidence if needed
-→ commit + push one Phase 1 implementation branch
-→ create/update one Phase 1 PR
-→ required CI
-→ stop for independent web audit
-```
-
-No release is authorized.
-
-## 14. Merge readiness
-
-Phase 1 is merge-ready only after:
-
-- exact implementation diff is inside this plan;
-- required tests/builds pass;
-- bounded live Runtime smoke passes;
-- required PR CI passes;
-- independent web audit passes;
-- Browser Profile/session/user-data safety remains intact.
-
-After merge, perform Control Alignment before entering Phase 2.
+Current implementation and regression coverage must be checked against current product source, current contracts and observed real-Mac behavior. This file does not prescribe branch/PR lifecycle or require Task/Status control alignment.

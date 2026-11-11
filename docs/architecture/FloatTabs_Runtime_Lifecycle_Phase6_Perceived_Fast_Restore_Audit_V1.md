@@ -6,7 +6,7 @@
 **Parent contract:** `FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md`  
 **Audit baseline:** `main@ed81f6d7879e7142a300a5d070a488b6747b27bb`
 
-This document records the Phase 6 source/test/design audit. It does not authorize product implementation. A later task reconciliation and explicit implementation authorization are required before source mutation.
+This is a historical Phase 6 source/test/design audit, not a current implementation instruction. Its proposed next steps, task-reconciliation and approval language applied only to the original audited revision.
 
 ## 1. Executive verdict
 
@@ -346,4 +346,4 @@ OPEN_EVIDENCE=REAL-MAC INTERACTIONSTATE READINESS SEQUENCE
 TASK_RECONCILIATION_REQUIRED=YES
 ```
 
-Before implementation, reconcile `CURRENT_TASK.md` from audit-only into a bounded Phase 6 implementation contract after explicit user authorization. The implementation contract must freeze the final readiness signal based on E1 evidence rather than guessing it.
+At the time of this audit, E1 evidence was still needed to choose a public, bounded readiness signal. The legacy Task reconciliation and implementation-approval instructions were specific to that historical session; they do not apply to present work.

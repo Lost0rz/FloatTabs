@@ -4,8 +4,9 @@ Read [documentation authority](../README.md) and the effective `main` [AGENTS.md
 
 ## Current bounded contracts
 
-- [Adaptive Lifecycle Restore Contract V2](FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md): accepted restore/presentation/lifecycle architecture boundaries. It supersedes V1's WP0 design gate, but its earlier `WP1 FROZEN` language is **historical for that phase**; it cannot override newer branch source, tests, task decisions or approved Issues.
-- [Phase 8 Pressure / Efficiency Rescope Contract V1](FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md): pressure-first evidence and allowed lifecycle direction.
+- [Adaptive Lifecycle Restore Contract V2](FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md): accepted restore/presentation/lifecycle architecture boundaries. It supersedes V1's WP0 design gate, but its earlier `WP1 FROZEN` language is **historical for that phase**; it cannot override newer accepted product contracts or present source/test evidence.
+- [Runtime Lifecycle Policy V7](FloatTabs_Runtime_Lifecycle_Policy_V7.md): current bounded Automatic/Keep Loaded stages and pressure-reclaim semantics, subject to current source/test evidence.
+- [Phase 8 Pressure / Efficiency Rescope Contract V1](FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md): historical pressure/efficiency design and memory-attribution evidence; its pre-WP2 fixed-count and Keep Loaded-critical rules are superseded by Policy V7.
 - [Phase 8 Measurement Feasibility Report](FloatTabs_Runtime_Lifecycle_Phase8_WP0_Measurement_Feasibility_Report_V1.md): production cannot deterministically attribute WebContent/GPU aggregate footprint through the supported ordinary public API. Never substitute Runtime count as an exact RAM budget.
 - [Native Completion Notification Reliability and Rich Preview](FloatTabs_Native_Completion_Notification_Reliability_Rich_Preview_Contract_V1.md): delivered exact-Slot notification/unread/privacy regression boundary.
 - [Runtime Lifecycle Memory Contract V6](FloatTabs_Runtime_Lifecycle_Memory_Contract_V6.md): bounded historical cross-cutting rationale, only where not superseded by the accepted restore/rescope evidence.
@@ -49,7 +50,7 @@ The system memory-pressure route is progressive and independent of future health
 
 ```text
 warning → eligible unprotected inactive Automatic reclaim
-critical → Automatic first, then inactive unprotected Keep Loaded
+critical → eligible inactive unprotected Automatic only; Keep Loaded remains protected
 normal → cancel pending continuation; no mass restore
 ```
 
@@ -59,6 +60,6 @@ macOS 14+ public inactive scheduling is a WebKit-owned mechanism, not a second a
 
 - WP0 controlled evidence established resident revisit was much quicker than nonresident cold restore; it did not establish a production GiB budget.
 - WP1 unified restoring-presentation design was the earlier phase. Branch #195 later narrowed the corrective; do not read old WP1 statements as present write authority.
-- WP2–WP4 policy/tuning are **not** implicitly authorized by this index or prior phase plans. Each needs its own current task authority/gates.
-- Product-facing changes need risk-proportional machine checks and explicit human acceptance when required. No AI-driven UI smoke is a human verdict.
-- The accepted version/diff, not this document's date, determines actual implementation readiness.
+- Old WP2–WP4 gates and references to `CURRENT_TASK.md` / `CURRENT_STATUS.md` in legacy lifecycle documents describe historical execution context only; they are not live engineering instructions.
+- Architecture contracts define the product behavior to validate. Generic verification tiers, audit independence, and acceptance workflow belong to the installed Engineering Governance plugin.
+- Actual implementation state must be established from current source and relevant tests; historical document dates are not live implementation evidence.

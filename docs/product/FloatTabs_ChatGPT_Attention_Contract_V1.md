@@ -8,8 +8,7 @@
 
 Current routing:
 
-- `CURRENT_STATUS.md` / `CURRENT_TASK.md` for current phase and authorization;
-- [`../architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](../architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md) for the accepted cross-cutting lifecycle direction;
+- [`../architecture/README.md`](../architecture/README.md) for applicable current Runtime lifecycle and durable-Unread contracts;
 - current `WebAttentionCoordinator`, Attention/Response/Unread source and regression tests for present behavior;
 - later accepted phase contracts for future semantic changes.
 
