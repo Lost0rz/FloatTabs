@@ -1,8 +1,10 @@
 # FloatTabs Runtime Lifecycle — Phase 5 Background Generation Thrift Plan V1
 
-**Status:** `ACTIVE / ACCEPTED / FROZEN FOR PHASE 5 EXECUTION`  
+**Status:** `HISTORICAL ACCEPTED PHASE 5 PLAN; NOT CURRENT EXECUTION AUTHORITY`  
 **Program:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Program contract:** `FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md`
+
+> Original Task/Status, test/CI, PR and phase-transition language is historical implementation evidence. Product specifics below do not authorize present work or prescribe global governance procedures.
 
 ## 1. Objective
 

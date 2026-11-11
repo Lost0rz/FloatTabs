@@ -2,11 +2,11 @@
 
 **Program:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Phase:** `1 — Safe Hibernate + Restore`  
-**Status:** `ACCEPTED / FROZEN IMPLEMENTATION PLAN`  
+**Status:** `HISTORICAL ACCEPTED PHASE 1 PLAN; NOT CURRENT EXECUTION AUTHORITY`  
 **Audit baseline:** `main @ 1ba0ec7fe70c3d8a6fd42d586dcc813ed87d9088`  
-**Product mutation:** authorized only after this plan/control reconciliation merges  
+**Historical mutation condition:** depended on the original phase's accepted plan; no present task permission  
 
-This document is the concrete Phase 1 implementation contract under the parent [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md). It does not authorize Phase 2+ semantics.
+This is the original Phase 1 implementation and evidence plan under [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md). Its Task/Status, build/CI/PR and approval instructions describe the original phase only. Current behavior and permissions are not inferred from this historical plan.
 
 ## 1. Phase objective
 
