@@ -4456,6 +4456,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 slotID: slotID,
                 runtimeIdentity: runtimeIdentity,
                 navigationGeneration: navigationGeneration,
+                candidateUpdateSource: navigationGeneration == 1 ? .initialization : .pageNavigation,
                 isManualReloadRefresh: isManualReloadRefresh
             )
         }
@@ -4477,6 +4478,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotID: UUID,
         runtimeIdentity: WebRuntimeDiagnosticIdentity,
         navigationGeneration: UInt64,
+        candidateUpdateSource: WebsiteFaviconProvider.DOMCandidateUpdateSource = .initialization,
         isManualReloadRefresh: Bool = false
     ) {
         guard navigationGeneration > 0,
@@ -4539,7 +4541,11 @@ final class PanelController: NSObject, NSWindowDelegate {
                         for: [committedURL, activeProfile.homeURL]
                     )
                 } else {
-                    WebsiteFaviconProvider.shared.setDOMCandidates(candidates, for: committedURL)
+                    WebsiteFaviconProvider.shared.setDOMCandidates(
+                        candidates,
+                        for: committedURL,
+                        source: candidateUpdateSource
+                    )
                 }
             case .noCandidates:
                 fields["result"] = .string("no_candidates")
@@ -4560,7 +4566,8 @@ final class PanelController: NSObject, NSWindowDelegate {
                 } else {
                     provider.setDOMCandidates(
                         [WebsiteFaviconProvider.Candidate](),
-                        for: committedURL
+                        for: committedURL,
+                        source: candidateUpdateSource
                     )
                 }
             case .readFailed:

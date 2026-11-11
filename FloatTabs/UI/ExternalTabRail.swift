@@ -2333,6 +2333,11 @@ final class WebsiteFaviconProvider {
         case readFailed
     }
 
+    enum DOMCandidateUpdateSource: Equatable {
+        case initialization
+        case pageNavigation
+    }
+
     enum ProjectionOutcome: String, Equatable {
         case iconDisplayed = "icon_displayed"
         case fallbackDisplayed = "fallback_displayed"
@@ -3008,7 +3013,11 @@ final class WebsiteFaviconProvider {
 
     /// Called only after PanelController has revalidated the exact Slot,
     /// Runtime, committed URL and navigation generation for the DOM result.
-    func setDOMCandidates(_ candidates: [Candidate], for committedURL: URL) {
+    func setDOMCandidates(
+        _ candidates: [Candidate],
+        for committedURL: URL,
+        source: DOMCandidateUpdateSource = .pageNavigation
+    ) {
         guard let key = Self.originKey(for: committedURL) else { return }
         let normalized = Self.orderedCandidates(candidates)
             .filter { Self.isValidDOMCandidate($0, forPageOriginKey: key) }
@@ -3017,20 +3026,18 @@ final class WebsiteFaviconProvider {
         guard domCandidates[key] != next else { return }
         storeDOMCandidates(next, for: key)
 
-        // Initial DOM reads and new consumers may refresh candidate metadata,
-        // but only an explicit Reload or user choice may fetch a replacement
-        // once this origin already has an accepted icon.
-        guard cachedFavicon(for: key) == nil else { return }
-
+        let accepted = cachedFavicon(for: key)
         let targetIdentity = next.first?.resourceIdentity
-        if let request = inFlight[key],
+        let initializationHasAcceptedIcon = source == .initialization && accepted != nil
+        if !initializationHasAcceptedIcon,
+           let request = inFlight[key],
            request.acceptanceMode == .automatic,
            request.resourceIdentity != targetIdentity {
             inFlight.removeValue(forKey: key)?.task.cancel()
         }
 
         if let candidate = next.first,
-           let entry = cache[key],
+           let entry = accepted,
            candidate.resourceIdentity == entry.resourceIdentity {
             let metadataChanged = candidate.priority != entry.priority || candidate.kind != entry.kind
             if metadataChanged {
@@ -3050,8 +3057,13 @@ final class WebsiteFaviconProvider {
             return
         }
 
+        // A new Tab's first DOM read can refresh candidates without treating
+        // them as a new independent favicon observation. Later page-navigation
+        // reads retain the existing automatic candidate and confirmation path.
+        guard !initializationHasAcceptedIcon else { return }
+
         let hasInterest = hasDemand(for: key) || oneShotCompletions[key]?.isEmpty == false
-        let needsFetch = cache[key].map { entry in
+        let needsFetch = accepted.map { entry in
             next.first.map { Self.candidate($0, shouldReplace: entry) } ?? false
         } ?? true
         guard hasInterest, needsFetch else {
@@ -3171,10 +3183,15 @@ final class WebsiteFaviconProvider {
         )
     }
 
-    func setDOMCandidates(_ candidates: [URL], for committedURL: URL) {
+    func setDOMCandidates(
+        _ candidates: [URL],
+        for committedURL: URL,
+        source: DOMCandidateUpdateSource = .pageNavigation
+    ) {
         setDOMCandidates(
             candidates.enumerated().map { Candidate.declared($0.element, sourceOrder: $0.offset) },
-            for: committedURL
+            for: committedURL,
+            source: source
         )
     }
 

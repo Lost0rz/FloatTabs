@@ -513,6 +513,108 @@ final class FaviconRecoveryTests: XCTestCase {
         provider.cancel(consumerID: menuID)
     }
 
+    func testNewSameOriginTabInitializationDoesNotAdvancePendingCandidate() async throws {
+        let oldData = try fixtureImageData(color: .systemRed)
+        let candidateData = try fixtureImageData(color: .systemBlue)
+        let initializationData = try fixtureImageData(color: .systemGreen)
+        let pageURL = try XCTUnwrap(URL(string: "https://multi-tab-init.example.test/page"))
+        let oldURL = try XCTUnwrap(URL(string: "https://multi-tab-init.example.test/old.png"))
+        let candidateURL = try XCTUnwrap(URL(string: "https://multi-tab-init.example.test/brand.png"))
+        let initializationURL = try XCTUnwrap(URL(string: "https://multi-tab-init.example.test/init.png"))
+        let loader = FaviconTestLoader { request, _ in
+            let data: Data
+            switch request.url?.path {
+            case "/old.png": data = oldData
+            case "/brand.png": data = candidateData
+            case "/init.png": data = initializationData
+            default: throw URLError(.badServerResponse)
+            }
+            return (data, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabs-Favicon-MultiTabInit-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            diagnosticRecorder: diagnostics,
+            assetStore: WebsiteFaviconAssetStore(directoryURL: directory)
+        )
+        let existingTabID = UUID()
+        let newTabID = UUID()
+        let initialDisplay = expectation(description: "the existing Tab accepts its first icon")
+        let newTabDisplay = expectation(description: "the new same-origin Tab immediately reuses the accepted icon")
+        let updatedDisplays = expectation(description: "a later page candidate is confirmed for both Tabs")
+        updatedDisplays.expectedFulfillmentCount = 2
+        var existingTabImages: [NSImage?] = []
+        var newTabImages: [NSImage?] = []
+
+        provider.setDOMCandidates([.declared(oldURL)], for: pageURL, source: .pageNavigation)
+        provider.subscribe(for: pageURL, consumerID: existingTabID) { image in
+            existingTabImages.append(image)
+            if existingTabImages.count == 1 {
+                initialDisplay.fulfill()
+            } else {
+                updatedDisplays.fulfill()
+            }
+        }
+        await fulfillment(of: [initialDisplay], timeout: 2)
+        let acceptedImage = try XCTUnwrap(existingTabImages.first ?? nil)
+
+        provider.setDOMCandidates([.declared(initializationURL)], for: pageURL, source: .initialization)
+        provider.subscribe(for: pageURL, consumerID: newTabID) { image in
+            newTabImages.append(image)
+            if newTabImages.count == 1 {
+                newTabDisplay.fulfill()
+            } else {
+                updatedDisplays.fulfill()
+            }
+        }
+        await fulfillment(of: [newTabDisplay], timeout: 2)
+        XCTAssertEqual(loader.requests.compactMap(\.url), [oldURL])
+        XCTAssertEqual(
+            try XCTUnwrap(newTabImages.first ?? nil).tiffRepresentation,
+            acceptedImage.tiffRepresentation
+        )
+
+        provider.setDOMCandidates([.declared(candidateURL)], for: pageURL, source: .pageNavigation)
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("awaiting_confirmation")
+            }
+        }
+        XCTAssertEqual(loader.requests.compactMap(\.url), [oldURL, candidateURL])
+        XCTAssertEqual(existingTabImages.count, 1)
+        XCTAssertEqual(newTabImages.count, 1)
+
+        // A distinct initialization read stores its candidates but neither
+        // fetches an icon nor advances or replaces the pending page candidate.
+        provider.setDOMCandidates([.declared(initializationURL)], for: pageURL, source: .initialization)
+        XCTAssertEqual(loader.requests.compactMap(\.url), [oldURL, candidateURL])
+        XCTAssertEqual(
+            try XCTUnwrap(existingTabImages.last ?? nil).tiffRepresentation,
+            acceptedImage.tiffRepresentation
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(newTabImages.last ?? nil).tiffRepresentation,
+            acceptedImage.tiffRepresentation
+        )
+
+        // A later, legitimate page-navigation observation can still confirm
+        // the same candidate and update all same-origin consumers.
+        provider.setDOMCandidates([.declared(candidateURL)], for: pageURL, source: .pageNavigation)
+        await fulfillment(of: [updatedDisplays], timeout: 2)
+        XCTAssertEqual(loader.requests.compactMap(\.url), [oldURL, candidateURL, candidateURL])
+        let updatedExistingIcon = try XCTUnwrap(existingTabImages.last ?? nil).tiffRepresentation
+        let updatedNewTabIcon = try XCTUnwrap(newTabImages.last ?? nil).tiffRepresentation
+        XCTAssertNotEqual(updatedExistingIcon, acceptedImage.tiffRepresentation)
+        XCTAssertEqual(updatedExistingIcon, updatedNewTabIcon)
+        provider.cancel(consumerID: existingTabID)
+        provider.cancel(consumerID: newTabID)
+    }
+
     func testManualReloadFetchesFreshBytesForSameResourceAndDeduplicatesOrigin() async throws {
         let oldData = try fixtureImageData(color: .systemRed)
         let newData = try fixtureImageData(color: .systemBlue)
