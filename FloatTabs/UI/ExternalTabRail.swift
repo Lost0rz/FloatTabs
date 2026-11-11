@@ -2352,6 +2352,7 @@ final class WebsiteFaviconProvider {
 
     private enum CacheUpdateOutcome: String, Equatable {
         case updated = "updated"
+        case memoryOnlyUpdated = "memory_only_updated"
         case awaitingConfirmation = "awaiting_confirmation"
         case sameVisualContent = "same_visual_content"
         case locked = "locked"
@@ -3231,7 +3232,7 @@ final class WebsiteFaviconProvider {
             }
         }
         recordCacheUpdate(cacheOutcome)
-        if cacheOutcome == .updated, let fetched {
+        if (cacheOutcome == .updated || cacheOutcome == .memoryOnlyUpdated), let fetched {
             notifyDemands(for: key, with: fetched.image)
         } else if existingImage == nil {
             notifyDemands(for: key, with: nil)
@@ -3327,26 +3328,36 @@ final class WebsiteFaviconProvider {
             kind: fetched.kind.rawValue,
             isLocked: locked
         )
-        switch assetStore.save(record) {
+        let writeResult = assetStore.save(record)
+        // Persistence failure does not make a validated icon unusable in this runtime.
+        cache[key] = CachedFavicon(
+            image: fetched.image,
+            pixelSHA256: fetched.pixelSHA256,
+            priority: fetched.priority,
+            resourceIdentity: fetched.resourceIdentity,
+            kind: fetched.kind,
+            isLocked: locked
+        )
+        pendingFavicons.removeValue(forKey: key)
+        refreshMemoryCacheOrder(for: key)
+
+        let cacheOutcome: CacheUpdateOutcome
+        let controlResult: IconControlResult
+        switch writeResult {
         case .saved:
-            cache[key] = CachedFavicon(
-                image: fetched.image,
-                pixelSHA256: fetched.pixelSHA256,
-                priority: fetched.priority,
-                resourceIdentity: fetched.resourceIdentity,
-                kind: fetched.kind,
-                isLocked: locked
-            )
-            pendingFavicons.removeValue(forKey: key)
-            refreshMemoryCacheOrder(for: key)
-            return AcceptanceResult(cacheOutcome: .updated, controlResult: .changed)
+            cacheOutcome = .updated
+            controlResult = .changed
         case .capacityExceeded:
-            return AcceptanceResult(cacheOutcome: .failed, controlResult: .capacityExceeded)
+            cacheOutcome = .memoryOnlyUpdated
+            controlResult = .capacityExceeded
         case .corruptExistingRecord:
-            return AcceptanceResult(cacheOutcome: .failed, controlResult: .corruptStorage)
+            cacheOutcome = .memoryOnlyUpdated
+            controlResult = .corruptStorage
         case .invalidRecord, .unavailable:
-            return AcceptanceResult(cacheOutcome: .failed, controlResult: .unavailable)
+            cacheOutcome = .memoryOnlyUpdated
+            controlResult = .unavailable
         }
+        return AcceptanceResult(cacheOutcome: cacheOutcome, controlResult: controlResult)
     }
 
     private func refreshMemoryCacheOrder(for key: String) {
@@ -3466,7 +3477,7 @@ final class WebsiteFaviconProvider {
     private func recordCacheUpdate(_ outcome: CacheUpdateOutcome) {
         diagnosticRecorder?.record(
             event: "favicon.cache_update",
-            level: outcome == .failed ? .warning : .notice,
+            level: outcome == .failed || outcome == .memoryOnlyUpdated ? .warning : .notice,
             subsystem: "favicon",
             fields: ["outcome": .string(outcome.rawValue)]
         )

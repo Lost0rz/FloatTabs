@@ -1858,7 +1858,12 @@ final class FaviconRecoveryTests: XCTestCase {
             assetStore: corruptStore
         )
         let recoveredImage = await load(recoveryProvider, from: corruptOrigin)
-        XCTAssertNil(recoveredImage, "corrupt persisted data fails closed instead of being silently replaced")
+        XCTAssertNotNil(recoveredImage, "a valid icon remains visible when corrupt storage rejects persistence")
+        XCTAssertEqual(
+            recoveryProvider.iconControlState(for: corruptOrigin),
+            WebsiteFaviconProvider.IconControlState(hasAcceptedIcon: true, isLocked: false)
+        )
+        XCTAssertFalse(recoveryLoader.requests.isEmpty)
         XCTAssertEqual(try Data(contentsOf: corruptURL), badBytes)
     }
 
@@ -2013,6 +2018,138 @@ final class FaviconRecoveryTests: XCTestCase {
         }
         XCTAssertLessThanOrEqual(totalBytes, 640)
         XCTAssertTrue(storeHasRecord(aggregateStore, origin: "https://aggregate-locked.example.test"))
+    }
+
+    func testAcceptedIconRemainsVisibleInMemoryWhenAssetStoreRejectsPersistence() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabs-Favicon-Memory-Only-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pageURL = try XCTUnwrap(URL(string: "https://memory-only-icon.example.test/"))
+        let iconURL = try XCTUnwrap(URL(string: "https://memory-only-icon.example.test/icon.png"))
+        let originKey = try XCTUnwrap(WebsiteFaviconProvider.originKey(for: pageURL))
+        let imageData = try fixtureImageData(color: .systemOrange)
+        let loader = FaviconTestLoader { request, _ in
+            (imageData, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let store = WebsiteFaviconAssetStore(
+            directoryURL: directory,
+            limits: WebsiteFaviconAssetStore.Limits(
+                maximumOrigins: 1,
+                maximumImageBytes: 1,
+                maximumStoreBytes: 64
+            )
+        )
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            diagnosticRecorder: diagnostics,
+            assetStore: store
+        )
+        provider.setDOMCandidates([.declared(iconURL)], for: pageURL)
+
+        let consumerID = UUID()
+        let displayed = expectation(description: "accepted icon reaches the display consumer")
+        var deliveredImage: NSImage?
+        provider.subscribe(for: pageURL, consumerID: consumerID, automaticallyRetries: false) { image in
+            deliveredImage = image
+            if image != nil { displayed.fulfill() }
+        }
+        await fulfillment(of: [displayed], timeout: 2)
+
+        XCTAssertNotNil(deliveredImage)
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("memory_only_updated")
+            }
+        }
+        XCTAssertEqual(
+            provider.iconControlState(for: pageURL),
+            WebsiteFaviconProvider.IconControlState(hasAcceptedIcon: true, isLocked: false)
+        )
+        XCTAssertEqual(loader.requests.count, 1)
+        if case .missing = store.load(originKey: originKey) {
+        } else {
+            XCTFail("a capacity failure must not create or replace an asset record")
+        }
+        let recordURL = try XCTUnwrap(store.recordURL(forTesting: originKey))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recordURL.path))
+
+        let cachedDelivery = expectation(description: "memory-only accepted icon remains cached")
+        provider.subscribe(for: pageURL, consumerID: consumerID, automaticallyRetries: false) { image in
+            deliveredImage = image
+            if image != nil { cachedDelivery.fulfill() }
+        }
+        await fulfillment(of: [cachedDelivery], timeout: 1)
+        XCTAssertEqual(loader.requests.count, 1, "the in-memory icon avoids a second fetch")
+        provider.cancel(consumerID: consumerID)
+    }
+
+    func testExplicitChoiceUpdatesMemoryAndPreservesLockWhenCorruptRecordCannotBeReplaced() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabs-Favicon-Corrupt-Memory-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pageURL = try XCTUnwrap(URL(string: "https://locked-corrupt-icon.example.test/"))
+        let iconURL = try XCTUnwrap(URL(string: "https://locked-corrupt-icon.example.test/icon.png"))
+        let originKey = try XCTUnwrap(WebsiteFaviconProvider.originKey(for: pageURL))
+        let originalData = try fixtureImageData(color: .systemPurple)
+        let selectedData = try fixtureImageData(color: .systemGreen)
+        let loader = FaviconTestLoader { request, count in
+            let data = count == 1 ? originalData : selectedData
+            return (data, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let store = WebsiteFaviconAssetStore(directoryURL: directory)
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            assetStore: store
+        )
+        provider.setDOMCandidates([.declared(iconURL)], for: pageURL)
+
+        let consumerID = UUID()
+        let firstDisplay = expectation(description: "initial icon is displayed")
+        let selectedDisplay = expectation(description: "explicitly selected icon is displayed in memory")
+        var displayedImages: [NSImage] = []
+        provider.subscribe(for: pageURL, consumerID: consumerID, automaticallyRetries: false) { image in
+            guard let image else { return }
+            displayedImages.append(image)
+            if displayedImages.count == 1 {
+                firstDisplay.fulfill()
+            } else if displayedImages.count == 2 {
+                selectedDisplay.fulfill()
+            }
+        }
+        await fulfillment(of: [firstDisplay], timeout: 2)
+        let originalTIFF = try XCTUnwrap(displayedImages.first?.tiffRepresentation)
+        XCTAssertEqual(provider.lockCurrentIcon(for: pageURL), .changed)
+        if case let .record(lockedRecord) = store.load(originKey: originKey) {
+            XCTAssertTrue(lockedRecord.isLocked)
+        } else {
+            XCTFail("the locked icon should initially be persisted")
+        }
+
+        let recordURL = try XCTUnwrap(store.recordURL(forTesting: originKey))
+        let corruptBytes = Data("preserve-corrupt-favicon-record".utf8)
+        try corruptBytes.write(to: recordURL)
+        let explicitChoice = expectation(description: "explicit choice reports the protected corrupt record")
+        var explicitResult: WebsiteFaviconProvider.IconControlResult?
+        provider.refreshAndChooseIcon(for: pageURL) { result in
+            explicitResult = result
+            explicitChoice.fulfill()
+        }
+        await fulfillment(of: [explicitChoice, selectedDisplay], timeout: 2)
+
+        XCTAssertEqual(explicitResult, .corruptStorage)
+        XCTAssertEqual(displayedImages.count, 2)
+        let selectedTIFF = try XCTUnwrap(displayedImages.last?.tiffRepresentation)
+        XCTAssertNotEqual(selectedTIFF, originalTIFF)
+        XCTAssertEqual(
+            provider.iconControlState(for: pageURL),
+            WebsiteFaviconProvider.IconControlState(hasAcceptedIcon: true, isLocked: true)
+        )
+        XCTAssertEqual(try Data(contentsOf: recordURL), corruptBytes)
+        XCTAssertEqual(loader.requests.count, 2)
+        provider.cancel(consumerID: consumerID)
     }
 
     func testFaviconContextMenuOffersLockUnlockAndExplicitSelection() {
