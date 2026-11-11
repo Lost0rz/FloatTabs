@@ -4,7 +4,7 @@ Read `../README.md` first. This directory contains a mixture of accepted feature
 
 ## Scope and validity
 
-These documents own bounded feature behavior and historical product decisions, not generic workflow, task authorization or PR status. Current Runtime retention is **Automatic / Keep Loaded**; the old Hot/Warm/Cold wording describes compatibility history. Consult the [architecture index](../architecture/README.md) for cross-cutting lifecycle contracts and production source/tests for implemented behavior.
+These documents own bounded feature behavior and historical product decisions, not generic workflow, task authorization or PR status. Any references within old feature contracts to `CURRENT_TASK.md`, `CURRENT_STATUS.md`, per-phase approval, Git/PR procedures or legacy execution gates describe their original program only; those instructions are no longer active. Current Runtime retention is **Automatic / Keep Loaded**; the old Hot/Warm/Cold wording describes compatibility history. Consult the [architecture index](../architecture/README.md) for cross-cutting lifecycle contracts and production source/tests for implemented behavior.
 
 ## Bounded accepted feature references
 
