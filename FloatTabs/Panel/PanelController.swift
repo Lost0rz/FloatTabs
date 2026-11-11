@@ -4456,7 +4456,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 slotID: slotID,
                 runtimeIdentity: runtimeIdentity,
                 navigationGeneration: navigationGeneration,
-                candidateUpdateSource: navigationGeneration == 1 ? .initialization : .pageNavigation,
                 isManualReloadRefresh: isManualReloadRefresh
             )
         }
@@ -4478,7 +4477,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotID: UUID,
         runtimeIdentity: WebRuntimeDiagnosticIdentity,
         navigationGeneration: UInt64,
-        candidateUpdateSource: WebsiteFaviconProvider.DOMCandidateUpdateSource = .initialization,
         isManualReloadRefresh: Bool = false
     ) {
         guard navigationGeneration > 0,
@@ -4496,6 +4494,10 @@ final class PanelController: NSObject, NSWindowDelegate {
            existing.committedURL == committedURL {
             if existing.isManualReloadRefresh || !isManualReloadRefresh { return }
         }
+        let candidateUpdateSource = WebsiteFaviconProvider.DOMCandidateUpdateSource.forDOMRead(
+            previousRuntimeIdentity: faviconDOMReadBySlot[slotID]?.identity,
+            currentRuntimeIdentity: runtimeIdentity
+        )
         let read = FaviconDOMReadRecord(
             identity: runtimeIdentity,
             navigationGeneration: navigationGeneration,

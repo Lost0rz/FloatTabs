@@ -513,6 +513,116 @@ final class FaviconRecoveryTests: XCTestCase {
         provider.cancel(consumerID: menuID)
     }
 
+    func testDOMCandidateUpdateSourceUsesSlotRuntimeReadIdentity() {
+        let previousRuntime = WebRuntimeDiagnosticIdentity(
+            runtimeGeneration: 11,
+            webViewInstanceID: UUID()
+        )
+        let newTabRuntime = WebRuntimeDiagnosticIdentity(
+            runtimeGeneration: 29,
+            webViewInstanceID: UUID()
+        )
+
+        XCTAssertEqual(
+            WebsiteFaviconProvider.DOMCandidateUpdateSource.forDOMRead(
+                previousRuntimeIdentity: nil,
+                currentRuntimeIdentity: newTabRuntime
+            ),
+            .initialization,
+            "a new Slot's first read is initialization even when generation numbers are not 1"
+        )
+        XCTAssertEqual(
+            WebsiteFaviconProvider.DOMCandidateUpdateSource.forDOMRead(
+                previousRuntimeIdentity: previousRuntime,
+                currentRuntimeIdentity: newTabRuntime
+            ),
+            .initialization,
+            "a replacement Runtime for the same Slot begins a new initialization read"
+        )
+        XCTAssertEqual(
+            WebsiteFaviconProvider.DOMCandidateUpdateSource.forDOMRead(
+                previousRuntimeIdentity: newTabRuntime,
+                currentRuntimeIdentity: newTabRuntime
+            ),
+            .pageNavigation,
+            "later navigation reads from the same Slot and Runtime retain the update path"
+        )
+    }
+
+    func testFirstNavigationDOMIconUpgradesConventionalFallback() async throws {
+        let fallbackData = try fixtureImageData(color: .systemRed)
+        let declaredData = try fixtureImageData(color: .systemBlue)
+        let pageURL = try XCTUnwrap(URL(string: "https://first-load-icon.example.test/chat"))
+        let declaredURL = try XCTUnwrap(URL(string: "https://first-load-icon.example.test/brand.png"))
+        let loader = FaviconTestLoader { request, _ in
+            let data: Data
+            let status: Int
+            switch request.url?.path {
+            case "/":
+                data = Data()
+                status = 404
+            case "/favicon.ico":
+                data = fallbackData
+                status = 200
+            case "/brand.png":
+                data = declaredData
+                status = 200
+            default:
+                data = Data()
+                status = 404
+            }
+            return (data, Self.response(for: request, status: status, mimeType: "image/png"))
+        }
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            diagnosticRecorder: diagnostics
+        )
+        let consumerID = UUID()
+        let fallbackDisplayed = expectation(description: "conventional fallback appears during first navigation")
+        let upgraded = expectation(description: "confirmed formal DOM icon replaces the fallback")
+        var images: [NSImage?] = []
+
+        provider.subscribe(for: pageURL, consumerID: consumerID, automaticallyRetries: false) { image in
+            images.append(image)
+            if images.count == 1 {
+                fallbackDisplayed.fulfill()
+            } else {
+                upgraded.fulfill()
+            }
+        }
+        await fulfillment(of: [fallbackDisplayed], timeout: 2)
+        let fallbackImage = try XCTUnwrap(images.first ?? nil)
+
+        provider.setDOMCandidates([.declared(declaredURL)], for: pageURL, source: .initialization)
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("awaiting_confirmation")
+            }
+        }
+        XCTAssertEqual(loader.requests.compactMap(\.url?.path), ["/", "/chat", "/favicon.ico", "/brand.png"])
+        XCTAssertEqual(images.count, 1, "the first automatic observation keeps the accepted fallback visible")
+        XCTAssertEqual(
+            try XCTUnwrap(images.last ?? nil).tiffRepresentation,
+            fallbackImage.tiffRepresentation
+        )
+
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(declaredURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await fulfillment(of: [upgraded], timeout: 2)
+        XCTAssertEqual(loader.requests.compactMap(\.url?.path), ["/", "/chat", "/favicon.ico", "/brand.png", "/brand.png"])
+        XCTAssertNotEqual(
+            try XCTUnwrap(images.last ?? nil).tiffRepresentation,
+            fallbackImage.tiffRepresentation
+        )
+        provider.cancel(consumerID: consumerID)
+    }
+
     func testNewSameOriginTabInitializationDoesNotAdvancePendingCandidate() async throws {
         let oldData = try fixtureImageData(color: .systemRed)
         let candidateData = try fixtureImageData(color: .systemBlue)
@@ -543,6 +653,14 @@ final class FaviconRecoveryTests: XCTestCase {
         )
         let existingTabID = UUID()
         let newTabID = UUID()
+        let newTabRuntime = WebRuntimeDiagnosticIdentity(
+            runtimeGeneration: 37,
+            webViewInstanceID: UUID()
+        )
+        let newTabInitializationSource = WebsiteFaviconProvider.DOMCandidateUpdateSource.forDOMRead(
+            previousRuntimeIdentity: nil,
+            currentRuntimeIdentity: newTabRuntime
+        )
         let initialDisplay = expectation(description: "the existing Tab accepts its first icon")
         let newTabDisplay = expectation(description: "the new same-origin Tab immediately reuses the accepted icon")
         let updatedDisplays = expectation(description: "a later page candidate is confirmed for both Tabs")
@@ -562,7 +680,11 @@ final class FaviconRecoveryTests: XCTestCase {
         await fulfillment(of: [initialDisplay], timeout: 2)
         let acceptedImage = try XCTUnwrap(existingTabImages.first ?? nil)
 
-        provider.setDOMCandidates([.declared(initializationURL)], for: pageURL, source: .initialization)
+        provider.setDOMCandidates(
+            [.declared(initializationURL)],
+            for: pageURL,
+            source: newTabInitializationSource
+        )
         provider.subscribe(for: pageURL, consumerID: newTabID) { image in
             newTabImages.append(image)
             if newTabImages.count == 1 {
@@ -578,7 +700,15 @@ final class FaviconRecoveryTests: XCTestCase {
             acceptedImage.tiffRepresentation
         )
 
-        provider.setDOMCandidates([.declared(candidateURL)], for: pageURL, source: .pageNavigation)
+        let laterNewTabNavigationSource = WebsiteFaviconProvider.DOMCandidateUpdateSource.forDOMRead(
+            previousRuntimeIdentity: newTabRuntime,
+            currentRuntimeIdentity: newTabRuntime
+        )
+        provider.setDOMCandidates(
+            [.declared(candidateURL)],
+            for: pageURL,
+            source: laterNewTabNavigationSource
+        )
         await waitForDiagnostic(writer) { events in
             events.contains {
                 $0.event == "favicon.cache_update"
@@ -589,9 +719,21 @@ final class FaviconRecoveryTests: XCTestCase {
         XCTAssertEqual(existingTabImages.count, 1)
         XCTAssertEqual(newTabImages.count, 1)
 
-        // A distinct initialization read stores its candidates but neither
-        // fetches an icon nor advances or replaces the pending page candidate.
-        provider.setDOMCandidates([.declared(initializationURL)], for: pageURL, source: .initialization)
+        // A different new Slot's initialization read stores candidates but
+        // neither fetches an icon nor advances the pending page candidate.
+        let secondTabRuntime = WebRuntimeDiagnosticIdentity(
+            runtimeGeneration: 41,
+            webViewInstanceID: UUID()
+        )
+        let secondTabInitializationSource = WebsiteFaviconProvider.DOMCandidateUpdateSource.forDOMRead(
+            previousRuntimeIdentity: nil,
+            currentRuntimeIdentity: secondTabRuntime
+        )
+        provider.setDOMCandidates(
+            [.declared(initializationURL)],
+            for: pageURL,
+            source: secondTabInitializationSource
+        )
         XCTAssertEqual(loader.requests.compactMap(\.url), [oldURL, candidateURL])
         XCTAssertEqual(
             try XCTUnwrap(existingTabImages.last ?? nil).tiffRepresentation,

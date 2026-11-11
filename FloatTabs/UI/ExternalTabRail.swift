@@ -2336,6 +2336,13 @@ final class WebsiteFaviconProvider {
     enum DOMCandidateUpdateSource: Equatable {
         case initialization
         case pageNavigation
+
+        static func forDOMRead(
+            previousRuntimeIdentity: WebRuntimeDiagnosticIdentity?,
+            currentRuntimeIdentity: WebRuntimeDiagnosticIdentity
+        ) -> Self {
+            previousRuntimeIdentity == currentRuntimeIdentity ? .pageNavigation : .initialization
+        }
     }
 
     enum ProjectionOutcome: String, Equatable {
@@ -3028,7 +3035,12 @@ final class WebsiteFaviconProvider {
 
         let accepted = cachedFavicon(for: key)
         let targetIdentity = next.first?.resourceIdentity
-        let initializationHasAcceptedIcon = source == .initialization && accepted != nil
+        let initializationMayUpgradeFallback = source == .initialization
+            && accepted?.kind == .conventional
+            && next.first?.kind == .icon
+        let initializationHasAcceptedIcon = source == .initialization
+            && accepted != nil
+            && !initializationMayUpgradeFallback
         if !initializationHasAcceptedIcon,
            let request = inFlight[key],
            request.acceptanceMode == .automatic,
@@ -3057,9 +3069,9 @@ final class WebsiteFaviconProvider {
             return
         }
 
-        // A new Tab's first DOM read can refresh candidates without treating
-        // them as a new independent favicon observation. Later page-navigation
-        // reads retain the existing automatic candidate and confirmation path.
+        // A new Runtime's first DOM read cannot replace an existing accepted
+        // brand icon. It may still upgrade a conventional fallback to a formal
+        // DOM icon; later reads retain the automatic confirmation path.
         guard !initializationHasAcceptedIcon else { return }
 
         let hasInterest = hasDemand(for: key) || oneShotCompletions[key]?.isEmpty == false
