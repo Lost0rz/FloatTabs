@@ -246,13 +246,13 @@ FloatTabs-<version>.dSYM.zip.sha256
 
 Engineering and document authority:
 
-- Project rules and current **control mode**: [`AGENTS.md`](AGENTS.md).
+- FloatTabs product/architecture/runtime/data boundaries: [`AGENTS.md`](AGENTS.md).
 - Canonical documentation routing: [`docs/README.md`](docs/README.md).
 - Architecture contracts and source map: [`docs/architecture/README.md`](docs/architecture/README.md) and [`docs/architecture/DOMAIN_MAP.md`](docs/architecture/DOMAIN_MAP.md).
 - Current shell / interaction references: [`docs/design/`](docs/design/).
 - Browser Profiles bounded product reference: [`docs/product/FloatTabs_Browser_Profiles_Contract_V1.md`](docs/product/FloatTabs_Browser_Profiles_Contract_V1.md).
 - This version's release record: [`docs/release/FloatTabs_v0.5.8.md`](docs/release/FloatTabs_v0.5.8.md).
 
-The installed Engineering Governance plugin owns generic collaboration and task workflow. FloatTabs records only project-specific settings in [`AGENTS.md`](AGENTS.md), with current documentation authority routed through [`docs/README.md`](docs/README.md). Historical migration evidence: [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197) and merged [PR #199](https://github.com/Lost0rz/FloatTabs/pull/199).
+Reusable engineering workflows live in the installed Engineering Governance plugin; FloatTabs documents only product-specific facts and constraints. See [`docs/README.md`](docs/README.md) for the applicable technical contracts.
 
 Older stage, design and release files are retained as historical records. Historical documents do not override current production behavior or current accepted contracts.

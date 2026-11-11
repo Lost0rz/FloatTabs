@@ -1,8 +1,6 @@
 # FloatTabs — Documentation Authority Index
 
-This is the **FloatTabs document index**, not a workflow, permission selector, or live progress database. [AGENTS.md](../AGENTS.md) contains only project-specific product/architecture/environment/data boundaries. The installed Engineering Governance plugin owns reusable engineering workflow, task selection and authorization, Skill routing, review, verification, delivery, and lifecycle policy. An independently selected task authority is established through that plugin and the current host; no project document or historical Issue grants new execution permission.
-
-GitHub source, PR, CI and release records establish observed repository delivery state, not task authority.
+This index maps **FloatTabs-specific** product/technical documents. [AGENTS.md](../AGENTS.md) records project context, Domain ownership, Runtime constraints, and user-data safety. Generic engineering workflow belongs to the separately installed Engineering Governance plugin; no file in this index grants execution permission.
 
 ## Project document owners
 
@@ -35,6 +33,4 @@ The [Favicon Identity and Active-State Amendment V1](product/FloatTabs_Favicon_A
 
 Historical contracts, Stage/WP plans, audits, releases and all `docs/superpowers/` plans remain available as evidence. `CURRENT`, `LOCKED`, `APPROVED`, `IMPLEMENTED` and `NEXT` in those materials are relative to their original scope and date, not current executable instructions. Do not rewrite history to make it look current.
 
-The FILE_CONTROL → ISSUE_CONTROL migration is recorded in historical [Issue #197](https://github.com/Lost0rz/FloatTabs/issues/197) and merged [PR #199](https://github.com/Lost0rz/FloatTabs/pull/199). Carry-forward [PR #195](https://github.com/Lost0rz/FloatTabs/pull/195) was also merged. Do not resurrect historical `CURRENT_TASK.md` or `CURRENT_STATUS.md` as parallel active controls.
-
-When behavior changes, update the current applicable index or publish a bounded amendment; do not treat an old execution card, dated PR status or historical design file as new authorization.
+Past migration records and implementation cards remain in GitHub history for traceability; they do not describe current product behavior. For any present product claim, check the applicable contract against current source, tests, and real-Mac evidence where required.

@@ -8,8 +8,7 @@
 
 Current routing:
 
-- `CURRENT_STATUS.md` / `CURRENT_TASK.md` for current work;
-- [`../architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](../architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md) for cross-cutting lifecycle direction;
+- [`../architecture/README.md`](../architecture/README.md) for applicable current Runtime contracts and supersession;
 - current `BrowserProfile*` / `BrowserProfileDataStoreProvider` source and regression tests for present Profile behavior.
 
 Use the archived full contract for feature rationale and migration history, not as global Runtime policy authority.

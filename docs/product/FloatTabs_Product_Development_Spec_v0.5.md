@@ -10,7 +10,6 @@ Current routing:
 
 - [`../README.md`](../README.md) — documentation authority/status index;
 - [`README.md`](README.md) — product-document status;
-- `CURRENT_STATUS.md` / `CURRENT_TASK.md` — current state and authorization;
 - current architecture/design contracts and production source/tests.
 
 The old product goal and rationale may still be useful as historical context, but current product facts must be revalidated before use.
