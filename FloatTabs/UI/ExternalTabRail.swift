@@ -2860,11 +2860,6 @@ final class WebsiteFaviconProvider {
         )
         if let cached = cachedImage(for: key) {
             completion(cached)
-            if let bestDOMCandidate = domCandidates[key]?.first,
-               let entry = cache[key],
-               Self.candidate(bestDOMCandidate, shouldReplace: entry) {
-                ensureRequest(for: key, fallbackURL: url)
-            }
             return
         }
         ensureRequest(for: key, fallbackURL: url)
@@ -3021,6 +3016,11 @@ final class WebsiteFaviconProvider {
         let next = Array(normalized)
         guard domCandidates[key] != next else { return }
         storeDOMCandidates(next, for: key)
+
+        // Initial DOM reads and new consumers may refresh candidate metadata,
+        // but only an explicit Reload or user choice may fetch a replacement
+        // once this origin already has an accepted icon.
+        guard cachedFavicon(for: key) == nil else { return }
 
         let targetIdentity = next.first?.resourceIdentity
         if let request = inFlight[key],
