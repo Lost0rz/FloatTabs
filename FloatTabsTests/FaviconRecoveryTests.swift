@@ -358,7 +358,12 @@ final class FaviconRecoveryTests: XCTestCase {
                 return (Data(), Self.response(for: request, status: 404))
             }
         }
-        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            diagnosticRecorder: diagnostics
+        )
         let pageURL = try XCTUnwrap(URL(string: "https://chatgpt.example.test/c/123"))
         let iconURL = try XCTUnwrap(URL(string: "https://chatgpt.example.test/assets/brand.png"))
         let tabConsumerID = UUID()
@@ -404,6 +409,19 @@ final class FaviconRecoveryTests: XCTestCase {
         // menu-bar consumer remains subscribed and receives the improved icon.
         provider.cancel(consumerID: tabConsumerID)
         provider.setDOMCandidates([.declared(iconURL)], for: pageURL)
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("awaiting_confirmation")
+            }
+        }
+        XCTAssertEqual(menuImages.count, 1, "one changed image observation retains the fallback")
+        XCTAssertEqual(statusItem.debugStatusButtonImageTIFF, fallbackStatusImage)
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(iconURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
         await fulfillment(of: [improvedMenuImage], timeout: 2)
 
         XCTAssertEqual(tabImages.count, 1)
@@ -431,7 +449,12 @@ final class FaviconRecoveryTests: XCTestCase {
                 Self.response(for: request, status: 200, mimeType: "image/png")
             )
         }
-        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            diagnosticRecorder: diagnostics
+        )
         let tabID = UUID()
         let menuID = UUID()
         let initial = expectation(description: "both current consumers receive the cached icon")
@@ -463,9 +486,24 @@ final class FaviconRecoveryTests: XCTestCase {
         await gate.waitUntilSuspended()
         provider.cancel(consumerID: tabID)
         gate.resumeNext()
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("awaiting_confirmation")
+            }
+        }
+        XCTAssertEqual(tabImages.count, 1)
+        XCTAssertEqual(menuImages.count, 1, "unconfirmed pixels remain hidden from active consumers")
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(newURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await gate.waitUntilSuspended()
+        gate.resumeNext()
         await fulfillment(of: [updated], timeout: 2)
 
-        XCTAssertEqual(loader.requests.compactMap(\.url), [oldURL, newURL])
+        XCTAssertEqual(loader.requests.compactMap(\.url), [oldURL, newURL, newURL])
         XCTAssertEqual(tabImages.count, 1)
         XCTAssertEqual(menuImages.count, 2)
         XCTAssertNotEqual(
@@ -485,7 +523,12 @@ final class FaviconRecoveryTests: XCTestCase {
             let data = count == 1 ? oldData : newData
             return (data, Self.response(for: request, status: 200, mimeType: "image/png"))
         }
-        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            diagnosticRecorder: diagnostics
+        )
         let tabConsumer = UUID()
         let menuConsumer = UUID()
         let staleConsumer = UUID()
@@ -525,12 +568,26 @@ final class FaviconRecoveryTests: XCTestCase {
             committedURL: pageURL,
             for: [pageURL, sameOriginURL]
         )
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("awaiting_confirmation")
+            }
+        }
+        XCTAssertEqual(tabImages.count, 1)
+        XCTAssertEqual(menuImages.count, 1)
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(iconURL)]),
+            committedURL: pageURL,
+            for: [pageURL, sameOriginURL]
+        )
         await fulfillment(of: [refreshed], timeout: 2)
 
-        XCTAssertEqual(loader.requests.count, 2)
+        XCTAssertEqual(loader.requests.count, 3)
         XCTAssertEqual(loader.requests[0].cachePolicy, .returnCacheDataElseLoad)
         XCTAssertEqual(loader.requests[1].cachePolicy, .reloadIgnoringLocalCacheData)
-        XCTAssertEqual(loader.requests.map(\.url), [iconURL, iconURL])
+        XCTAssertEqual(loader.requests[2].cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(loader.requests.map(\.url), [iconURL, iconURL, iconURL])
         XCTAssertEqual(tabImages.count, 2)
         XCTAssertEqual(menuImages.count, 2)
         XCTAssertEqual(staleImages.count, 1, "cancelled consumer must not receive a stale completion")
@@ -563,7 +620,12 @@ final class FaviconRecoveryTests: XCTestCase {
             }
             return (data, Self.response(for: request, status: 200, mimeType: "image/png"))
         }
-        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            diagnosticRecorder: diagnostics
+        )
         let tabConsumer = UUID()
         let menuConsumer = UUID()
         let initial = expectation(description: "each origin receives its cached icon")
@@ -589,14 +651,27 @@ final class FaviconRecoveryTests: XCTestCase {
             committedURL: committedURL,
             for: [committedURL, tabHomeURL]
         )
+        await waitForDiagnostic(writer) { events in
+            events.filter {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("awaiting_confirmation")
+            }.count >= 2
+        }
+        XCTAssertEqual(tabImages.count, 1)
+        XCTAssertEqual(menuImages.count, 1)
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(committedIconURL)]),
+            committedURL: committedURL,
+            for: [committedURL, tabHomeURL]
+        )
         await fulfillment(of: [refreshed], timeout: 2)
 
-        XCTAssertEqual(loader.requests.count, 4)
+        XCTAssertEqual(loader.requests.count, 6)
         XCTAssertEqual(loader.requests.filter { $0.cachePolicy == .returnCacheDataElseLoad }.count, 2)
         let freshRequests = loader.requests.filter {
             $0.cachePolicy == .reloadIgnoringLocalCacheData
         }
-        XCTAssertEqual(freshRequests.count, 2)
+        XCTAssertEqual(freshRequests.count, 4)
         XCTAssertEqual(Set(freshRequests.compactMap(\.url)), Set([homeIconURL, committedIconURL]))
         XCTAssertFalse(loader.requests.contains { $0.url?.host == "www.example.test" })
         XCTAssertTrue(loader.requests.allSatisfy {
@@ -624,7 +699,12 @@ final class FaviconRecoveryTests: XCTestCase {
             let data = request.cachePolicy == .reloadIgnoringLocalCacheData ? newData : oldData
             return (data, Self.response(for: request, status: 200, mimeType: "image/png"))
         }
-        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            diagnosticRecorder: diagnostics
+        )
         let tabConsumer = UUID()
         let initial = expectation(description: "home origin has a validated cached candidate")
         let refreshed = expectation(description: "home origin refresh uses its own candidate")
@@ -639,10 +719,23 @@ final class FaviconRecoveryTests: XCTestCase {
         provider.refreshAfterManualReload(
             candidateReadResult: .noCandidates,
             committedURL: committedURL,
-            for: [committedURL, homeURL]
+            for: [homeURL]
+        )
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("awaiting_confirmation")
+            }
+        }
+        XCTAssertEqual(images.count, 1)
+        provider.refreshAfterManualReload(
+            candidateReadResult: .noCandidates,
+            committedURL: committedURL,
+            for: [homeURL]
         )
         await fulfillment(of: [refreshed], timeout: 2)
 
+        XCTAssertEqual(loader.requests.filter { $0.url == homeIconURL }.count, 3)
         XCTAssertEqual(images.count, 2)
         XCTAssertNotEqual(images[0]?.tiffRepresentation, images[1]?.tiffRepresentation)
         XCTAssertTrue(loader.requests.contains {
@@ -811,7 +904,6 @@ final class FaviconRecoveryTests: XCTestCase {
         let consumerID = UUID()
         var images: [NSImage?] = []
         let initial = expectation(description: "same resource is fetched")
-        let refreshed = expectation(description: "same resource metadata reuses the cache")
         let compact = WebsiteFaviconProvider.Candidate(
             url: iconURL,
             kind: .icon,
@@ -831,16 +923,21 @@ final class FaviconRecoveryTests: XCTestCase {
         provider.setDOMCandidates([compact], for: pageURL)
         provider.subscribe(for: pageURL, consumerID: consumerID) { image in
             images.append(image)
-            (images.count == 1 ? initial : refreshed).fulfill()
+            if images.count == 1 { initial.fulfill() }
         }
         await fulfillment(of: [initial], timeout: 2)
         provider.setDOMCandidates([preferred], for: pageURL)
-        await fulfillment(of: [refreshed], timeout: 2)
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("reused_same_resource")
+            }
+        }
 
         XCTAssertEqual(compact.priority, 11)
         XCTAssertEqual(preferred.priority, 0)
         XCTAssertEqual(loader.requests.compactMap(\.url), [iconURL])
-        XCTAssertEqual(images.count, 2)
+        XCTAssertEqual(images.count, 1, "metadata for the same resource does not redraw the icon")
         XCTAssertTrue(writer.events.contains { event in
             guard event.event == "favicon.cache_update",
                   case .string("reused_same_resource") = event.fields["outcome"] else {
@@ -1336,6 +1433,525 @@ final class FaviconRecoveryTests: XCTestCase {
         XCTAssertEqual(staleStatusItem.attentionPresentation.badge, .count("3"))
     }
 
+    func testStickyIconRequiresTwoIndependentMatchingPixelObservations() async throws {
+        let originalData = try fixtureImageData(color: .systemBlue)
+        let changed16 = try fixtureImageData(color: .systemRed, size: NSSize(width: 16, height: 16))
+        let changed32 = try fixtureImageData(color: .systemRed, size: NSSize(width: 32, height: 32))
+        let pageURL = try XCTUnwrap(URL(string: "https://sticky.example.test/page"))
+        let firstIconURL = try XCTUnwrap(URL(string: "https://sticky.example.test/first.png"))
+        let secondIconURL = try XCTUnwrap(URL(string: "https://sticky.example.test/second.png"))
+        let thirdIconURL = try XCTUnwrap(URL(string: "https://sticky.example.test/third.png"))
+        let fourthIconURL = try XCTUnwrap(URL(string: "https://sticky.example.test/fourth.png"))
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let loader = FaviconTestLoader { request, count in
+            let data: Data
+            switch request.url {
+            case firstIconURL where count == 1: data = originalData
+            case firstIconURL where count == 3: data = originalData
+            case firstIconURL: data = changed16
+            case secondIconURL: data = changed32
+            case thirdIconURL: data = changed16
+            case fourthIconURL: data = changed16
+            default: throw URLError(.badURL)
+            }
+            return (data, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            diagnosticRecorder: diagnostics
+        )
+        let consumerID = UUID()
+        var images: [NSImage?] = []
+        let firstAccepted = expectation(description: "first valid favicon is accepted immediately")
+        let confirmedUpdate = expectation(description: "second independent matching favicon is accepted")
+        provider.setDOMCandidates([.declared(firstIconURL)], for: pageURL)
+        provider.subscribe(for: pageURL, consumerID: consumerID) { image in
+            images.append(image)
+            (images.count == 1 ? firstAccepted : confirmedUpdate).fulfill()
+        }
+        await fulfillment(of: [firstAccepted], timeout: 2)
+
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(firstIconURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("awaiting_confirmation")
+            }
+        }
+        XCTAssertEqual(images.count, 1, "one changed image observation must retain the accepted icon")
+        let originalTIFF = try XCTUnwrap(images.first ?? nil).tiffRepresentation
+
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(firstIconURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("same_visual_content")
+            }
+        }
+        XCTAssertEqual(images.count, 1, "the accepted image clears the pending candidate")
+
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(secondIconURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await waitForDiagnostic(writer) { events in
+            events.filter {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("awaiting_confirmation")
+            }.count >= 2
+        }
+        XCTAssertEqual(images.count, 1, "an old accepted image resets the confirmation count")
+
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(thirdIconURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await fulfillment(of: [confirmedUpdate], timeout: 2)
+        XCTAssertNotEqual(try XCTUnwrap(images.last ?? nil).tiffRepresentation, originalTIFF)
+
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(fourthIconURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("same_visual_content")
+            }
+        }
+        XCTAssertEqual(images.count, 2, "different URLs with identical normalized pixels must not redraw")
+        provider.cancel(consumerID: consumerID)
+    }
+
+    func testTemplateMaskKindIsAnIndependentVisualIdentity() async throws {
+        let samePixels = try fixtureImageData(color: .systemGreen)
+        let pageURL = try XCTUnwrap(URL(string: "https://mask-kind.example.test/"))
+        let iconURL = try XCTUnwrap(URL(string: "https://mask-kind.example.test/icon.png"))
+        let maskURL = try XCTUnwrap(URL(string: "https://mask-kind.example.test/mask.png"))
+        let maskCandidate = WebsiteFaviconProvider.Candidate(
+            url: maskURL,
+            kind: .mask,
+            sizes: "any",
+            type: "image/png",
+            mediaSpecific: false,
+            sourceOrder: 0
+        )
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let store = WebsiteFaviconAssetStore()
+        let loader = FaviconTestLoader { request, _ in
+            (samePixels, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            diagnosticRecorder: diagnostics,
+            assetStore: store
+        )
+        let consumerID = UUID()
+        var images: [NSImage?] = []
+        let initial = expectation(description: "regular favicon is accepted")
+        let maskConfirmed = expectation(description: "mask semantics are independently confirmed")
+        provider.setDOMCandidates([.declared(iconURL)], for: pageURL)
+        provider.subscribe(for: pageURL, consumerID: consumerID) { image in
+            images.append(image)
+            if images.count == 1 {
+                initial.fulfill()
+            } else if images.count == 2 {
+                maskConfirmed.fulfill()
+            }
+        }
+        await fulfillment(of: [initial], timeout: 2)
+        XCTAssertFalse(try XCTUnwrap(images.first ?? nil).isTemplate)
+
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([maskCandidate]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("awaiting_confirmation")
+            }
+        }
+        XCTAssertEqual(images.count, 1, "same pixels with a new template kind remain pending")
+
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([maskCandidate]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await fulfillment(of: [maskConfirmed], timeout: 2)
+        XCTAssertTrue(try XCTUnwrap(images.last ?? nil).isTemplate)
+        let originKey = try XCTUnwrap(WebsiteFaviconProvider.originKey(for: pageURL))
+        guard case let .record(record) = store.load(originKey: originKey) else {
+            return XCTFail("accepted template metadata must persist with the image")
+        }
+        XCTAssertEqual(record.kind, WebsiteFaviconProvider.Candidate.Kind.mask.rawValue)
+        provider.cancel(consumerID: consumerID)
+    }
+
+    func testFailedFetchCycleClearsPendingFaviconConfirmation() async throws {
+        let originalData = try fixtureImageData(color: .systemBlue)
+        let changedData = try fixtureImageData(color: .systemOrange)
+        let pageURL = try XCTUnwrap(URL(string: "https://failed-pending.example.test/"))
+        let iconURL = try XCTUnwrap(URL(string: "https://failed-pending.example.test/icon.png"))
+        let failedCandidateURL = try XCTUnwrap(
+            URL(string: "https://failed-pending.example.test/failed.png")
+        )
+        var shouldFail = false
+        let loader = FaviconTestLoader { request, count in
+            if count == 1 {
+                return (originalData, Self.response(for: request, status: 200, mimeType: "image/png"))
+            }
+            if shouldFail {
+                return (Data(), Self.response(for: request, status: 404))
+            }
+            return (changedData, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            retryWaiter: { _ in },
+            diagnosticRecorder: diagnostics
+        )
+        let consumerID = UUID()
+        var images: [NSImage?] = []
+        let initial = expectation(description: "accepted image is delivered")
+        let confirmed = expectation(description: "changed image is delivered after a second success")
+        provider.setDOMCandidates([.declared(iconURL)], for: pageURL)
+        provider.subscribe(for: pageURL, consumerID: consumerID) { image in
+            images.append(image)
+            if images.count == 1 {
+                initial.fulfill()
+            } else if images.count == 2 {
+                confirmed.fulfill()
+            }
+        }
+        await fulfillment(of: [initial], timeout: 2)
+
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(iconURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("awaiting_confirmation")
+            }
+        }
+        let originalTIFF = try XCTUnwrap(images.first ?? nil).tiffRepresentation
+
+        shouldFail = true
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(failedCandidateURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("retained_previous")
+            }
+        }
+        XCTAssertEqual(images.count, 1, "failed retrieval retains the accepted image")
+        XCTAssertEqual(try XCTUnwrap(images.first ?? nil).tiffRepresentation, originalTIFF)
+
+        shouldFail = false
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(iconURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await waitForDiagnostic(writer) { events in
+            events.filter {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("awaiting_confirmation")
+            }.count >= 2
+        }
+        XCTAssertEqual(images.count, 1, "post-failure success starts a new confirmation")
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(iconURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await fulfillment(of: [confirmed], timeout: 2)
+        XCTAssertNotEqual(try XCTUnwrap(images.last ?? nil).tiffRepresentation, originalTIFF)
+        provider.cancel(consumerID: consumerID)
+    }
+
+    func testIconLockUnlockAndExplicitChoicePreserveLockStateOnFailure() async throws {
+        let initialData = try fixtureImageData(color: .systemBlue)
+        let automaticData = try fixtureImageData(color: .systemOrange)
+        let explicitData = try fixtureImageData(color: .systemGreen)
+        let pageURL = try XCTUnwrap(URL(string: "https://icon-controls.example.test/"))
+        let iconURL = try XCTUnwrap(URL(string: "https://icon-controls.example.test/icon.png"))
+        let siblingURL = try XCTUnwrap(URL(string: "https://icon-controls.example.test/another-page"))
+        let defaultPortSiblingURL = try XCTUnwrap(
+            URL(string: "https://icon-controls.example.test:443/explicit-port")
+        )
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let loader = FaviconTestLoader { request, count in
+            if count == 1 {
+                return (initialData, Self.response(for: request, status: 200, mimeType: "image/png"))
+            }
+            if count >= 7 {
+                throw URLError(.timedOut)
+            }
+            let data = count == 6 ? explicitData : automaticData
+            return (data, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            retryWaiter: { _ in },
+            diagnosticRecorder: diagnostics
+        )
+        let consumerID = UUID()
+        var images: [NSImage?] = []
+        let initial = expectation(description: "initial icon arrives")
+        let automaticChange = expectation(description: "unlocked icon changes after confirmation")
+        provider.setDOMCandidates([.declared(iconURL)], for: pageURL)
+        provider.subscribe(for: pageURL, consumerID: consumerID, automaticallyRetries: false) { image in
+            images.append(image)
+            if images.count == 1 {
+                initial.fulfill()
+            } else if images.count == 2 {
+                automaticChange.fulfill()
+            }
+        }
+        await fulfillment(of: [initial], timeout: 2)
+        let originalTIFF = try XCTUnwrap(images.first ?? nil).tiffRepresentation
+        XCTAssertEqual(provider.lockCurrentIcon(for: pageURL), .changed)
+        XCTAssertTrue(provider.iconControlState(for: pageURL).isLocked)
+        XCTAssertTrue(provider.iconControlState(for: siblingURL).isLocked)
+        XCTAssertTrue(provider.iconControlState(for: defaultPortSiblingURL).isLocked)
+
+        for expectedLockEvents in 1...2 {
+            provider.refreshAfterManualReload(
+                candidateReadResult: .candidates([.declared(iconURL)]),
+                committedURL: pageURL,
+                for: [pageURL]
+            )
+            await waitForDiagnostic(writer) { events in
+                events.filter {
+                    $0.event == "favicon.cache_update"
+                        && $0.fields["outcome"] == .string("locked")
+                }.count >= expectedLockEvents
+            }
+        }
+        XCTAssertEqual(images.count, 1, "automatic favicon changes cannot replace a locked icon")
+        XCTAssertEqual(try XCTUnwrap(images.first ?? nil).tiffRepresentation, originalTIFF)
+
+        XCTAssertEqual(provider.unlockIcon(for: pageURL), .changed)
+        XCTAssertFalse(provider.iconControlState(for: pageURL).isLocked)
+        XCTAssertFalse(provider.iconControlState(for: siblingURL).isLocked)
+        XCTAssertFalse(provider.iconControlState(for: defaultPortSiblingURL).isLocked)
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(iconURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await waitForDiagnostic(writer) { events in
+            events.contains {
+                $0.event == "favicon.cache_update"
+                    && $0.fields["outcome"] == .string("awaiting_confirmation")
+            }
+        }
+        XCTAssertEqual(images.count, 1, "unlock does not immediately adopt the pending image")
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(iconURL)]),
+            committedURL: pageURL,
+            for: [pageURL]
+        )
+        await fulfillment(of: [automaticChange], timeout: 2)
+        XCTAssertEqual(images.count, 2)
+
+        XCTAssertEqual(provider.lockCurrentIcon(for: pageURL), .changed)
+        let explicitChanged = expectation(description: "explicit choice can replace a locked icon")
+        var explicitResult: WebsiteFaviconProvider.IconControlResult?
+        provider.refreshAndChooseIcon(for: pageURL) { result in
+            explicitResult = result
+            explicitChanged.fulfill()
+        }
+        await fulfillment(of: [explicitChanged], timeout: 2)
+        XCTAssertEqual(explicitResult, .changed)
+        XCTAssertTrue(provider.iconControlState(for: pageURL).isLocked)
+        XCTAssertEqual(images.count, 3)
+        let explicitTIFF = try XCTUnwrap(images.last ?? nil).tiffRepresentation
+        XCTAssertNotEqual(explicitTIFF, originalTIFF)
+
+        let explicitFailed = expectation(description: "failed explicit choice reports failure")
+        var failedResult: WebsiteFaviconProvider.IconControlResult?
+        provider.refreshAndChooseIcon(for: pageURL) { result in
+            failedResult = result
+            explicitFailed.fulfill()
+        }
+        await fulfillment(of: [explicitFailed], timeout: 2)
+        XCTAssertEqual(failedResult, .fetchFailed)
+        XCTAssertEqual(try XCTUnwrap(images.last ?? nil).tiffRepresentation, explicitTIFF)
+        XCTAssertTrue(provider.iconControlState(for: pageURL).isLocked)
+        provider.cancel(consumerID: consumerID)
+    }
+
+    func testPersistentAcceptedIconAndLockRestoreAfterProviderRestartAndProtectCorruptFile() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabs-Favicon-Persistence-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pageURL = try XCTUnwrap(URL(string: "https://persisted-icon.example.test/"))
+        let iconURL = try XCTUnwrap(URL(string: "https://persisted-icon.example.test/icon.png"))
+        let originalData = try fixtureImageData(color: .systemPurple)
+        let firstLoader = FaviconTestLoader { request, _ in
+            (originalData, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let firstProvider = WebsiteFaviconProvider(
+            dataLoader: { try await firstLoader.load($0) },
+            assetStore: WebsiteFaviconAssetStore(directoryURL: directory)
+        )
+        firstProvider.setDOMCandidates([.declared(iconURL)], for: pageURL)
+        let originalImage = await load(firstProvider, from: pageURL)
+        XCTAssertNotNil(originalImage)
+        XCTAssertEqual(firstProvider.lockCurrentIcon(for: pageURL), .changed)
+
+        let restartedLoader = FaviconTestLoader { request, _ in
+            throw URLError(.cannotFindHost)
+        }
+        let restartedProvider = WebsiteFaviconProvider(
+            dataLoader: { try await restartedLoader.load($0) },
+            assetStore: WebsiteFaviconAssetStore(directoryURL: directory)
+        )
+        let restoredImage = await load(restartedProvider, from: pageURL)
+        XCTAssertNotNil(restoredImage)
+        XCTAssertEqual(restoredImage?.tiffRepresentation, originalImage?.tiffRepresentation)
+        XCTAssertEqual(
+            restartedProvider.iconControlState(for: pageURL),
+            WebsiteFaviconProvider.IconControlState(hasAcceptedIcon: true, isLocked: true)
+        )
+        XCTAssertTrue(restartedLoader.requests.isEmpty, "persistent icon is restored before a network request")
+
+        let corruptOrigin = try XCTUnwrap(URL(string: "https://corrupt-icon.example.test/"))
+        let corruptStore = WebsiteFaviconAssetStore(directoryURL: directory)
+        let corruptOriginKey = try XCTUnwrap(WebsiteFaviconProvider.originKey(for: corruptOrigin))
+        let corruptURL = try XCTUnwrap(corruptStore.recordURL(forTesting: corruptOriginKey))
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let badBytes = Data("preserve-this-corrupt-record".utf8)
+        try badBytes.write(to: corruptURL)
+        let recoveryLoader = FaviconTestLoader { request, _ in
+            (originalData, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let recoveryProvider = WebsiteFaviconProvider(
+            dataLoader: { try await recoveryLoader.load($0) },
+            assetStore: corruptStore
+        )
+        let recoveredImage = await load(recoveryProvider, from: corruptOrigin)
+        XCTAssertNil(recoveredImage, "corrupt persisted data fails closed instead of being silently replaced")
+        XCTAssertEqual(try Data(contentsOf: corruptURL), badBytes)
+    }
+
+    func testFaviconAssetStoreEnforcesBoundsAndProtectsLockedOrigins() throws {
+        XCTAssertEqual(WebsiteFaviconAssetStore.Limits.production, .init(
+            maximumOrigins: 256,
+            maximumImageBytes: 64 * 1024,
+            maximumStoreBytes: 16 * 1024 * 1024
+        ))
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabs-Favicon-Capacity-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let limits = WebsiteFaviconAssetStore.Limits(
+            maximumOrigins: 3,
+            maximumImageBytes: 64,
+            maximumStoreBytes: 1_024
+        )
+        let store = WebsiteFaviconAssetStore(directoryURL: directory, limits: limits)
+        func record(_ host: String, locked: Bool = false, bytes: Int = 1) -> WebsiteFaviconAssetStore.Record {
+            WebsiteFaviconAssetStore.Record(
+                originKey: "https://\(host)",
+                imageData: Data(repeating: 1, count: bytes),
+                pixelSHA256: String(repeating: "a", count: 64),
+                priority: 0,
+                kind: "icon",
+                isLocked: locked
+            )
+        }
+
+        XCTAssertEqual(store.save(record("locked.example.test", locked: true)), .saved)
+        XCTAssertEqual(store.save(record("first.example.test")), .saved)
+        XCTAssertEqual(store.save(record("second.example.test")), .saved)
+        _ = store.load(originKey: "https://first.example.test")
+        XCTAssertEqual(store.save(record("third.example.test")), .saved)
+        XCTAssertTrue(storeHasRecord(store, origin: "https://locked.example.test"))
+        XCTAssertTrue(storeHasRecord(store, origin: "https://first.example.test"))
+        XCTAssertFalse(storeHasRecord(store, origin: "https://second.example.test"))
+        XCTAssertEqual(store.setLocked(true, originKey: "https://first.example.test"), .saved)
+        XCTAssertEqual(store.setLocked(true, originKey: "https://third.example.test"), .saved)
+        XCTAssertEqual(store.save(record("fourth.example.test")), .capacityExceeded)
+        XCTAssertEqual(store.save(record("oversized.example.test", bytes: 65)), .capacityExceeded)
+
+        let aggregateDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabs-Favicon-Aggregate-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: aggregateDirectory) }
+        let aggregateStore = WebsiteFaviconAssetStore(
+            directoryURL: aggregateDirectory,
+            limits: .init(maximumOrigins: 10, maximumImageBytes: 64, maximumStoreBytes: 640)
+        )
+        XCTAssertEqual(aggregateStore.save(record("aggregate-locked.example.test", locked: true, bytes: 64)), .saved)
+        for index in 0..<8 {
+            XCTAssertEqual(
+                aggregateStore.save(record("aggregate-\(index).example.test", bytes: 64)),
+                .saved
+            )
+        }
+        let files = try FileManager.default.contentsOfDirectory(
+            at: aggregateDirectory,
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: []
+        ).filter { $0.pathExtension == "json" }
+        let totalBytes = files.reduce(0) { total, file in
+            total + ((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
+        XCTAssertLessThanOrEqual(totalBytes, 640)
+        XCTAssertTrue(storeHasRecord(aggregateStore, origin: "https://aggregate-locked.example.test"))
+    }
+
+    func testFaviconContextMenuOffersLockUnlockAndExplicitSelection() {
+        let uniqueURL = URL(string: "https://menu-\(UUID().uuidString).example.test/")!
+        let tab = ExternalWebAppTabView(
+            slotID: UUID(),
+            faviconLoader: { _, completion in completion(nil) }
+        )
+        tab.update(profile: makeProfile(url: uniqueURL.absoluteString), isActive: false, isResident: false)
+        let menuItems = tab.makeContextMenu().items
+        let lock = menuItems.first { $0.title == "Lock Current Icon" }
+        let unlock = menuItems.first { $0.title == "Unlock Icon" }
+        let refresh = menuItems.first { $0.title == "Refresh & Choose Icon" }
+        XCTAssertNotNil(lock)
+        XCTAssertNotNil(unlock)
+        XCTAssertNotNil(refresh)
+        XCTAssertTrue(menuItems.contains { $0.title == "Shared by tabs on this website" })
+        XCTAssertFalse(lock?.isEnabled ?? true)
+        XCTAssertFalse(unlock?.isEnabled ?? true)
+        XCTAssertTrue(refresh?.isEnabled ?? false)
+    }
+
+    private func storeHasRecord(_ store: WebsiteFaviconAssetStore, origin: String) -> Bool {
+        if case .record = store.load(originKey: origin) { return true }
+        return false
+    }
+
     private func load(_ provider: WebsiteFaviconProvider, from url: URL) async -> NSImage? {
         await withCheckedContinuation { continuation in
             provider.load(for: url) { continuation.resume(returning: $0) }
@@ -1361,17 +1977,23 @@ final class FaviconRecoveryTests: XCTestCase {
         )
     }
 
-    private func fixtureImage(color: NSColor) -> NSImage {
-        let image = NSImage(size: NSSize(width: 16, height: 16))
+    private func fixtureImage(
+        color: NSColor,
+        size: NSSize = NSSize(width: 16, height: 16)
+    ) -> NSImage {
+        let image = NSImage(size: size)
         image.lockFocus()
         color.setFill()
-        NSRect(origin: .zero, size: image.size).fill()
+        NSRect(origin: .zero, size: size).fill()
         image.unlockFocus()
         return image
     }
 
-    private func fixtureImageData(color: NSColor) throws -> Data {
-        let tiff = try XCTUnwrap(fixtureImage(color: color).tiffRepresentation)
+    private func fixtureImageData(
+        color: NSColor,
+        size: NSSize = NSSize(width: 16, height: 16)
+    ) throws -> Data {
+        let tiff = try XCTUnwrap(fixtureImage(color: color, size: size).tiffRepresentation)
         let bitmap = try XCTUnwrap(NSBitmapImageRep(data: tiff))
         return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
     }
