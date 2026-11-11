@@ -1,77 +1,36 @@
-# FloatTabs Agent Instructions
+# FloatTabs — Project Context and Technical Boundaries
 
-FloatTabs is a native macOS browser container. Engineering priority:
-**user experience / stability → runtime correctness → diagnosability → governance**.
-Do not expand governance, telemetry, or generic frameworks ahead of product needs.
+FloatTabs is a native macOS floating Web App container, not a general-purpose browser. Product priorities are user experience, stability, runtime correctness, and diagnosability. Do not expand instrumentation or abstraction at the expense of those product goals.
 
-CONTROL_MODE: ISSUE_CONTROL
-ISSUE_APPROVERS: Lost0rz
-ISSUE_DELEGATED_APPROVAL: ENABLED
-ISSUE_WEB_SPEC_AUTHORING: ENABLED
+This file describes **FloatTabs-specific** source boundaries and safety constraints. The installed Engineering Governance plugin owns generic task/workflow authorization, Skill routing, verification policy, reviews, delivery, and lifecycle. This file defines no governance control mode, approver, delegation permission, or CI test-selection procedure.
 
-## Project-specific authority boundaries
+## Documentation and source navigation
 
-The installed Engineering Governance plugin is the sole owner of reusable engineering workflow. FloatTabs owns only its control-mode/approver opt-ins, product contracts, Domain boundaries, Runtime evidence needs, CI environment and data-safety policy. Do not copy generic approval, handoff, audit, Git/PR/worktree or verification procedures into this file; plugin updates must not require repeating those procedures in FloatTabs.
+- `docs/README.md` indexes currently applicable product/architecture contracts, historical plans, design evidence, and supersession.
+- `docs/architecture/DOMAIN_MAP.md` maps Domains, canonical writers, implementation entry points, and related tests.
+- Historical Stage/WP plans, dated audits, acceptance reports, and archived files are evidence from their original scope, not current implementation facts. Verify current behavior against applicable bounded contracts and source/tests.
 
-Real macOS runtime, installed app, TCC, multi-display and interaction claims require evidence from the actual Mac. Remote repository inspection alone cannot prove local behavior. Historical `CURRENT_TASK.md` and `CURRENT_STATUS.md` files are not active project controls.
+## Canonical product ownership
 
-## Documentation authority
+- **Tabs / Profiles:** own persistent Tab/Profile identity, selection, order, and configuration projection, independent of live Runtime residency.
+- **Web:** owns `WKWebView` creation, navigation, observer lifetime, health, and recovery. `SlotLifecycleCoordinator` alone decides lifecycle/reclaim policy. `WebViewPool` implements Runtime creation, retention, release, and restore; it must not introduce an independent reclaim policy.
+- **Panel / Window / Fullscreen:** own presentation and exact selected-Slot/window synchronization.
+- **Focus / Input:** own native/DOM focus and command/event routing; stale Runtime callbacks must not focus or present a different Slot.
+- **Persistence:** owns configuration, Browser Profile/Session state, and recovery material independently of WebView lifetime.
+- **Attention:** consumes bounded Web/Slot generation facts without becoming a Runtime or persistence writer.
+- **Diagnostics:** records bounded observations and privacy-safe evidence; it is not a second source of product truth.
 
-Consult `docs/README.md` before using historical plans/architecture/design/validation files. Use `docs/architecture/DOMAIN_MAP.md` for source/domain navigation. Stage-numbered plans, dated audits, old release records and archived documents are historical evidence by default, not a parallel active authority. An applicable current product contract retains its bounded authority; do not promote historical claims into current runtime facts.
+Preserve single-writer state ownership. Do not conceal Runtime defects by resetting persistence, forcing unrelated reloads, or silently replacing user configuration.
 
-## Domain / Authority boundaries
+## FloatTabs Runtime and platform constraints
 
-Use `docs/architecture/DOMAIN_MAP.md` for navigation. Key durable boundaries:
+- Bind incident evidence, when available, to build/source identity, Slot and Session, WebView/Runtime generation, navigation generation, timestamps, and recovery request/outcome. Do not combine stale generations into one incident.
+- A successful reload, reset, or restart proves a recovery boundary, not a WebKit root cause. Unsupported causal claims remain `ROOT CAUSE UNKNOWN`.
+- Real macOS/WebKit behavior, TCC, multi-display focus, installed app provenance, and user interaction need evidence from an actual Mac; repository or simulated browser observations cannot establish those runtime facts.
+- Public WebKit APIs cannot reliably attribute all WebContent/GPU process memory to FloatTabs. Runtime count must not be represented as a measured aggregate GiB footprint.
 
-- **Tabs** own Tab/Profile identity, selection, ordering, and configuration projection.
-- **Web** owns `WKWebView` runtime, navigation, observer/task lifecycle, health and recovery. `SlotLifecycleCoordinator` is the sole lifecycle policy/reclaim decision writer; `WebViewPool` owns Runtime creation/retention/release/restore mechanisms, not an independent policy.
-- **Panel / Window / Fullscreen** own presentation and window synchronization.
-- **Focus / Input** own native/DOM focus and command/event routing.
-- **Persistence** owns durable user configuration, Browser Profile/Session data and recovery material independently of WKWebView Runtime residence.
-- **Speech / Attention** consume bounded runtime/content signals; they do not become Tab/Web authorities.
-- **Diagnostics** record evidence; logs do not become product truth or root-cause authority.
+## Project CI environment and data safety
 
-Keep one writer per canonical state. Do not use persistence to hide runtime bugs or reload to hide runtime-ownership problems.
-
-## Runtime / incident evidence
-
-Keep separate:
-
-- symptom / observation;
-- recovery behavior;
-- causal evidence;
-- experimental mitigation;
-- production fix.
-
-For incidents, correlate evidence where available by source/build identity, Slot, session, runtime generation/WebView instance, navigation generation, timestamps, and recovery request/result.
-
-`reload fixed it`, `reset fixed it`, or `restart fixed it` identifies a recovery boundary only. It does not prove root cause.
-
-If evidence is insufficient, preserve:
-
-`ROOT CAUSE UNKNOWN`
-
-Do not combine stale events from different runtime/navigation generations as one incident.
-
-## Project-specific verification and acceptance
-
-- Validate affected `WKWebView` lifecycle/navigation, observer cleanup, runtime recovery, window/fullscreen, focus/event monitoring, persistence/migration and canonical-writer boundaries with evidence appropriate to the risk. Routine changes do not by default demand all test suites.
-- Real macOS interaction/runtime acceptance is human-owned where the applicable product contract requires it. Deterministic browser automation, including Playwright, remains permitted, but AI-driven clicks/screenshots cannot replace required human UI acceptance.
-
-## CI execution
-
-FloatTabs macOS CI is intended to execute on the user's local Apple Silicon self-hosted runner while GitHub Actions provides scheduling and status. Required macOS jobs should target the established labels:
-
-`[self-hosted, macOS, ARM64, mac-mini-ci]`
-
-Do not silently switch required CI back to a GitHub-hosted `macos-*` runner unless the active task explicitly authorizes that fallback.
-
-Because `pull_request` workflows do not run while the PR has a merge conflict, a task waiting on required PR CI must first ensure the PR is mergeable against the current base. Treat `workflow runs = 0` together with a conflicting PR as a trigger-layer problem, not as evidence that the self-hosted runner is offline.
-
-For this public repository, self-hosted CI must not execute untrusted fork PR code by default. Gate self-hosted PR jobs to same-repository heads unless a separately reviewed security policy authorizes broader execution.
-
-## Product-data safety
-
-Browser Profiles, Web App Slot configuration, persisted website/session data, preferences, backups, and recovery material are user/product data.
-
-Do not delete/reset them or replace unreadable persisted configuration with an empty fallback merely to recover runtime behavior unless the active task explicitly authorizes that behavior and its data-loss implications.
+- Product macOS builds run on Apple Silicon. The established self-hosted runner labels are `[self-hosted, macOS, ARM64, mac-mini-ci]`. Runner definitions and test commands live in `.github/workflows/` and `tools/ci/`, not in this file.
+- The repository is public: untrusted fork PR code must not run on the private self-hosted Mac runner.
+- Browser Profiles, Slot configuration, website/session data, preferences, backups, and recovery material are user data. Runtime recovery or diagnostics must not delete them, or turn unreadable persistent configuration into an empty fallback, without an explicit product/data-loss decision.

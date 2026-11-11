@@ -1,13 +1,17 @@
 ---
-name: Governed engineering task (plugin-owned)
-about: Discovery entry only; the installed Engineering Governance plugin owns the actual Issue specification.
+name: Engineering task (optional)
+about: Optional task discovery; the installed Engineering Governance plugin owns task specification and authorization
 title: "[ENGINEERING] "
 labels: []
 assignees: []
 ---
 
-> **Draft placeholder, not executable authorization.**
+> **Optional task description, not authorization.**
 >
-> Use the installed Engineering Governance `project-governance` capability to generate the current supported Issue specification and approval record. Replace this placeholder before requesting execution. FloatTabs does not maintain a second Issue schema, approval procedure, handoff or verification workflow here.
->
-> Repository-specific policies: [FloatTabs AGENTS.md](https://github.com/Lost0rz/FloatTabs/blob/main/AGENTS.md).
+> Describe the FloatTabs objective, affected area, expected behavior, and project-specific constraints below. The installed Engineering Governance plugin decides whether a GitHub Issue/specification or an authenticated current-session task is the appropriate authority. This repository template defines no separate approval, delegation, verification, handoff, or delivery rules.
+
+## Objective
+
+## Relevant FloatTabs components / contracts
+
+## Expected behavior and evidence

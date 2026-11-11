@@ -60,5 +60,5 @@ macOS 14+ public inactive scheduling is a WebKit-owned mechanism, not a second a
 - WP0 controlled evidence established resident revisit was much quicker than nonresident cold restore; it did not establish a production GiB budget.
 - WP1 unified restoring-presentation design was the earlier phase. Branch #195 later narrowed the corrective; do not read old WP1 statements as present write authority.
 - WP2–WP4 policy/tuning are **not** implicitly authorized by this index or prior phase plans. Each needs its own current task authority/gates.
-- Product-facing changes need risk-proportional machine checks and explicit human acceptance when required. No AI-driven UI smoke is a human verdict.
+- Architecture contracts define the product behavior to validate. Generic verification tiers, audit independence, and acceptance workflow belong to the installed Engineering Governance plugin.
 - The accepted version/diff, not this document's date, determines actual implementation readiness.

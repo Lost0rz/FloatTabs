@@ -1,6 +1,8 @@
 # FloatTabs — Documentation Authority Index
 
-This file is a **project-document router**, not a workflow, task authorization or live progress database. [AGENTS.md](../AGENTS.md) owns FloatTabs-specific policy and declares `ISSUE_CONTROL`; the installed Engineering Governance plugin owns generic approval, handoff, verification and delivery procedures. The selected approved GitHub Issue owns an active task; GitHub source, PR, CI and release records establish observed delivery state.
+This is the **FloatTabs document index**, not a workflow, permission selector, or live progress database. [AGENTS.md](../AGENTS.md) contains only project-specific product/architecture/environment/data boundaries. The installed Engineering Governance plugin owns reusable engineering workflow, task selection and authorization, Skill routing, review, verification, delivery, and lifecycle policy. An independently selected task authority is established through that plugin and the current host; no project document or historical Issue grants new execution permission.
+
+GitHub source, PR, CI and release records establish observed repository delivery state, not task authority.
 
 ## Project document owners
 
