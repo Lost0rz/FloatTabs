@@ -1,13 +1,11 @@
 # FloatTabs Runtime Lifecycle & Memory Contract V1
 
-**Status:** `ACCEPTED / FROZEN`
+**Status:** `HISTORICAL ACCEPTED 2026-10-31 TECHNICAL BASELINE; SUPERSEDED BY LATER CONTRACTS`
 **Accepted:** `2026-10-31`
 **Program:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`
 **Product baseline:** `main` after PR #162 merge (`26d1669198a6f94faa769fb27d2cd00d0fcd1184`)
 
-This document is the accepted architecture contract for the Runtime Lifecycle / Memory program. It defines the target ownership model, phase order, invariants, gates, and non-goals. It does not claim that later phases are already implemented.
-
-A material change to this contract requires explicit task reconciliation in `CURRENT_TASK.md` and an intentional contract revision. Historical task cards, chat summaries, PR descriptions, and local notes do not override this contract.
+This document records the original Runtime Lifecycle/Memory architecture, phase dependencies, product invariants and historical verification rationale. Later accepted contracts and current source/tests control current product behavior; this historical baseline neither selects a task nor defines current workflow.
 
 ## 1. Problem statement
 
@@ -312,12 +310,9 @@ The program does not authorize:
 
 Implementation proceeds in this dependency order unless this contract is explicitly revised.
 
-### Phase 0 — Authority / contract freeze
+### Phase 0 — Original architecture baseline
 
-- reconcile PR #162 as merged;
-- align `CURRENT_STATUS.md` / `CURRENT_TASK.md`;
-- publish this contract and architecture navigation;
-- authorize only the next phase's audit, not broad product mutation.
+The Phase 0 historical evidence covered PR #162 integration, architecture documentation and a scoped initial investigation. It does not establish a present construction permission.
 
 ### Phase 1 — Safe Hibernate + Restore
 
@@ -349,26 +344,9 @@ Goal: make reclaimed Slot selection feel immediate without keeping heavyweight W
 
 Research only until independently proven and explicitly authorized.
 
-## 12. Per-phase development gate
+## 12. Historical stage dependencies
 
-Every phase after Phase 0 uses this sequence:
-
-```text
-READ AUTHORITIES
-  -> FOCUSED READ-ONLY AUDIT
-  -> FREEZE EXACT PHASE SCOPE / FILES / TESTS / STOP CONDITIONS
-  -> UPDATE CURRENT_TASK / CURRENT_STATUS WHEN MATERIAL
-  -> ISSUE CONCISE EXECUTION CARD
-  -> LOCAL IMPLEMENTATION
-  -> FOCUSED VERIFICATION
-  -> INDEPENDENT WEB AUDIT
-  -> MERGE / CLOSEOUT
-  -> CONTROL ALIGNMENT GATE
-```
-
-The execution card is intentionally concise and must not duplicate the full repository task contract. Repository authority remains in the control files and this accepted contract.
-
-No implementation phase may be skipped directly from high-level design to code mutation.
+The original phases depended on a safe release/restore primitive, durable unread separation, and bounded evidence before introducing more aggressive Runtime policy. Those dependencies are technical rationale only; the legacy execution-card, Task/Status, audit sequencing and merge-control procedure is retired.
 
 ## 13. Phase 1 pre-implementation audit requirements
 
@@ -386,7 +364,7 @@ Before any Phase 1 product mutation, the audit must establish at minimum:
 10. a benchmark plan comparing resident counts and memory before release, after release, and after restore;
 11. explicit STOP conditions if release fails to reclaim memory or restore breaks session/profile invariants.
 
-The output of that audit is the exact Phase 1 construction scope and a concise local execution card.
+This is the original Phase 1 evidence checklist, not present task authorization or a compulsory handoff card.
 
 ## 14. Verification matrix for the program
 
@@ -407,23 +385,8 @@ At relevant gates, cover at least:
 
 Memory evidence should distinguish FloatTabs host footprint from observable WebKit helper/content footprint where possible. Do not assign a child-process measurement to a specific Slot without proof.
 
-## 15. Acceptance / change control
+## 15. Product compatibility and supersession
 
-This contract is `FROZEN` for the current program.
+The historical design emphasized single-writer lifecycle policy, durable Browser Profile/session state, correct Attention/unread handoff, exact notification routing and supported WebKit interfaces. New product semantics should be described in a bounded current technical contract and checked against implementation evidence.
 
-A proposed change to:
-
-- phase order;
-- ownership boundaries;
-- persistence/data-safety rules;
-- Attention/unread handoff semantics;
-- notification routing semantics;
-- prohibited shortcuts;
-- benchmark/STOP gates;
-
-requires:
-
-1. focused evidence;
-2. explicit reconciliation in `CURRENT_TASK.md`;
-3. an updated/revisioned contract;
-4. no product mutation under the changed assumption until the revised contract is accepted.
+This V1 record does not define a current `CURRENT_TASK.md` reconciliation, approval procedure, audit gate, merge permission or release workflow.

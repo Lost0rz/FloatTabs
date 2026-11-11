@@ -2,11 +2,11 @@
 
 **Program:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Phase:** `7 — Automatic Lifecycle Simplification + Legacy Residency Retirement`  
-**Status:** `ACCEPTED / FROZEN / IMPLEMENTATION ACTIVE / CORRECTIVE`  
+**Status:** `HISTORICAL ACCEPTED PHASE 7 IMPLEMENTATION CONTRACT; NOT A LIVE TASK`  
 **Parent contract:** `FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`  
 **Execution baseline:** `main@54f2e43b0fbc224affa52d9662ac2ba5aa5b963c`
 
-This document freezes the Phase 7 product mutation boundary. Product construction is authorized by `CURRENT_TASK.md` after the completed predecessor gate.
+This document records the original Phase 7 product transition from Hot/Warm/Cold to Automatic / Keep Loaded. Prior implementation gates, HEAD references and correction statuses describe the historical phase only; they are not current task authorization.
 
 ## 1. Objective
 
@@ -394,16 +394,8 @@ STOP and reconcile if implementation requires:
 - material production files outside Section 9;
 - release/version work.
 
-## 15. Execution state
+## 15. Historical execution snapshot
 
-```text
-PHASE7_CONTRACT=ACCEPTED_FROZEN
-PHASE7_PRODUCT_IMPLEMENTATION=ACTIVE_CORRECTIVE
-PREDECESSOR_PR187=MERGED
-CURRENT_PRODUCT_HEAD=9118b79cfee7e7a1a065ba5e2e82dca9ad6e19fe
-CURRENT_BUILD_EVIDENCE=QA_DMG_639_RELEASE_COMPILE_FAIL_STALE_COLD_CALLBACK
-NEXT_REQUIRED_GATE=BOUNDED_CORRECTIVE_THEN_MACHINE_VERIFICATION
-PROGRAM_HUMAN_ACCEPTANCE=PENDING
-```
+The Phase 7 record originally reported PR #187 merged, product HEAD `9118b79cfee7e7a1a065ba5e2e82dca9ad6e19fe`, and QA DMG #639 detecting a stale Cold callback compilation error. These are **point-in-time observations**, not current build failures, required workflow gates or work authorization.
 
-Continue the frozen Phase 7 objective through bounded corrective, machine verification, fresh exact-diff self-audit and merge-readiness. Do not reopen the Hot/Warm/Cold product-design question unless a STOP condition produces contrary evidence.
+Current Automatic/Keep Loaded behavior and the resulting pressure policy are governed by [Runtime Lifecycle Policy V7](FloatTabs_Runtime_Lifecycle_Policy_V7.md) and current source/tests.
