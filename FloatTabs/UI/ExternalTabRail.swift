@@ -2431,6 +2431,15 @@ final class WebsiteFaviconProvider {
         return sorted.filter { seen.insert($0.resourceIdentity).inserted }
     }
 
+    private static func isValidDOMCandidate(
+        _ candidate: Candidate,
+        forPageOriginKey pageOriginKey: String
+    ) -> Bool {
+        guard let resourceOriginKey = originKey(for: candidate.url) else { return false }
+        guard resourceOriginKey != pageOriginKey else { return true }
+        return candidate.url.scheme?.lowercased() == "https"
+    }
+
     /// One stable subscriber per UI consumer. Repeating the call for the same
     /// consumer replaces its callback instead of accumulating stale waiters.
     func subscribe(
@@ -2513,7 +2522,7 @@ final class WebsiteFaviconProvider {
     func setDOMCandidates(_ candidates: [Candidate], for committedURL: URL) {
         guard let key = Self.originKey(for: committedURL) else { return }
         let normalized = Self.orderedCandidates(candidates)
-            .filter { Self.originKey(for: $0.url) == key }
+            .filter { Self.isValidDOMCandidate($0, forPageOriginKey: key) }
             .prefix(Self.maximumDeclaredCandidates)
         let next = Array(normalized)
         guard domCandidates[key] != next else { return }
@@ -2556,8 +2565,9 @@ final class WebsiteFaviconProvider {
         if let request = inFlight[key], request.resourceIdentity == targetIdentity {
             return
         }
-        // A newly committed DOM declaration is an identity-checked source.
-        // A changed resource at equal priority is also a real refresh request.
+        // DOM declarations belong to the committed page origin even when a
+        // valid HTTPS CDN serves the icon resource. A changed resource at
+        // equal priority is also a real refresh request.
         // The currently cached image remains visible until that request succeeds.
         inFlight.removeValue(forKey: key)?.task.cancel()
         scheduledRetries.removeValue(forKey: key)?.task.cancel()
@@ -2582,14 +2592,14 @@ final class WebsiteFaviconProvider {
                 continue
             }
 
-            // The DOM read belongs only to the current committed page origin.
-            // A different Tab home origin retains its own validated declarations
-            // and discovers its own resources through the bounded URLSession path.
+            // The DOM read belongs only to the current committed page identity;
+            // its icon resource may be served by a valid HTTPS CDN. A different
+            // Tab home origin retains its own declarations and resources.
             if key == committedOriginKey {
                 switch candidateReadResult {
                 case let .candidates(candidates):
                     let normalized = Self.orderedCandidates(candidates)
-                        .filter { Self.originKey(for: $0.url) == key }
+                        .filter { Self.isValidDOMCandidate($0, forPageOriginKey: key) }
                         .prefix(Self.maximumDeclaredCandidates)
                     storeDOMCandidates(Array(normalized), for: key)
                 case .noCandidates:

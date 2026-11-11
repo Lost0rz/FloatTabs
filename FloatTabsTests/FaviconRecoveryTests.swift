@@ -68,10 +68,10 @@ final class FaviconRecoveryTests: XCTestCase {
         XCTAssertEqual(candidates.last?.kind, .mask)
     }
 
-    func testDeclaredDOMCandidatesAreScopedToCommittedOrigin() async throws {
+    func testDeclaredHTTPSCDNCandidateLoadsForCommittedPageOrigin() async throws {
         let imageData = try fixtureImageData(color: .systemPurple)
         let pageURL = try XCTUnwrap(URL(string: "https://committed.example.test/page"))
-        let foreignIconURL = try XCTUnwrap(URL(string: "https://cdn.example.test/foreign.png"))
+        let cdnIconURL = try XCTUnwrap(URL(string: "https://cdn.example.test/brand/icon.png"))
         let sameOriginIconURL = try XCTUnwrap(URL(string: "https://committed.example.test/icon.png"))
         let loader = FaviconTestLoader { request, _ in
             (imageData, Self.response(for: request, status: 200, mimeType: "image/png"))
@@ -79,7 +79,7 @@ final class FaviconRecoveryTests: XCTestCase {
         let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
         provider.setDOMCandidates(
             [
-                .declared(foreignIconURL, sourceOrder: 0),
+                .declared(cdnIconURL, sourceOrder: 0),
                 .declared(sameOriginIconURL, sourceOrder: 1),
             ],
             for: pageURL
@@ -88,7 +88,10 @@ final class FaviconRecoveryTests: XCTestCase {
         let image = await load(provider, from: pageURL)
 
         XCTAssertNotNil(image)
-        XCTAssertEqual(loader.requests.compactMap(\.url), [sameOriginIconURL])
+        XCTAssertEqual(loader.requests.compactMap(\.url), [cdnIconURL])
+        XCTAssertTrue(loader.requests.allSatisfy {
+            !$0.httpShouldHandleCookies && $0.timeoutInterval == 8
+        })
     }
 
     func testTransparentDeclaredIconIsSkippedForNextVisibleCandidate() async throws {
@@ -308,23 +311,23 @@ final class FaviconRecoveryTests: XCTestCase {
         provider.cancel(consumerID: consumerID)
     }
 
-    func testCrossOriginDOMIconIsRejectedAndFallbackRequestsRemainCookieLess() async throws {
-        let imageData = try fixtureImageData(color: .systemBlue)
+    func testUnsafeCrossOriginAndNonHTTPDOMCandidatesAreRejectedCookieLess() async throws {
         let loader = FaviconTestLoader { request, _ in
-            if request.url?.host == "cdn.example.test" {
-                return (imageData, Self.response(for: request, status: 200, mimeType: "image/png"))
-            }
             return (Data(), Self.response(for: request, status: 404))
         }
-        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            retryWaiter: { _ in }
+        )
         let pageURL = try XCTUnwrap(URL(string: "https://chatgpt.example.test/c/123"))
-        let iconURL = try XCTUnwrap(URL(string: "https://cdn.example.test/brand/icon.png?v=4"))
+        let insecureCDNIconURL = try XCTUnwrap(URL(string: "http://cdn.example.test/brand/icon.png?v=4"))
         provider.setDOMCandidates(
             [
-                iconURL,
-                iconURL,
+                insecureCDNIconURL,
+                insecureCDNIconURL,
                 URL(string: "javascript:alert(1)")!,
                 URL(string: "data:image/png;base64,AA==")!,
+                URL(string: "file:///tmp/icon.png")!,
             ],
             for: pageURL
         )
@@ -333,7 +336,8 @@ final class FaviconRecoveryTests: XCTestCase {
 
         XCTAssertNil(image)
         XCTAssertFalse(loader.requests.isEmpty)
-        XCTAssertFalse(loader.requests.contains { $0.url == iconURL })
+        XCTAssertFalse(loader.requests.contains { $0.url == insecureCDNIconURL })
+        XCTAssertLessThanOrEqual(loader.requests.count, 14)
         XCTAssertTrue(loader.requests.allSatisfy {
             $0.url?.host == "chatgpt.example.test"
                 && !$0.httpShouldHandleCookies
@@ -548,14 +552,13 @@ final class FaviconRecoveryTests: XCTestCase {
         let tabHomeURL = try XCTUnwrap(URL(string: "https://bare-origin.example.test/home"))
         let committedURL = try XCTUnwrap(URL(string: "https://www.example.test/page"))
         let homeIconURL = try XCTUnwrap(URL(string: "https://bare-origin.example.test/home-icon.png"))
-        let committedIconURL = try XCTUnwrap(URL(string: "https://www.example.test/committed-icon.png"))
-        let foreignIconURL = try XCTUnwrap(URL(string: "https://cdn.example.test/shared-icon.png"))
+        let committedIconURL = try XCTUnwrap(URL(string: "https://cdn.example.test/shared-icon.png"))
         let loader = FaviconTestLoader { request, _ in
             let isFresh = request.cachePolicy == .reloadIgnoringLocalCacheData
             let data: Data
             switch request.url?.host {
             case "bare-origin.example.test": data = isFresh ? homeNewData : homeOldData
-            case "www.example.test": data = isFresh ? committedNewData : committedOldData
+            case "cdn.example.test": data = isFresh ? committedNewData : committedOldData
             default: data = committedNewData
             }
             return (data, Self.response(for: request, status: 200, mimeType: "image/png"))
@@ -582,10 +585,7 @@ final class FaviconRecoveryTests: XCTestCase {
         await fulfillment(of: [initial], timeout: 2)
 
         provider.refreshAfterManualReload(
-            candidateReadResult: .candidates([
-                .declared(committedIconURL),
-                .declared(foreignIconURL, sourceOrder: 1),
-            ]),
+            candidateReadResult: .candidates([.declared(committedIconURL)]),
             committedURL: committedURL,
             for: [committedURL, tabHomeURL]
         )
@@ -598,7 +598,10 @@ final class FaviconRecoveryTests: XCTestCase {
         }
         XCTAssertEqual(freshRequests.count, 2)
         XCTAssertEqual(Set(freshRequests.compactMap(\.url)), Set([homeIconURL, committedIconURL]))
-        XCTAssertFalse(loader.requests.contains { $0.url == foreignIconURL })
+        XCTAssertFalse(loader.requests.contains { $0.url?.host == "www.example.test" })
+        XCTAssertTrue(loader.requests.allSatisfy {
+            !$0.httpShouldHandleCookies && $0.timeoutInterval == 8
+        })
         XCTAssertEqual(tabImages.count, 2)
         XCTAssertEqual(menuImages.count, 2)
         XCTAssertNotEqual(tabImages[0]?.tiffRepresentation, tabImages[1]?.tiffRepresentation)
