@@ -111,14 +111,11 @@ Tests:
 
 - `FloatTabsTests/ChatGPTAttentionBridgeTests.swift`
 
-Control/documentation:
+Historical technical references:
 
-- `CURRENT_STATUS.md`
-- `CURRENT_TASK.md`
-- `docs/README.md`
 - `docs/architecture/README.md`
 - `docs/architecture/DOMAIN_MAP.md`
-- current V4 contract / this Phase 5 plan
+- the original V4 phase contract and this archived-in-place Phase 5 design
 
 No `WebViewPool`, `SlotLifecycleCoordinator`, persistence, Browser Profile, settings UI or release/version mutation is expected.
 

@@ -346,4 +346,4 @@ OPEN_EVIDENCE=REAL-MAC INTERACTIONSTATE READINESS SEQUENCE
 TASK_RECONCILIATION_REQUIRED=YES
 ```
 
-Before implementation, reconcile `CURRENT_TASK.md` from audit-only into a bounded Phase 6 implementation contract after explicit user authorization. The implementation contract must freeze the final readiness signal based on E1 evidence rather than guessing it.
+At the time of this audit, E1 evidence was still needed to choose a public, bounded readiness signal. The legacy Task reconciliation and implementation-approval instructions were specific to that historical session; they do not apply to present work.
