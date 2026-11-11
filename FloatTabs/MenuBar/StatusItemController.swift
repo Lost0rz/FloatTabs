@@ -61,6 +61,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         URL,
         @escaping (NSImage?) -> Void
     ) -> Void
+    typealias FaviconCancelHandler = @MainActor (UUID) -> Void
 
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
@@ -83,10 +84,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let onQuit: () -> Void
     private let preferencesStore: AppPreferencesStore
     private let loadFavicon: FaviconLoadHandler
+    private let cancelFavicon: FaviconCancelHandler
+    private let faviconConsumerID: UUID
     private let diagnostics: any RuntimeDiagnosticRecording
     private let onToggleWithTrace: ((RuntimeDiagnosticTrace) -> Void)?
     private var selectedFaviconOriginKey: String?
     private var selectedFaviconImage: NSImage?
+    private var selectedFaviconLoaded = false
+    private var selectedFaviconRequested = false
+    private var selectedFaviconRequestGeneration: UInt64 = 0
     private var latestActiveWebAppName: String?
     private(set) var attentionPresentation = StatusItemAttentionPresentation.resolve(
         unreadCount: 0,
@@ -133,6 +139,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         onQuit: @escaping () -> Void,
         preferencesStore: AppPreferencesStore = AppPreferencesStore(),
         faviconLoader: FaviconLoadHandler? = nil,
+        faviconCanceller: FaviconCancelHandler? = nil,
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         onToggleWithTrace: ((RuntimeDiagnosticTrace) -> Void)? = nil
     ) {
@@ -145,8 +152,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         self.preferencesStore = preferencesStore
         self.diagnostics = diagnostics
         self.onToggleWithTrace = onToggleWithTrace
+        let faviconConsumerID = UUID()
+        self.faviconConsumerID = faviconConsumerID
         self.loadFavicon = faviconLoader ?? { url, completion in
-            WebsiteFaviconProvider.shared.load(for: url, completion: completion)
+            WebsiteFaviconProvider.shared.subscribe(
+                for: url,
+                consumerID: faviconConsumerID,
+                completion: completion
+            )
+        }
+        self.cancelFavicon = faviconCanceller ?? {
+            WebsiteFaviconProvider.shared.cancel(consumerID: $0)
         }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -214,31 +230,43 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         guard let faviconURL,
               let originKey = Self.faviconOriginKey(for: faviconURL) else {
+            cancelFavicon(faviconConsumerID)
+            selectedFaviconRequestGeneration &+= 1
             selectedFaviconOriginKey = nil
             selectedFaviconImage = nil
+            selectedFaviconLoaded = false
+            selectedFaviconRequested = false
             redrawStatusImage()
             return
         }
 
-        // The menu bar favicon is origin-scoped. A path/query commit within
-        // the same site must keep the current image and its in-flight request;
-        // only a cross-origin selection invalidates the previous projection.
-        if selectedFaviconOriginKey == originKey {
-            return
+        if selectedFaviconOriginKey != originKey {
+            selectedFaviconRequestGeneration &+= 1
+            selectedFaviconOriginKey = originKey
+            selectedFaviconImage = nil
+            selectedFaviconLoaded = false
+            selectedFaviconRequested = false
+            // Do not leave the previous site's image visible while this
+            // origin's favicon is loading.
+            redrawStatusImage()
         }
 
-        selectedFaviconOriginKey = originKey
-        // Never leave the previous site's favicon visible while a newly selected
-        // origin is loading. The shared provider normally returns immediately from
-        // the same cache already populated by the tab rail.
-        selectedFaviconImage = nil
-        redrawStatusImage()
+        // A stable consumer subscription remains attached through failure
+        // cooldowns. Provider retries no longer depend on this UI method being
+        // called again by an unrelated status or badge update.
+        guard !selectedFaviconLoaded, !selectedFaviconRequested else { return }
+        selectedFaviconRequested = true
+        let requestGeneration = selectedFaviconRequestGeneration
         loadFavicon(faviconURL) { [weak self] image in
             guard let self,
                   Self.acceptsFaviconCompletion(
                       selectedOriginKey: self.selectedFaviconOriginKey,
                       completionOriginKey: originKey
-                  ) else { return }
+                  ),
+                  self.selectedFaviconRequestGeneration == requestGeneration else { return }
+            if image != nil {
+                self.selectedFaviconLoaded = true
+            }
             self.applyStatusImage(image)
         }
     }
@@ -332,6 +360,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func applyStatusImage(_ favicon: NSImage?) {
         selectedFaviconImage = favicon
         redrawStatusImage()
+        let outcome: WebsiteFaviconProvider.ProjectionOutcome = {
+            guard statusItem.button?.image != nil else { return .noImageDisplayed }
+            return favicon == nil ? .fallbackDisplayed : .iconDisplayed
+        }()
+        diagnostics.record(
+            event: "favicon.ui_projection",
+            level: outcome == .noImageDisplayed ? .warning : .notice,
+            subsystem: "favicon",
+            fields: [
+                "surface": .string("menu_bar"),
+                "outcome": .string(outcome.rawValue)
+            ]
+        )
     }
 
     private func redrawStatusImage() {

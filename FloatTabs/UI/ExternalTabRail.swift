@@ -1,8 +1,11 @@
 import AppKit
 import CoreImage
+import CryptoKit
 import Foundation
+import ImageIO
 import KeyboardShortcuts
 import QuartzCore
+import WebKit
 
 struct BrowserProfileMenuOption: Equatable {
     let id: UUID?
@@ -1975,30 +1978,760 @@ enum ExternalTabVisualPalette {
 }
 
 @MainActor
+final class WebsiteFaviconAssetStore {
+    struct Limits: Equatable {
+        let maximumOrigins: Int
+        let maximumImageBytes: Int
+        let maximumStoreBytes: Int
+
+        static let production = Limits(
+            maximumOrigins: 256,
+            maximumImageBytes: 64 * 1024,
+            maximumStoreBytes: 16 * 1024 * 1024
+        )
+    }
+
+    struct Record: Codable, Equatable {
+        static let currentVersion = 1
+
+        let version: Int
+        let originKey: String
+        let imageData: Data
+        let pixelSHA256: String
+        let priority: Int
+        let kind: String
+        var isLocked: Bool
+
+        init(
+            originKey: String,
+            imageData: Data,
+            pixelSHA256: String,
+            priority: Int,
+            kind: String,
+            isLocked: Bool
+        ) {
+            version = Self.currentVersion
+            self.originKey = originKey
+            self.imageData = imageData
+            self.pixelSHA256 = pixelSHA256
+            self.priority = priority
+            self.kind = kind
+            self.isLocked = isLocked
+        }
+    }
+
+    enum ReadResult {
+        case record(Record)
+        case missing
+        case corrupt
+        case unavailable
+    }
+
+    enum WriteResult: Equatable {
+        case saved
+        case capacityExceeded
+        case corruptExistingRecord
+        case invalidRecord
+        case unavailable
+    }
+
+    private struct FileEntry {
+        let url: URL
+        let size: Int
+        let modifiedAt: Date
+        let record: Record?
+    }
+
+    static let shared = WebsiteFaviconAssetStore(directoryURL: WebsiteFaviconAssetStore.defaultDirectoryURL)
+
+    private let directoryURL: URL?
+    private let fileManager: FileManager
+    private let limits: Limits
+    private let encoder: JSONEncoder
+    private let decoder = JSONDecoder()
+    private var memoryRecords: [String: Record] = [:]
+    private var memoryOrder: [String] = []
+    private var corruptOrigins: Set<String> = []
+
+    /// A nil directory is a bounded in-memory store for provider tests. The
+    /// production singleton uses the isolated Application Support directory.
+    init(
+        directoryURL: URL? = nil,
+        fileManager: FileManager = .default,
+        limits: Limits = .production
+    ) {
+        self.directoryURL = directoryURL
+        self.fileManager = fileManager
+        self.limits = limits
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        self.encoder = encoder
+    }
+
+    func load(originKey: String) -> ReadResult {
+        guard Self.isSafeOriginKey(originKey) else { return .corrupt }
+        if directoryURL == nil {
+            guard let record = memoryRecords[originKey] else { return .missing }
+            guard Self.isValid(record, for: originKey),
+                  record.imageData.count <= limits.maximumImageBytes else {
+                corruptOrigins.insert(originKey)
+                return .corrupt
+            }
+            memoryOrder.removeAll { $0 == originKey }
+            memoryOrder.append(originKey)
+            return .record(record)
+        }
+
+        let fileURL = Self.recordURL(for: originKey, in: directoryURL!)
+        guard fileManager.fileExists(atPath: fileURL.path) else { return .missing }
+        guard !corruptOrigins.contains(originKey),
+              let data = try? Data(contentsOf: fileURL),
+              let record = try? decoder.decode(Record.self, from: data),
+              Self.isValid(record, for: originKey),
+              record.imageData.count <= limits.maximumImageBytes else {
+            corruptOrigins.insert(originKey)
+            return .corrupt
+        }
+        try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: fileURL.path)
+        return .record(record)
+    }
+
+    func save(_ record: Record) -> WriteResult {
+        guard Self.isValid(record, for: record.originKey) else { return .invalidRecord }
+        guard record.imageData.count <= limits.maximumImageBytes else { return .capacityExceeded }
+        guard !corruptOrigins.contains(record.originKey) else { return .corruptExistingRecord }
+        guard let encoded = try? encoder.encode(record) else { return .invalidRecord }
+
+        guard let directoryURL else {
+            memoryRecords[record.originKey] = record
+            memoryOrder.removeAll { $0 == record.originKey }
+            memoryOrder.append(record.originKey)
+            while memoryRecords.count > limits.maximumOrigins {
+                guard let oldestUnlocked = memoryOrder.first(where: {
+                    memoryRecords[$0]?.isLocked == false
+                }) else {
+                    memoryRecords.removeValue(forKey: record.originKey)
+                    memoryOrder.removeAll { $0 == record.originKey }
+                    return .capacityExceeded
+                }
+                memoryRecords.removeValue(forKey: oldestUnlocked)
+                memoryOrder.removeAll { $0 == oldestUnlocked }
+            }
+            return .saved
+        }
+
+        do {
+            try fileManager.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: true
+            )
+            recoverInterruptedEvictions(in: directoryURL)
+        } catch {
+            return .unavailable
+        }
+
+        let targetURL = Self.recordURL(for: record.originKey, in: directoryURL)
+        let targetPath = targetURL.standardizedFileURL.path
+        let entries: [FileEntry]
+        do {
+            entries = try recordEntries(in: directoryURL)
+        } catch {
+            return .unavailable
+        }
+        let existingTarget = entries.first {
+            $0.url.standardizedFileURL.path == targetPath
+        }
+        if let existingTarget,
+           existingTarget.record == nil || existingTarget.record?.originKey != record.originKey {
+            corruptOrigins.insert(record.originKey)
+            return .corruptExistingRecord
+        }
+
+        var countAfterWrite = entries.count + (existingTarget == nil ? 1 : 0)
+        var bytesAfterWrite = entries.reduce(0) { $0 + $1.size }
+            - (existingTarget?.size ?? 0)
+            + encoded.count
+        var evictionCandidates = entries
+            .filter {
+                $0.url.standardizedFileURL.path != targetPath
+                    && $0.record?.isLocked == false
+            }
+            .sorted { $0.modifiedAt < $1.modifiedAt }
+        var evictions: [FileEntry] = []
+        while countAfterWrite > limits.maximumOrigins || bytesAfterWrite > limits.maximumStoreBytes {
+            guard !evictionCandidates.isEmpty else { return .capacityExceeded }
+            let entry = evictionCandidates.removeFirst()
+            evictions.append(entry)
+            countAfterWrite -= 1
+            bytesAfterWrite -= entry.size
+        }
+
+        var stagedEvictions: [(original: URL, staged: URL)] = []
+        for entry in evictions {
+            let stagedURL = directoryURL.appendingPathComponent(
+                ".evicting-\(UUID().uuidString)-\(entry.url.lastPathComponent)"
+            )
+            do {
+                try fileManager.moveItem(at: entry.url, to: stagedURL)
+                stagedEvictions.append((entry.url, stagedURL))
+            } catch {
+                restore(stagedEvictions)
+                return .unavailable
+            }
+        }
+
+        let previousTargetData = try? Data(contentsOf: targetURL)
+        do {
+            try encoded.write(to: targetURL, options: [.atomic])
+        } catch {
+            restore(stagedEvictions)
+            return .unavailable
+        }
+
+        do {
+            for item in stagedEvictions {
+                try fileManager.removeItem(at: item.staged)
+            }
+        } catch {
+            if let previousTargetData {
+                try? previousTargetData.write(to: targetURL, options: [.atomic])
+            } else {
+                try? fileManager.removeItem(at: targetURL)
+            }
+            restore(stagedEvictions.filter { fileManager.fileExists(atPath: $0.staged.path) })
+            return .unavailable
+        }
+        return .saved
+    }
+
+    func setLocked(_ isLocked: Bool, originKey: String) -> WriteResult {
+        guard case let .record(existing) = load(originKey: originKey) else {
+            return corruptOrigins.contains(originKey) ? .corruptExistingRecord : .invalidRecord
+        }
+        var updated = existing
+        updated.isLocked = isLocked
+        return save(updated)
+    }
+
+    func markCorrupt(originKey: String) {
+        corruptOrigins.insert(originKey)
+    }
+
+    func recordURL(forTesting originKey: String) -> URL? {
+        directoryURL.map { Self.recordURL(for: originKey, in: $0) }
+    }
+
+    private func recordEntries(in directoryURL: URL) throws -> [FileEntry] {
+        let urls = try fileManager.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
+            options: []
+        ).filter { $0.pathExtension == "json" }
+        return urls.map { url in
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            let size = values?.fileSize ?? ((try? Data(contentsOf: url).count) ?? 0)
+            let modifiedAt = values?.contentModificationDate ?? .distantPast
+            let data = try? Data(contentsOf: url)
+            let decoded = data.flatMap { try? decoder.decode(Record.self, from: $0) }
+            let record: Record? = decoded.flatMap { value -> Record? in
+                guard Self.isValid(value, for: value.originKey),
+                      Self.recordURL(for: value.originKey, in: directoryURL).lastPathComponent
+                        == url.lastPathComponent else {
+                    return nil
+                }
+                return value
+            }
+            return FileEntry(url: url, size: size, modifiedAt: modifiedAt, record: record)
+        }
+    }
+
+    private func restore(_ items: [(original: URL, staged: URL)]) {
+        for item in items.reversed() where fileManager.fileExists(atPath: item.staged.path) {
+            try? fileManager.moveItem(at: item.staged, to: item.original)
+        }
+    }
+
+    private func recoverInterruptedEvictions(in directoryURL: URL) {
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: nil,
+            options: []
+        ) else { return }
+        for file in files where file.lastPathComponent.hasPrefix(".evicting-") {
+            guard let data = try? Data(contentsOf: file),
+                  let record = try? decoder.decode(Record.self, from: data),
+                  Self.isValid(record, for: record.originKey) else {
+                continue
+            }
+            let target = Self.recordURL(for: record.originKey, in: directoryURL)
+            if fileManager.fileExists(atPath: target.path) {
+                try? fileManager.removeItem(at: file)
+            } else {
+                try? fileManager.moveItem(at: file, to: target)
+            }
+        }
+    }
+
+    private static func isValid(_ record: Record, for originKey: String) -> Bool {
+        record.version == Record.currentVersion
+            && record.originKey == originKey
+            && isSafeOriginKey(record.originKey)
+            && record.imageData.count <= Limits.production.maximumImageBytes
+            && record.pixelSHA256.count == 64
+            && record.pixelSHA256.allSatisfy(\.isHexDigit)
+            && ["icon", "appleTouch", "mask", "conventional"].contains(record.kind)
+    }
+
+    private static func isSafeOriginKey(_ value: String) -> Bool {
+        guard let components = URLComponents(string: value),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              components.host != nil,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil,
+              components.path.isEmpty || components.path == "/" else {
+            return false
+        }
+        return true
+    }
+
+    private static func recordURL(for originKey: String, in directoryURL: URL) -> URL {
+        let digest = SHA256.hash(data: Data(originKey.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return directoryURL.appendingPathComponent("\(digest).json", isDirectory: false)
+    }
+
+    private static var defaultDirectoryURL: URL {
+        let applicationSupport = (try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )) ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
+        return applicationSupport
+            .appendingPathComponent("FloatTabs", isDirectory: true)
+            .appendingPathComponent("Favicons-v1", isDirectory: true)
+    }
+}
+
+@MainActor
 final class WebsiteFaviconProvider {
     typealias DataLoader = @MainActor @Sendable (
         URLRequest
     ) async throws -> (Data, URLResponse)
+    typealias MonotonicClock = @MainActor @Sendable () -> TimeInterval
+    typealias RetryWaiter = @MainActor @Sendable (TimeInterval) async -> Void
+    typealias Completion = (NSImage?) -> Void
 
-    static let shared = WebsiteFaviconProvider()
+    enum DOMCandidateReadResult: Equatable {
+        case candidates([Candidate])
+        case noCandidates
+        case readFailed
+    }
+
+    enum DOMCandidateUpdateSource: Equatable {
+        case initialization
+        case pageNavigation
+
+        static func forDOMRead(
+            previousRuntimeIdentity: WebRuntimeDiagnosticIdentity?,
+            currentRuntimeIdentity: WebRuntimeDiagnosticIdentity
+        ) -> Self {
+            previousRuntimeIdentity == currentRuntimeIdentity ? .pageNavigation : .initialization
+        }
+    }
+
+    enum ProjectionOutcome: String, Equatable {
+        case iconDisplayed = "icon_displayed"
+        case fallbackDisplayed = "fallback_displayed"
+        case noImageDisplayed = "no_image_displayed"
+    }
+
+    private enum FailureStage: String, Hashable {
+        case noCandidates = "no_candidates"
+        case requestFailed = "request_failed"
+        case requestTimedOut = "request_timed_out"
+        case httpStatus = "http_status"
+        case htmlDecodeFailed = "html_decode_failed"
+        case imageDecodeFailed = "image_decode_failed"
+        case pixelNormalizationFailed = "pixel_normalization_failed"
+        case noVisiblePixels = "no_visible_pixels"
+    }
+
+    private enum CacheUpdateOutcome: String, Equatable {
+        case updated = "updated"
+        case memoryOnlyUpdated = "memory_only_updated"
+        case awaitingConfirmation = "awaiting_confirmation"
+        case sameVisualContent = "same_visual_content"
+        case locked = "locked"
+        case reusedSameResource = "reused_same_resource"
+        case retainedPrevious = "retained_previous"
+        case empty = "empty"
+        case failed = "failed"
+    }
+
+    enum IconControlResult: Equatable {
+        case changed
+        case unchanged
+        case unavailable
+        case capacityExceeded
+        case corruptStorage
+        case noAcceptedIcon
+        case fetchFailed
+
+        var succeeded: Bool {
+            self == .changed || self == .unchanged
+        }
+    }
+
+    struct IconControlState: Equatable {
+        let hasAcceptedIcon: Bool
+        let isLocked: Bool
+    }
+
+    private enum AcceptanceMode: Equatable {
+        case automatic
+        case explicitChoice
+    }
+
+    private enum CandidateFetchResult {
+        case fetched(FetchedFavicon)
+        case failed(FailureStage)
+    }
+
+    private struct FetchReport {
+        let favicon: FetchedFavicon?
+        let failureStages: Set<FailureStage>
+        let candidateCount: Int
+    }
+
+    private enum PageHTMLResult {
+        case loaded(String, URLResponse)
+        case failed(FailureStage)
+    }
+
+    struct Candidate: Equatable {
+        enum Kind: String, Equatable {
+            case icon
+            case appleTouch
+            case mask
+            case conventional
+
+            var preference: Int {
+                switch self {
+                case .icon: 0
+                case .appleTouch: 1
+                case .mask: 2
+                case .conventional: 3
+                }
+            }
+        }
+
+        let url: URL
+        let kind: Kind
+        let sizes: String
+        let type: String
+        let mediaSpecific: Bool
+        let sourceOrder: Int
+
+        var resourceIdentity: String {
+            guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                  let scheme = components.scheme?.lowercased(),
+                  let host = components.host?.lowercased() else {
+                return url.absoluteString
+            }
+            components.scheme = scheme
+            components.host = host
+            if components.port == (scheme == "https" ? 443 : 80) {
+                components.port = nil
+            }
+            components.fragment = nil
+            return components.string ?? url.absoluteString
+        }
+
+        var priority: Int {
+            let sizeRank: Int
+            let declaredSizes = sizes.lowercased().split(whereSeparator: \.isWhitespace)
+            if declaredSizes.contains("any") || declaredSizes.contains("32x32") {
+                sizeRank = 0
+            } else if declaredSizes.contains("16x16") {
+                sizeRank = 1
+            } else if declaredSizes.isEmpty {
+                sizeRank = 2
+            } else {
+                sizeRank = 3
+            }
+
+            let normalizedType = type.lowercased()
+            let typeRank: Int
+            if normalizedType == "image/png" || normalizedType == "image/svg+xml" {
+                typeRank = 0
+            } else if normalizedType == "image/x-icon"
+                || normalizedType == "image/vnd.microsoft.icon" {
+                typeRank = 1
+            } else if normalizedType.hasPrefix("image/") {
+                typeRank = 2
+            } else {
+                typeRank = 3
+            }
+
+            return kind.preference * 1_000
+                + (mediaSpecific ? 100 : 0)
+                + sizeRank * 10
+                + typeRank
+        }
+
+        static func conventional(_ url: URL, sourceOrder: Int = 0) -> Self {
+            Self(
+                url: url,
+                kind: .conventional,
+                sizes: "",
+                type: "",
+                mediaSpecific: false,
+                sourceOrder: sourceOrder
+            )
+        }
+
+        static func declared(_ url: URL, sourceOrder: Int = 0) -> Self {
+            Self(
+                url: url,
+                kind: .icon,
+                sizes: "",
+                type: "",
+                mediaSpecific: false,
+                sourceOrder: sourceOrder
+            )
+        }
+    }
+
+    private struct CachedFavicon {
+        let image: NSImage
+        let pixelSHA256: String
+        let priority: Int
+        let resourceIdentity: String?
+        let kind: Candidate.Kind
+        let isLocked: Bool
+    }
+
+    private struct FetchedFavicon {
+        let image: NSImage
+        let pixelSHA256: String
+        let priority: Int
+        let resourceIdentity: String
+        let kind: Candidate.Kind
+    }
+
+    private struct PendingFavicon {
+        let fetched: FetchedFavicon
+    }
+
+    private struct AcceptanceResult {
+        let cacheOutcome: CacheUpdateOutcome
+        let controlResult: IconControlResult?
+    }
+
+    private struct ConsumerDemand {
+        let originKey: String
+        var url: URL
+        var automaticallyRetries: Bool
+        var completion: Completion
+    }
+
+    private struct InFlightRequest {
+        let id: UUID
+        let resourceIdentity: String?
+        let acceptanceMode: AcceptanceMode
+        let task: Task<Void, Never>
+    }
+
+    private struct ScheduledRetry {
+        let id: UUID
+        let fireAt: TimeInterval
+        let task: Task<Void, Never>
+    }
+
+    static let shared = WebsiteFaviconProvider(assetStore: .shared)
+    private static let automaticRetryDelay: TimeInterval = 15
+    private static let retryBackoff: [TimeInterval] = [120, 240, 480, 900]
+    private static let maximumDeclaredCandidates = 8
+    private static let maximumDiscoveryPages = 2
+    private static let maximumCachedOrigins = 256
+    private static let maximumDOMCandidateOrigins = 128
+    private static let requestTimeout: TimeInterval = 8
+    private static let requestBudget: TimeInterval = 25
+    private static let faviconSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieAcceptPolicy = .never
+        return URLSession(configuration: configuration)
+    }()
 
     private let dataLoader: DataLoader
-    private var cache: [String: NSImage] = [:]
-    private var failedOrigins = Set<String>()
+    private let monotonicClock: MonotonicClock
+    private let retryWaiter: RetryWaiter
+    private let assetStore: WebsiteFaviconAssetStore
+    private weak var diagnosticRecorder: (any RuntimeDiagnosticRecording)?
+    private var cache: [String: CachedFavicon] = [:]
+    private var cacheOrder: [String] = []
+    private var pendingFavicons: [String: PendingFavicon] = [:]
+    private var domCandidates: [String: [Candidate]] = [:]
+    private var domCandidateOrder: [String] = []
+    private var demands: [UUID: ConsumerDemand] = [:]
+    private var oneShotCompletions: [String: [Completion]] = [:]
+    private var explicitChoiceCompletions: [
+        String: [(IconControlResult) -> Void]
+    ] = [:]
+    private var failureCycles: [String: Int] = [:]
+    private var cooldownUntil: [String: TimeInterval] = [:]
+    private var inFlight: [String: InFlightRequest] = [:]
+    private var scheduledRetries: [String: ScheduledRetry] = [:]
 
     init(
-        dataLoader: @escaping DataLoader = { request in
-            try await URLSession.shared.data(for: request)
-        }
+        dataLoader: DataLoader? = nil,
+        monotonicClock: @escaping MonotonicClock = {
+            ProcessInfo.processInfo.systemUptime
+        },
+        retryWaiter: @escaping RetryWaiter = { delay in
+            let nanoseconds = UInt64(max(delay, 0) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanoseconds)
+        },
+        diagnosticRecorder: (any RuntimeDiagnosticRecording)? = nil,
+        assetStore: WebsiteFaviconAssetStore? = nil
     ) {
-        self.dataLoader = dataLoader
+        self.dataLoader = dataLoader ?? { request in
+            try await Self.faviconSession.data(for: request)
+        }
+        self.monotonicClock = monotonicClock
+        self.retryWaiter = retryWaiter
+        self.diagnosticRecorder = diagnosticRecorder
+        self.assetStore = assetStore ?? WebsiteFaviconAssetStore()
+    }
+
+    func setDiagnosticRecorder(_ recorder: any RuntimeDiagnosticRecording) {
+        diagnosticRecorder = recorder
+    }
+
+    func recordProjection(_ outcome: ProjectionOutcome, surface: String) {
+        guard ["tab", "menu_bar"].contains(surface) else { return }
+        diagnosticRecorder?.record(
+            event: "favicon.ui_projection",
+            level: outcome == .noImageDisplayed ? .warning : .notice,
+            subsystem: "favicon",
+            fields: [
+                "surface": .string(surface),
+                "outcome": .string(outcome.rawValue)
+            ]
+        )
     }
 
     static func originKey(for url: URL) -> String? {
         guard let scheme = url.scheme?.lowercased(),
-              let host = url.host?.lowercased() else { return nil }
-        let port = url.port.map { ":\($0)" } ?? ""
+              scheme == "http" || scheme == "https",
+              let host = url.host?.lowercased(),
+              URLComponents(url: url, resolvingAgainstBaseURL: false)?.user == nil,
+              URLComponents(url: url, resolvingAgainstBaseURL: false)?.password == nil else {
+            return nil
+        }
+        let defaultPort = scheme == "https" ? 443 : 80
+        let port = url.port.flatMap { $0 == defaultPort ? nil : $0 }
+            .map { ":\($0)" } ?? ""
         return "\(scheme)://\(host)\(port)"
+    }
+
+    private static func candidate(_ candidate: Candidate, shouldReplace cached: CachedFavicon) -> Bool {
+        candidate.priority < cached.priority
+            || (candidate.priority == cached.priority
+                && candidate.resourceIdentity != cached.resourceIdentity)
+    }
+
+    /// Reads only icon link declarations from the loaded main document. The
+    /// isolated WebKit client world prevents this helper from calling any
+    /// page-provided JavaScript and returns no page content.
+    static func readDOMFaviconCandidates(
+        from webView: WKWebView,
+        completion: @escaping (DOMCandidateReadResult) -> Void
+    ) {
+        let script = #"""
+        (() => {
+          const records = Array.from(document.querySelectorAll("link[rel]"))
+            .map((link, sourceOrder) => {
+              const rel = (link.getAttribute("rel") || "").toLowerCase();
+              const tokens = rel.split(/\s+/).filter(Boolean);
+              const kind = tokens.includes("icon") ? "icon"
+                : tokens.includes("apple-touch-icon-precomposed") ? "appleTouch"
+                : tokens.includes("apple-touch-icon") ? "appleTouch"
+                : tokens.includes("mask-icon") ? "mask" : null;
+              const media = link.getAttribute("media") || "";
+              const matchesMedia = !media || (() => {
+                try { return window.matchMedia(media).matches; }
+                catch (_) { return false; }
+              })();
+              return {
+                href: link.href,
+                kind,
+                sizes: link.getAttribute("sizes") || "",
+                type: (link.getAttribute("type") || "").toLowerCase(),
+                mediaSpecific: false,
+                sourceOrder,
+                matchesMedia
+              };
+            })
+            .filter(item => item.kind && item.matchesMedia && /^https?:\/\//i.test(item.href));
+          const priority = item => {
+            const kindRank = { icon: 0, appleTouch: 1, mask: 2 }[item.kind] * 1000;
+            const sizes = item.sizes.toLowerCase().split(/\s+/).filter(Boolean);
+            const sizeRank = sizes.includes("any") || sizes.includes("32x32") ? 0
+              : sizes.includes("16x16") ? 1 : sizes.length === 0 ? 2 : 3;
+            const typeRank = item.type === "image/png" || item.type === "image/svg+xml" ? 0
+              : item.type === "image/x-icon" || item.type === "image/vnd.microsoft.icon" ? 1
+              : item.type.startsWith("image/") ? 2 : 3;
+            return kindRank + sizeRank * 10 + typeRank;
+          };
+          const seen = new Set();
+          const selected = records
+            .sort((a, b) => priority(a) - priority(b) || a.sourceOrder - b.sourceOrder)
+            .filter(item => seen.has(item.href) ? false : (seen.add(item.href), true))
+            .slice(0, 8);
+          return JSON.stringify(selected);
+        })()
+        """#
+        webView.evaluateJavaScript(script, in: nil, in: .defaultClient) { result in
+            completion(parseDOMCandidateReadResult(result))
+        }
+    }
+
+    static func parseDOMCandidateReadResult(
+        _ result: Result<Any, Error>
+    ) -> DOMCandidateReadResult {
+        guard case let .success(rawValue) = result,
+              let json = rawValue as? String,
+              let data = json.data(using: .utf8),
+              let records = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return .readFailed
+        }
+        let candidates = records.enumerated().compactMap { order, record -> Candidate? in
+            guard let href = record["href"] as? String,
+                  let url = URL(string: href),
+                  Self.originKey(for: url) != nil,
+                  let kind = Self.candidateKind(from: record["kind"] as? String) else {
+                return nil
+            }
+            return Candidate(
+                url: url,
+                kind: kind,
+                sizes: record["sizes"] as? String ?? "",
+                type: record["type"] as? String ?? "",
+                mediaSpecific: record["mediaSpecific"] as? Bool ?? false,
+                sourceOrder: record["sourceOrder"] as? Int ?? order
+            )
+        }
+        let ordered = Array(orderedCandidates(candidates).prefix(maximumDeclaredCandidates))
+        return ordered.isEmpty ? .noCandidates : .candidates(ordered)
     }
 
     static func faviconURL(for url: URL) -> URL? {
@@ -2020,8 +2753,18 @@ final class WebsiteFaviconProvider {
     /// link elements and http(s) URLs; it never executes page content.
     static func discoveredFaviconURLs(
         in html: String,
-        baseURL: URL
+        baseURL: URL,
+        limit: Int = 8
     ) -> [URL] {
+        discoveredFaviconCandidates(in: html, baseURL: baseURL, limit: limit).map(\.url)
+    }
+
+    static func discoveredFaviconCandidates(
+        in html: String,
+        baseURL: URL,
+        limit: Int = 8
+    ) -> [Candidate] {
+        guard limit > 0 else { return [] }
         let linkPattern = #"(?is)<link\b[^>]*>"#
         let attributePattern = #"(?i)([A-Za-z][A-Za-z0-9:_-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
         guard let linkRegex = try? NSRegularExpression(pattern: linkPattern),
@@ -2038,8 +2781,7 @@ final class WebsiteFaviconProvider {
             .flatMap { URL(string: $0, relativeTo: baseURL)?.absoluteURL }
             ?? baseURL
 
-        var result: [URL] = []
-        var seen = Set<String>()
+        var result: [Candidate] = []
         let htmlRange = NSRange(html.startIndex..<html.endIndex, in: html)
         for match in linkRegex.matches(in: html, range: htmlRange) {
             guard let tagRange = Range(match.range, in: html) else { continue }
@@ -2049,83 +2791,918 @@ final class WebsiteFaviconProvider {
                 .lowercased()
                 .split { $0.isWhitespace }
                 .map(String.init)
-            let isIcon = relTokens.contains("icon")
-                || relTokens.contains("apple-touch-icon")
-                || relTokens.contains("apple-touch-icon-precomposed")
-                || relTokens.contains("mask-icon")
-            guard isIcon,
+            guard let kind = Self.candidateKind(from: relTokens),
                   let href = attributes["href"],
                   let candidate = URL(string: href, relativeTo: documentBaseURL)?.absoluteURL,
                   isHTTPURL(candidate) else {
                 continue
             }
-            let key = candidate.absoluteString
-            guard seen.insert(key).inserted else { continue }
-            result.append(candidate)
+            result.append(Candidate(
+                url: candidate,
+                kind: kind,
+                sizes: attributes["sizes"] ?? "",
+                type: (attributes["type"] ?? "").lowercased(),
+                mediaSpecific: !(attributes["media"] ?? "").isEmpty,
+                sourceOrder: match.range.location
+            ))
+        }
+        return Array(Self.orderedCandidates(result).prefix(limit))
+    }
+
+    private static func candidateKind(from rawKind: String?) -> Candidate.Kind? {
+        switch rawKind?.lowercased() {
+        case "icon": .icon
+        case "appletouch", "apple-touch-icon", "apple-touch-icon-precomposed": .appleTouch
+        case "mask", "mask-icon": .mask
+        default: nil
+        }
+    }
+
+    private static func candidateKind(from relTokens: [String]) -> Candidate.Kind? {
+        if relTokens.contains("icon") { return .icon }
+        if relTokens.contains("apple-touch-icon-precomposed")
+            || relTokens.contains("apple-touch-icon") {
+            return .appleTouch
+        }
+        if relTokens.contains("mask-icon") { return .mask }
+        return nil
+    }
+
+    private static func orderedCandidates(_ candidates: [Candidate]) -> [Candidate] {
+        let sorted = candidates.filter { originKey(for: $0.url) != nil }.sorted {
+            if $0.priority != $1.priority { return $0.priority < $1.priority }
+            return $0.sourceOrder < $1.sourceOrder
+        }
+        var seen = Set<String>()
+        return sorted.filter { seen.insert($0.resourceIdentity).inserted }
+    }
+
+    private static func isValidDOMCandidate(
+        _ candidate: Candidate,
+        forPageOriginKey pageOriginKey: String
+    ) -> Bool {
+        guard let resourceOriginKey = originKey(for: candidate.url) else { return false }
+        guard resourceOriginKey != pageOriginKey else { return true }
+        return candidate.url.scheme?.lowercased() == "https"
+    }
+
+    /// One stable subscriber per UI consumer. Repeating the call for the same
+    /// consumer replaces its callback instead of accumulating stale waiters.
+    func subscribe(
+        for url: URL,
+        consumerID: UUID,
+        automaticallyRetries: Bool = true,
+        completion: @escaping Completion
+    ) {
+        guard let key = Self.originKey(for: url) else {
+            cancel(consumerID: consumerID)
+            completion(nil)
+            return
+        }
+
+        if demands[consumerID]?.originKey != key,
+           demands[consumerID] != nil {
+            cancel(consumerID: consumerID)
+        }
+        demands[consumerID] = ConsumerDemand(
+            originKey: key,
+            url: url,
+            automaticallyRetries: automaticallyRetries,
+            completion: completion
+        )
+        if let cached = cachedImage(for: key) {
+            completion(cached)
+            return
+        }
+        ensureRequest(for: key, fallbackURL: url)
+    }
+
+    func iconControlState(for url: URL) -> IconControlState {
+        guard let key = Self.originKey(for: url),
+              cachedFavicon(for: key) != nil,
+              let accepted = cache[key] else {
+            return IconControlState(hasAcceptedIcon: false, isLocked: false)
+        }
+        return IconControlState(hasAcceptedIcon: true, isLocked: accepted.isLocked)
+    }
+
+    func lockCurrentIcon(for url: URL) -> IconControlResult {
+        guard let key = Self.originKey(for: url),
+              let accepted = cachedFavicon(for: key) else {
+            return .noAcceptedIcon
+        }
+        guard !accepted.isLocked else { return .unchanged }
+        let result = persistLockState(true, accepted: accepted, originKey: key)
+        if result == .changed {
+            cache[key] = CachedFavicon(
+                image: accepted.image,
+                pixelSHA256: accepted.pixelSHA256,
+                priority: accepted.priority,
+                resourceIdentity: accepted.resourceIdentity,
+                kind: accepted.kind,
+                isLocked: true
+            )
         }
         return result
     }
 
-    func load(for url: URL, completion: @escaping (NSImage?) -> Void) {
+    func unlockIcon(for url: URL) -> IconControlResult {
+        guard let key = Self.originKey(for: url),
+              let accepted = cachedFavicon(for: key) else {
+            return .noAcceptedIcon
+        }
+        guard accepted.isLocked else { return .unchanged }
+        let result = persistLockState(false, accepted: accepted, originKey: key)
+        if result == .changed {
+            cache[key] = CachedFavicon(
+                image: accepted.image,
+                pixelSHA256: accepted.pixelSHA256,
+                priority: accepted.priority,
+                resourceIdentity: accepted.resourceIdentity,
+                kind: accepted.kind,
+                isLocked: false
+            )
+        }
+        return result
+    }
+
+    private func persistLockState(
+        _ isLocked: Bool,
+        accepted: CachedFavicon,
+        originKey: String
+    ) -> IconControlResult {
+        guard let imageData = Self.serializedImageData(accepted.image) else { return .unavailable }
+        let record = WebsiteFaviconAssetStore.Record(
+            originKey: originKey,
+            imageData: imageData,
+            pixelSHA256: accepted.pixelSHA256,
+            priority: accepted.priority,
+            kind: accepted.kind.rawValue,
+            isLocked: isLocked
+        )
+        switch assetStore.save(record) {
+        case .saved: return .changed
+        case .capacityExceeded: return .capacityExceeded
+        case .corruptExistingRecord: return .corruptStorage
+        case .invalidRecord, .unavailable: return .unavailable
+        }
+    }
+
+    func refreshAndChooseIcon(
+        for url: URL,
+        completion: @escaping (IconControlResult) -> Void
+    ) {
+        guard let key = Self.originKey(for: url) else {
+            completion(.unavailable)
+            return
+        }
+
+        pendingFavicons.removeValue(forKey: key)
+        let currentImage = cachedImage(for: key)
+        let displacedOneShots = oneShotCompletions.removeValue(forKey: key) ?? []
+        displacedOneShots.forEach { $0(currentImage) }
+        inFlight.removeValue(forKey: key)?.task.cancel()
+        scheduledRetries.removeValue(forKey: key)?.task.cancel()
+        cooldownUntil.removeValue(forKey: key)
+        explicitChoiceCompletions[key, default: []].append(completion)
+        startRequest(
+            for: key,
+            fallbackURL: url,
+            preferredURL: url,
+            initialCachePolicy: .reloadIgnoringLocalCacheData,
+            acceptanceMode: .explicitChoice
+        )
+    }
+
+    func setAutomaticRetryDemand(consumerID: UUID, enabled: Bool) {
+        guard var demand = demands[consumerID] else { return }
+        guard demand.automaticallyRetries != enabled else { return }
+        demand.automaticallyRetries = enabled
+        demands[consumerID] = demand
+        if enabled {
+            ensureRequest(for: demand.originKey, fallbackURL: demand.url)
+        } else if !hasAutomaticRetryDemand(for: demand.originKey) {
+            scheduledRetries.removeValue(forKey: demand.originKey)?.task.cancel()
+        }
+    }
+
+    /// Compatibility entry point for finite, non-UI callers and tests. These
+    /// callbacks do not establish background retry demand after a failure.
+    func load(for url: URL, completion: @escaping Completion) {
         guard let key = Self.originKey(for: url) else {
             completion(nil)
             return
         }
-        if let cached = cache[key] {
+        if let cached = cachedImage(for: key) {
             completion(cached)
             return
         }
-        if failedOrigins.contains(key) {
+        if let until = cooldownUntil[key], until > monotonicClock() {
             completion(nil)
             return
         }
+        oneShotCompletions[key, default: []].append(completion)
+        ensureRequest(for: key, fallbackURL: url)
+    }
 
-        Task { [weak self] in
+    func cancel(consumerID: UUID) {
+        guard let demand = demands.removeValue(forKey: consumerID) else { return }
+        guard !hasDemand(for: demand.originKey),
+              oneShotCompletions[demand.originKey]?.isEmpty != false else {
+            return
+        }
+        if inFlight[demand.originKey]?.acceptanceMode == .explicitChoice {
+            return
+        }
+        inFlight.removeValue(forKey: demand.originKey)?.task.cancel()
+        scheduledRetries.removeValue(forKey: demand.originKey)?.task.cancel()
+    }
+
+    /// Called only after PanelController has revalidated the exact Slot,
+    /// Runtime, committed URL and navigation generation for the DOM result.
+    func setDOMCandidates(
+        _ candidates: [Candidate],
+        for committedURL: URL,
+        source: DOMCandidateUpdateSource = .pageNavigation
+    ) {
+        guard let key = Self.originKey(for: committedURL) else { return }
+        let normalized = Self.orderedCandidates(candidates)
+            .filter { Self.isValidDOMCandidate($0, forPageOriginKey: key) }
+            .prefix(Self.maximumDeclaredCandidates)
+        let next = Array(normalized)
+        guard domCandidates[key] != next else { return }
+        storeDOMCandidates(next, for: key)
+
+        let accepted = cachedFavicon(for: key)
+        let targetIdentity = next.first?.resourceIdentity
+        let initializationMayUpgradeFallback = source == .initialization
+            && accepted?.kind == .conventional
+            && next.first?.kind == .icon
+        let initializationHasAcceptedIcon = source == .initialization
+            && accepted != nil
+            && !initializationMayUpgradeFallback
+        if !initializationHasAcceptedIcon,
+           let request = inFlight[key],
+           request.acceptanceMode == .automatic,
+           request.resourceIdentity != targetIdentity {
+            inFlight.removeValue(forKey: key)?.task.cancel()
+        }
+
+        if let candidate = next.first,
+           let entry = accepted,
+           candidate.resourceIdentity == entry.resourceIdentity {
+            let metadataChanged = candidate.priority != entry.priority || candidate.kind != entry.kind
+            if metadataChanged {
+                let updated = CachedFavicon(
+                    image: entry.image,
+                    pixelSHA256: entry.pixelSHA256,
+                    priority: candidate.priority,
+                    resourceIdentity: candidate.resourceIdentity,
+                    kind: entry.kind,
+                    isLocked: entry.isLocked
+                )
+                cache[key] = updated
+                cacheOrder.removeAll { $0 == key }
+                cacheOrder.append(key)
+                recordCacheUpdate(.reusedSameResource)
+            }
+            return
+        }
+
+        // A new Runtime's first DOM read cannot replace an existing accepted
+        // brand icon. It may still upgrade a conventional fallback to a formal
+        // DOM icon; later reads retain the automatic confirmation path.
+        guard !initializationHasAcceptedIcon else { return }
+
+        let hasInterest = hasDemand(for: key) || oneShotCompletions[key]?.isEmpty == false
+        let needsFetch = accepted.map { entry in
+            next.first.map { Self.candidate($0, shouldReplace: entry) } ?? false
+        } ?? true
+        guard hasInterest, needsFetch else {
+            return
+        }
+        if let request = inFlight[key], request.resourceIdentity == targetIdentity {
+            return
+        }
+        // DOM declarations belong to the committed page origin even when a
+        // valid HTTPS CDN serves the icon resource. A changed resource at
+        // equal priority is also a real refresh request.
+        // The currently cached image remains visible until that request succeeds.
+        inFlight.removeValue(forKey: key)?.task.cancel()
+        scheduledRetries.removeValue(forKey: key)?.task.cancel()
+        cooldownUntil.removeValue(forKey: key)
+        startRequest(for: key, fallbackURL: committedURL)
+    }
+
+    /// A user initiated WebView reload is the only caller allowed to bypass
+    /// the local favicon cache while an image is already available. The old
+    /// image stays in `cache` until a fresh response has decoded and passed
+    /// visible-pixel validation; `finish` then notifies only current demands.
+    func refreshAfterManualReload(
+        candidateReadResult: DOMCandidateReadResult,
+        committedURL: URL,
+        for targetURLs: [URL]
+    ) {
+        let committedOriginKey = Self.originKey(for: committedURL)
+        var refreshedOrigins = Set<String>()
+        for targetURL in targetURLs {
+            guard let key = Self.originKey(for: targetURL),
+                  refreshedOrigins.insert(key).inserted else {
+                continue
+            }
+
+            // The DOM read belongs only to the current committed page identity;
+            // its icon resource may be served by a valid HTTPS CDN. A different
+            // Tab home origin retains its own declarations and resources.
+            if key == committedOriginKey {
+                switch candidateReadResult {
+                case let .candidates(candidates):
+                    let normalized = Self.orderedCandidates(candidates)
+                        .filter { Self.isValidDOMCandidate($0, forPageOriginKey: key) }
+                        .prefix(Self.maximumDeclaredCandidates)
+                    storeDOMCandidates(Array(normalized), for: key)
+                case .noCandidates:
+                    storeDOMCandidates([], for: key)
+                case .readFailed:
+                    // A transient DOM read failure must not discard declarations
+                    // which were validated for this origin on an earlier page.
+                    break
+                }
+            }
+
+            // A manual refresh may need to update the Tab identity cache even
+            // while its view is detached. finish() notifies only demands that
+            // are still valid when the fresh result arrives.
+            scheduledRetries.removeValue(forKey: key)?.task.cancel()
+            cooldownUntil.removeValue(forKey: key)
+            inFlight.removeValue(forKey: key)?.task.cancel()
+            startRequest(
+                for: key,
+                fallbackURL: targetURL,
+                preferredURL: targetURL,
+                initialCachePolicy: .reloadIgnoringLocalCacheData
+            )
+        }
+    }
+
+    private func startRequest(
+        for key: String,
+        fallbackURL: URL,
+        preferredURL: URL? = nil,
+        initialCachePolicy: URLRequest.CachePolicy = .returnCacheDataElseLoad,
+        acceptanceMode: AcceptanceMode = .automatic
+    ) {
+        guard inFlight[key] == nil else { return }
+        let requestID = UUID()
+        let initialURL = preferredURL
+            ?? demands.values.first(where: { $0.originKey == key })?.url
+            ?? fallbackURL
+        let hints = domCandidates[key] ?? []
+        let task = Task { @MainActor [weak self] in
             guard let self else { return }
-
-            // Keep the inexpensive and conventional endpoint first. Some
-            // modern sites, including Gemini, return an empty HTML response
-            // from /favicon.ico even though their real icon is declared in
-            // the document head.
-            if let faviconURL = Self.faviconURL(for: url),
-               let image = await self.fetchImage(from: faviconURL) {
-                self.cache[key] = image
-                completion(image)
+            let initialReport = await self.fetchFavicon(
+                for: initialURL,
+                iconURLHints: hints,
+                cachePolicy: initialCachePolicy
+            )
+            guard !Task.isCancelled,
+                  self.inFlight[key]?.id == requestID else { return }
+            self.recordFetchReport(initialReport, phase: "cached_first")
+            if let cachedImage = initialReport.favicon {
+                self.finish(cachedImage, for: key, requestID: requestID)
                 return
             }
 
-            // Read only the page markup and inspect <link rel="icon">. This
-            // supports absolute/relative, PNG/SVG and cross-origin CDN icons
-            // without executing JavaScript or sharing website cookies.
-            if let (html, response) = await self.fetchPageHTML(for: url) {
-                let pageURL = response.url ?? url
-                let htmlCandidates = Self.discoveredFaviconURLs(
-                    in: html,
-                    baseURL: pageURL
-                )
-                for candidate in htmlCandidates {
-                    if let image = await self.fetchImage(from: candidate) {
-                        self.cache[key] = image
-                        completion(image)
-                        return
-                    }
-                }
-            }
-
-            // A few older sites omit HTML declarations but expose one of
-            // these conventional names. Keep these after HTML discovery so a
-            // slow or unreachable fallback endpoint cannot delay normal pages.
-            for candidate in Self.fallbackFaviconURLs(for: url).dropFirst() {
-                if let image = await self.fetchImage(from: candidate) {
-                    self.cache[key] = image
-                    completion(image)
-                    return
-                }
-            }
-
-            failedOrigins.insert(key)
-            completion(nil)
+            self.pendingFavicons.removeValue(forKey: key)
+            await self.retryWaiter(Self.automaticRetryDelay)
+            guard !Task.isCancelled,
+                  self.inFlight[key]?.id == requestID else { return }
+            let freshReport = await self.fetchFavicon(
+                for: initialURL,
+                iconURLHints: self.domCandidates[key] ?? hints,
+                cachePolicy: .reloadIgnoringLocalCacheData
+            )
+            guard !Task.isCancelled,
+                  self.inFlight[key]?.id == requestID else { return }
+            self.recordFetchReport(freshReport, phase: "fresh_retry")
+            self.finish(freshReport.favicon, for: key, requestID: requestID)
         }
+        inFlight[key] = InFlightRequest(
+            id: requestID,
+            resourceIdentity: hints.first?.resourceIdentity,
+            acceptanceMode: acceptanceMode,
+            task: task
+        )
+    }
+
+    func setDOMCandidates(
+        _ candidates: [URL],
+        for committedURL: URL,
+        source: DOMCandidateUpdateSource = .pageNavigation
+    ) {
+        setDOMCandidates(
+            candidates.enumerated().map { Candidate.declared($0.element, sourceOrder: $0.offset) },
+            for: committedURL,
+            source: source
+        )
+    }
+
+    private func ensureRequest(for key: String, fallbackURL: URL) {
+        guard inFlight[key] == nil else { return }
+        if let retry = scheduledRetries[key] {
+            if retry.fireAt > monotonicClock() { return }
+            scheduledRetries.removeValue(forKey: key)?.task.cancel()
+        }
+        if let until = cooldownUntil[key] {
+            let remaining = until - monotonicClock()
+            guard remaining <= 0 else {
+                if hasAutomaticRetryDemand(for: key) {
+                    scheduleRetry(for: key, fallbackURL: fallbackURL, after: remaining)
+                }
+                return
+            }
+            cooldownUntil.removeValue(forKey: key)
+        }
+        startRequest(for: key, fallbackURL: fallbackURL)
+    }
+
+    private func finish(_ fetched: FetchedFavicon?, for key: String, requestID: UUID) {
+        guard let request = inFlight[key], request.id == requestID else { return }
+        inFlight.removeValue(forKey: key)
+        let oneShots = oneShotCompletions.removeValue(forKey: key) ?? []
+        let existingImage = cachedImage(for: key)
+        var cacheOutcome: CacheUpdateOutcome
+        if let fetched {
+            let acceptance = accept(fetched, for: key, mode: request.acceptanceMode)
+            cacheOutcome = acceptance.cacheOutcome
+            failureCycles.removeValue(forKey: key)
+            cooldownUntil.removeValue(forKey: key)
+            scheduledRetries.removeValue(forKey: key)?.task.cancel()
+            if request.acceptanceMode == .explicitChoice {
+                let result = acceptance.controlResult ?? .unavailable
+                explicitChoiceCompletions.removeValue(forKey: key)?.forEach { $0(result) }
+            }
+        } else {
+            pendingFavicons.removeValue(forKey: key)
+            cacheOutcome = existingImage == nil ? .empty : .retainedPrevious
+            let failureIndex = failureCycles[key, default: 0]
+            let delay = Self.retryBackoff[min(failureIndex, Self.retryBackoff.count - 1)]
+            failureCycles[key] = failureIndex + 1
+            cooldownUntil[key] = monotonicClock() + delay
+            if hasAutomaticRetryDemand(for: key) {
+                let retryURL = demands.values.first(where: { $0.originKey == key })?.url
+                    ?? URL(string: key)
+                if let retryURL {
+                    scheduleRetry(for: key, fallbackURL: retryURL, after: delay)
+                }
+            }
+            if request.acceptanceMode == .explicitChoice {
+                explicitChoiceCompletions.removeValue(forKey: key)?.forEach { $0(.fetchFailed) }
+            }
+        }
+        recordCacheUpdate(cacheOutcome)
+        if (cacheOutcome == .updated || cacheOutcome == .memoryOnlyUpdated), let fetched {
+            notifyDemands(for: key, with: fetched.image)
+        } else if existingImage == nil {
+            notifyDemands(for: key, with: nil)
+        }
+        oneShots.forEach { $0(cache[key]?.image) }
+    }
+
+    private func hasDemand(for key: String) -> Bool {
+        demands.values.contains { $0.originKey == key }
+    }
+
+    private func cachedImage(for key: String) -> NSImage? {
+        cachedFavicon(for: key)?.image
+    }
+
+    private func cachedFavicon(for key: String) -> CachedFavicon? {
+        if let cached = cache[key] {
+            refreshMemoryCacheOrder(for: key)
+            return cached
+        }
+        guard case let .record(record) = assetStore.load(originKey: key),
+              let image = NSImage(data: record.imageData) else {
+            return nil
+        }
+        image.size = NSSize(width: 16, height: 16)
+        image.isTemplate = record.kind == Candidate.Kind.mask.rawValue
+        guard Self.hasVisiblePixels(image),
+              let pixelSHA256 = Self.normalizedPixelSHA256(of: image),
+              pixelSHA256 == record.pixelSHA256,
+              let kind = Candidate.Kind(rawValue: record.kind) else {
+            assetStore.markCorrupt(originKey: key)
+            return nil
+        }
+        let cached = CachedFavicon(
+            image: image,
+            pixelSHA256: pixelSHA256,
+            priority: record.priority,
+            resourceIdentity: nil,
+            kind: kind,
+            isLocked: record.isLocked
+        )
+        cache[key] = cached
+        refreshMemoryCacheOrder(for: key)
+        return cached
+    }
+
+    private func accept(
+        _ fetched: FetchedFavicon,
+        for key: String,
+        mode: AcceptanceMode
+    ) -> AcceptanceResult {
+        let existing = cachedFavicon(for: key)
+        let existingTemplateSemantics = existing?.kind == .mask
+        let fetchedTemplateSemantics = fetched.kind == .mask
+        if let existing,
+           existing.pixelSHA256 == fetched.pixelSHA256,
+           existingTemplateSemantics == fetchedTemplateSemantics {
+            pendingFavicons.removeValue(forKey: key)
+            cache[key] = CachedFavicon(
+                image: existing.image,
+                pixelSHA256: existing.pixelSHA256,
+                priority: fetched.priority,
+                resourceIdentity: fetched.resourceIdentity,
+                kind: existing.kind,
+                isLocked: existing.isLocked
+            )
+            refreshMemoryCacheOrder(for: key)
+            return AcceptanceResult(cacheOutcome: .sameVisualContent, controlResult: .unchanged)
+        }
+
+        if let existing, existing.isLocked, mode == .automatic {
+            pendingFavicons.removeValue(forKey: key)
+            return AcceptanceResult(cacheOutcome: .locked, controlResult: nil)
+        }
+
+        let pending = pendingFavicons[key]?.fetched
+        let pendingMatches = pending?.pixelSHA256 == fetched.pixelSHA256
+            && (pending?.kind == .mask) == fetchedTemplateSemantics
+        if existing != nil, mode == .automatic, !pendingMatches {
+            pendingFavicons[key] = PendingFavicon(fetched: fetched)
+            return AcceptanceResult(cacheOutcome: .awaitingConfirmation, controlResult: nil)
+        }
+
+        let locked = existing?.isLocked ?? false
+        guard let imageData = Self.serializedImageData(fetched.image) else {
+            return AcceptanceResult(cacheOutcome: .failed, controlResult: .unavailable)
+        }
+        let record = WebsiteFaviconAssetStore.Record(
+            originKey: key,
+            imageData: imageData,
+            pixelSHA256: fetched.pixelSHA256,
+            priority: fetched.priority,
+            kind: fetched.kind.rawValue,
+            isLocked: locked
+        )
+        let writeResult = assetStore.save(record)
+        // Persistence failure does not make a validated icon unusable in this runtime.
+        cache[key] = CachedFavicon(
+            image: fetched.image,
+            pixelSHA256: fetched.pixelSHA256,
+            priority: fetched.priority,
+            resourceIdentity: fetched.resourceIdentity,
+            kind: fetched.kind,
+            isLocked: locked
+        )
+        pendingFavicons.removeValue(forKey: key)
+        refreshMemoryCacheOrder(for: key)
+
+        let cacheOutcome: CacheUpdateOutcome
+        let controlResult: IconControlResult
+        switch writeResult {
+        case .saved:
+            cacheOutcome = .updated
+            controlResult = .changed
+        case .capacityExceeded:
+            cacheOutcome = .memoryOnlyUpdated
+            controlResult = .capacityExceeded
+        case .corruptExistingRecord:
+            cacheOutcome = .memoryOnlyUpdated
+            controlResult = .corruptStorage
+        case .invalidRecord, .unavailable:
+            cacheOutcome = .memoryOnlyUpdated
+            controlResult = .unavailable
+        }
+        return AcceptanceResult(cacheOutcome: cacheOutcome, controlResult: controlResult)
+    }
+
+    private func refreshMemoryCacheOrder(for key: String) {
+        cacheOrder.removeAll { $0 == key }
+        cacheOrder.append(key)
+        trimMemoryCache()
+    }
+
+    private func trimMemoryCache() {
+        while cacheOrder.count > Self.maximumCachedOrigins {
+            let removedKey = cacheOrder.removeFirst()
+            cache.removeValue(forKey: removedKey)
+            pendingFavicons.removeValue(forKey: removedKey)
+        }
+    }
+
+    private static let normalizedPixelSide = 32
+    private static let normalizedPixelBitmapInfo = CGBitmapInfo.byteOrder32Big.union(
+        CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+    )
+
+    private static func normalizedPixelData(of image: NSImage) -> Data? {
+        var proposedRect = NSRect(origin: .zero, size: image.size)
+        guard let source = image.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil),
+              image.size.width > 0,
+              image.size.height > 0,
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+            return nil
+        }
+        let side = normalizedPixelSide
+        let bytesPerRow = side * 4
+        var pixels = [UInt8](repeating: 0, count: side * bytesPerRow)
+        let drawn = pixels.withUnsafeMutableBytes { storage -> Bool in
+            guard let context = CGContext(
+                data: storage.baseAddress,
+                width: side,
+                height: side,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: normalizedPixelBitmapInfo.rawValue
+            ) else {
+                return false
+            }
+            context.clear(CGRect(x: 0, y: 0, width: side, height: side))
+            context.interpolationQuality = .high
+            let scale = min(
+                CGFloat(side) / image.size.width,
+                CGFloat(side) / image.size.height
+            )
+            let width = image.size.width * scale
+            let height = image.size.height * scale
+            context.draw(
+                source,
+                in: CGRect(
+                    x: (CGFloat(side) - width) / 2,
+                    y: (CGFloat(side) - height) / 2,
+                    width: width,
+                    height: height
+                )
+            )
+            return true
+        }
+        guard drawn else { return nil }
+        return Data(pixels)
+    }
+
+    private static func serializedImageData(_ image: NSImage) -> Data? {
+        let side = normalizedPixelSide
+        let bytesPerRow = side * 4
+        guard let pixels = normalizedPixelData(of: image),
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let provider = CGDataProvider(data: pixels as CFData),
+              let canonicalImage = CGImage(
+                width: side,
+                height: side,
+                bitsPerComponent: 8,
+                bitsPerPixel: 32,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: normalizedPixelBitmapInfo,
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: true,
+                intent: .defaultIntent
+              ) else {
+            return nil
+        }
+
+        let pngData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            pngData as CFMutableData,
+            "public.png" as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+        CGImageDestinationAddImage(destination, canonicalImage, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return pngData as Data
+    }
+
+    private static func normalizedPixelSHA256(of image: NSImage) -> String? {
+        guard let pixels = normalizedPixelData(of: image) else { return nil }
+        let digest = SHA256.hash(data: pixels)
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func notifyDemands(for key: String, with image: NSImage?) {
+        let callbacks = demands.compactMap { id, demand in
+            demand.originKey == key ? (id, demand.completion) : nil
+        }
+        callbacks.forEach { $0.1(image) }
+    }
+
+    private func recordCacheUpdate(_ outcome: CacheUpdateOutcome) {
+        diagnosticRecorder?.record(
+            event: "favicon.cache_update",
+            level: outcome == .failed || outcome == .memoryOnlyUpdated ? .warning : .notice,
+            subsystem: "favicon",
+            fields: ["outcome": .string(outcome.rawValue)]
+        )
+    }
+
+    private func recordFetchReport(_ report: FetchReport, phase: String) {
+        let reasons = report.failureStages.map(\.rawValue).sorted().joined(separator: ",")
+        diagnosticRecorder?.record(
+            event: "favicon.fetch_attempt",
+            level: report.favicon == nil ? .notice : .info,
+            subsystem: "favicon",
+            fields: [
+                "phase": .string(phase),
+                "outcome": .string(report.favicon == nil ? "failed" : "loaded"),
+                "candidate_count": .integer(Int64(report.candidateCount)),
+                "failure_stages": reasons.isEmpty ? .null : .string(reasons)
+            ]
+        )
+    }
+
+    private func storeDOMCandidates(_ candidates: [Candidate], for key: String) {
+        if candidates.isEmpty {
+            domCandidates.removeValue(forKey: key)
+            domCandidateOrder.removeAll { $0 == key }
+            return
+        }
+        domCandidates[key] = candidates
+        domCandidateOrder.removeAll { $0 == key }
+        domCandidateOrder.append(key)
+        while domCandidateOrder.count > Self.maximumDOMCandidateOrigins {
+            domCandidates.removeValue(forKey: domCandidateOrder.removeFirst())
+        }
+    }
+
+    private func hasAutomaticRetryDemand(for key: String) -> Bool {
+        demands.values.contains { $0.originKey == key && $0.automaticallyRetries }
+    }
+
+    private func scheduleRetry(for key: String, fallbackURL: URL, after delay: TimeInterval) {
+        guard hasAutomaticRetryDemand(for: key), scheduledRetries[key] == nil else { return }
+        let id = UUID()
+        let fireAt = monotonicClock() + max(0, delay)
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.retryWaiter(delay)
+            guard !Task.isCancelled,
+                  self.scheduledRetries[key]?.id == id else { return }
+            self.scheduledRetries.removeValue(forKey: key)
+            guard self.hasAutomaticRetryDemand(for: key), self.inFlight[key] == nil else { return }
+            self.cooldownUntil.removeValue(forKey: key)
+            self.startRequest(for: key, fallbackURL: fallbackURL)
+        }
+        scheduledRetries[key] = ScheduledRetry(id: id, fireAt: fireAt, task: task)
+    }
+
+    private func fetchFavicon(
+        for url: URL,
+        iconURLHints: [Candidate],
+        cachePolicy: URLRequest.CachePolicy
+    ) async -> FetchReport {
+        let deadline = monotonicClock() + Self.requestBudget
+        var seen = Set<String>()
+        var declaredCount = 0
+        var failureStages = Set<FailureStage>()
+
+        for candidate in Self.orderedCandidates(iconURLHints).prefix(Self.maximumDeclaredCandidates) {
+            guard monotonicClock() < deadline else {
+                failureStages.insert(.requestTimedOut)
+                return FetchReport(favicon: nil, failureStages: failureStages, candidateCount: declaredCount)
+            }
+            guard seen.insert(candidate.resourceIdentity).inserted else { continue }
+            declaredCount += 1
+            switch await fetchImage(
+                from: candidate,
+                cachePolicy: cachePolicy,
+                deadline: deadline
+            ) {
+            case let .fetched(fetched):
+                return FetchReport(
+                    favicon: fetched,
+                    failureStages: failureStages,
+                    candidateCount: declaredCount
+                )
+            case let .failed(stage):
+                failureStages.insert(stage)
+            }
+        }
+
+        for pageURL in Self.pageDiscoveryURLs(for: url).prefix(Self.maximumDiscoveryPages) {
+            guard monotonicClock() < deadline,
+                  declaredCount < Self.maximumDeclaredCandidates else { break }
+            let htmlResult = await fetchPageHTML(
+                for: pageURL,
+                cachePolicy: cachePolicy,
+                deadline: deadline
+            )
+            let html: String
+            let response: URLResponse
+            switch htmlResult {
+            case let .loaded(pageHTML, pageResponse):
+                html = pageHTML
+                response = pageResponse
+            case let .failed(stage):
+                failureStages.insert(stage)
+                continue
+            }
+            let candidates = Self.discoveredFaviconCandidates(
+                in: html,
+                baseURL: response.url ?? pageURL,
+                limit: Self.maximumDeclaredCandidates - declaredCount
+            )
+            for candidate in candidates {
+                guard monotonicClock() < deadline else {
+                    failureStages.insert(.requestTimedOut)
+                    return FetchReport(
+                        favicon: nil,
+                        failureStages: failureStages,
+                        candidateCount: declaredCount
+                    )
+                }
+                guard seen.insert(candidate.resourceIdentity).inserted else { continue }
+                declaredCount += 1
+                switch await fetchImage(
+                    from: candidate,
+                    cachePolicy: cachePolicy,
+                    deadline: deadline
+                ) {
+                case let .fetched(fetched):
+                    return FetchReport(
+                        favicon: fetched,
+                        failureStages: failureStages,
+                        candidateCount: declaredCount
+                    )
+                case let .failed(stage):
+                    failureStages.insert(stage)
+                }
+            }
+        }
+
+        // Declared icons from the loaded page and the bounded HTML discovery
+        // pass take precedence over conventional filenames such as favicon.ico.
+        for (sourceOrder, candidateURL) in Self.fallbackFaviconURLs(for: url).enumerated()
+            where seen.insert(Candidate.conventional(candidateURL).resourceIdentity).inserted {
+            guard monotonicClock() < deadline else {
+                failureStages.insert(.requestTimedOut)
+                return FetchReport(
+                    favicon: nil,
+                    failureStages: failureStages,
+                    candidateCount: declaredCount
+                )
+            }
+            declaredCount += 1
+            switch await fetchImage(
+                from: Candidate.conventional(candidateURL, sourceOrder: sourceOrder),
+                cachePolicy: cachePolicy,
+                deadline: deadline
+            ) {
+            case let .fetched(fetched):
+                return FetchReport(
+                    favicon: fetched,
+                    failureStages: failureStages,
+                    candidateCount: declaredCount
+                )
+            case let .failed(stage):
+                failureStages.insert(stage)
+            }
+        }
+        if declaredCount == 0 {
+            failureStages.insert(.noCandidates)
+        }
+        return FetchReport(
+            favicon: nil,
+            failureStages: failureStages,
+            candidateCount: declaredCount
+        )
+    }
+
+    static func pageDiscoveryURLs(for url: URL) -> [URL] {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme != nil,
+              components.host != nil else { return [] }
+        let origin = components
+        components.path = "/"
+        components.query = nil
+        components.fragment = nil
+        var pages = [components.url].compactMap { $0 }
+
+        guard !origin.path.isEmpty, origin.path != "/" else { return pages }
+        var pathComponents = origin
+        pathComponents.query = nil
+        pathComponents.fragment = nil
+        if let pathURL = pathComponents.url,
+           !pages.contains(pathURL) {
+            pages.append(pathURL)
+        }
+        return pages
     }
 
     private static func iconURL(path: String, for url: URL) -> URL? {
@@ -2194,66 +3771,170 @@ final class WebsiteFaviconProvider {
         return nil
     }
 
-    private func fetchImage(from url: URL) async -> NSImage? {
-        guard Self.isHTTPURL(url) else { return nil }
+    private func fetchImage(
+        from candidate: Candidate,
+        cachePolicy: URLRequest.CachePolicy,
+        deadline: TimeInterval
+    ) async -> CandidateFetchResult {
+        let url = candidate.url
+        guard Self.isHTTPURL(url) else { return .failed(.requestFailed) }
+        guard let timeout = effectiveTimeout(until: deadline) else {
+            return .failed(.requestTimedOut)
+        }
         var request = URLRequest(url: url)
-        request.cachePolicy = .returnCacheDataElseLoad
-        request.timeoutInterval = 8
+        request.cachePolicy = cachePolicy
+        request.timeoutInterval = timeout
+        request.httpShouldHandleCookies = false
         request.setValue(
             "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
             forHTTPHeaderField: "Accept"
         )
         do {
-            let (data, response) = try await dataLoader(request)
+            let (data, response) = try await loadDataWithTimeout(request)
             if let http = response as? HTTPURLResponse,
                !(200..<300).contains(http.statusCode) {
-                return nil
+                return .failed(.httpStatus)
             }
-            guard let image = NSImage(data: data) else { return nil }
+            guard let image = NSImage(data: data) else { return .failed(.imageDecodeFailed) }
+            guard Self.hasVisiblePixels(image) else { return .failed(.noVisiblePixels) }
             image.size = NSSize(width: 16, height: 16)
-            return image
+            image.isTemplate = candidate.kind == .mask
+            guard let pixelSHA256 = Self.normalizedPixelSHA256(of: image) else {
+                return .failed(.pixelNormalizationFailed)
+            }
+            return .fetched(FetchedFavicon(
+                image: image,
+                pixelSHA256: pixelSHA256,
+                priority: candidate.priority,
+                resourceIdentity: candidate.resourceIdentity,
+                kind: candidate.kind
+            ))
+        } catch let error as URLError where error.code == .timedOut {
+            return .failed(.requestTimedOut)
         } catch {
-            return nil
+            return .failed(.requestFailed)
         }
     }
 
-    private func fetchPageHTML(for url: URL) async -> (String, URLResponse)? {
-        guard Self.isHTTPURL(url) else { return nil }
+    private static func hasVisiblePixels(_ image: NSImage) -> Bool {
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 32,
+            pixelsHigh: 32,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ),
+        let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            return false
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        image.draw(
+            in: NSRect(x: 0, y: 0, width: 32, height: 32),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1,
+            respectFlipped: false,
+            hints: nil
+        )
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                if (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.01 {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func fetchPageHTML(
+        for url: URL,
+        cachePolicy: URLRequest.CachePolicy,
+        deadline: TimeInterval
+    ) async -> PageHTMLResult {
+        guard Self.isHTTPURL(url) else { return .failed(.requestFailed) }
         guard var components = URLComponents(
             url: url,
             resolvingAgainstBaseURL: false
         ) else {
-            return nil
+            return .failed(.requestFailed)
         }
         // Favicon discovery does not need query tokens or fragments. Avoid
         // replaying page-specific tracking/session parameters through the
         // auxiliary URLSession request.
         components.query = nil
         components.fragment = nil
-        guard let pageURL = components.url else { return nil }
+        guard let pageURL = components.url else { return .failed(.requestFailed) }
+        guard let timeout = effectiveTimeout(until: deadline) else {
+            return .failed(.requestTimedOut)
+        }
         var request = URLRequest(url: pageURL)
-        request.cachePolicy = .returnCacheDataElseLoad
-        request.timeoutInterval = 8
+        request.cachePolicy = cachePolicy
+        request.timeoutInterval = timeout
+        request.httpShouldHandleCookies = false
         request.setValue(
             "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
             forHTTPHeaderField: "Accept"
         )
         do {
-            let (data, response) = try await dataLoader(request)
+            let (data, response) = try await loadDataWithTimeout(request)
             if let http = response as? HTTPURLResponse,
                !(200..<300).contains(http.statusCode) {
-                return nil
+                return .failed(.httpStatus)
             }
-            guard let html = String(data: data, encoding: .utf8) else { return nil }
-            return (html, response)
+            guard let html = String(data: data, encoding: .utf8) else {
+                return .failed(.htmlDecodeFailed)
+            }
+            return .loaded(html, response)
+        } catch let error as URLError where error.code == .timedOut {
+            return .failed(.requestTimedOut)
         } catch {
-            return nil
+            return .failed(.requestFailed)
+        }
+    }
+
+    private func effectiveTimeout(until deadline: TimeInterval) -> TimeInterval? {
+        let remaining = deadline - monotonicClock()
+        guard remaining > 0 else { return nil }
+        return min(Self.requestTimeout, remaining)
+    }
+
+    private func loadDataWithTimeout(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
+            group.addTask {
+                try await self.dataLoader(request)
+            }
+            group.addTask {
+                let nanoseconds = UInt64(max(request.timeoutInterval, 0) * 1_000_000_000)
+                try await Task.sleep(nanoseconds: nanoseconds)
+                throw URLError(.timedOut)
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else {
+                throw URLError(.unknown)
+            }
+            return result
         }
     }
 }
 
 @MainActor
 final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
+    typealias FaviconLoadHandler = @MainActor (
+        URL,
+        @escaping (NSImage?) -> Void
+    ) -> Void
+    typealias FaviconCancelHandler = @MainActor (UUID) -> Void
+
     let slotID: UUID
 
     var onSelect: ((UUID) -> Void)?
@@ -2278,6 +3959,9 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         frame: .zero,
         geometry: .railTab
     )
+    private let requestFavicon: FaviconLoadHandler
+    private let cancelFavicon: FaviconCancelHandler
+    private let faviconConsumerID: UUID
     private let iconView = NSImageView()
     private let unreadDotView = ClassicUnreadDotView()
     private let label = NSTextField(labelWithString: "")
@@ -2295,13 +3979,18 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     private var windowSizeEditingEnabled = true
     private var backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive
     private var webAppName = ""
+    private var faviconHomeURL: URL?
     private var browserProfileID: UUID?
     private var browserProfileMenuOptions: [BrowserProfileMenuOption] = [.defaultProfile()]
     private var browserProfileAssignmentEnabled = true
     private var browserProfileDuplicationEnabled = true
     private var faviconOriginKey: String?
+    private var loadedFaviconOriginKey: String?
+    private var subscribedFaviconOriginKey: String?
+    private var faviconRequestGeneration: UInt64 = 0
     private var sourceIcon: NSImage?
     private var grayscaleIcon: NSImage?
+    private var sourceIconLuminance: CGFloat?
     private var isUnreadResponse = false
     private var attentionStyle: TabAttentionStyle = .dot
     private var attentionPalette: TabAttentionPalette = .red
@@ -2320,6 +4009,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     var isActiveTab: Bool { isActive }
     var isResidentRuntime: Bool { isResident }
     var displayedIcon: NSImage? { iconView.image }
+    var displayedIconAlpha: CGFloat { iconView.alphaValue }
     var isShowingUnreadResponse: Bool { isUnreadResponse }
     var unreadResponseFrame: NSRect { isUnreadResponse ? bounds : .zero }
     var iconFrame: NSRect { iconView.frame }
@@ -2338,6 +4028,9 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         return label.textColor
     }
     var displayedIconTintColor: NSColor? { iconView.contentTintColor }
+    var displayedIconContrastBackgroundColor: NSColor? {
+        iconView.layer?.backgroundColor.flatMap(NSColor.init(cgColor:))
+    }
     var displayedAttentionStyle: TabAttentionStyle { attentionStyle }
     var displayedAttentionPalette: TabAttentionPalette { attentionPalette }
     var attentionSurfaceEffect: AttentionStyleEffect { attentionSurfaceView.renderedEffect }
@@ -2353,8 +4046,25 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         attentionSurfaceView.isReduceMotionEnabled
     }
 
-    init(slotID: UUID) {
+    init(
+        slotID: UUID,
+        faviconLoader: FaviconLoadHandler? = nil,
+        faviconCanceller: FaviconCancelHandler? = nil
+    ) {
         self.slotID = slotID
+        let faviconConsumerID = UUID()
+        self.faviconConsumerID = faviconConsumerID
+        self.requestFavicon = faviconLoader ?? { url, completion in
+            WebsiteFaviconProvider.shared.subscribe(
+                for: url,
+                consumerID: faviconConsumerID,
+                automaticallyRetries: false,
+                completion: completion
+            )
+        }
+        self.cancelFavicon = faviconCanceller ?? {
+            WebsiteFaviconProvider.shared.cancel(consumerID: $0)
+        }
         super.init(frame: .zero)
 
         wantsLayer = true
@@ -2364,6 +4074,9 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         addSubview(attentionSurfaceView)
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.wantsLayer = true
+        iconView.layer?.masksToBounds = true
+        iconView.layer?.cornerRadius = 3.5
         setSourceIcon(Self.fallbackIcon())
         addSubview(iconView)
         unreadDotView.translatesAutoresizingMaskIntoConstraints = false
@@ -2522,6 +4235,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         self.isActive = isActive
         self.isResident = isResident
         webAppName = profile.name
+        faviconHomeURL = profile.homeURL
         browserProfileID = profile.browserProfileID
         renderingProfile = profile.renderingProfile.normalized()
         runtimeRetentionPreference = profile.runtimeRetentionPreference
@@ -2600,6 +4314,10 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
+        makeContextMenu()
+    }
+
+    func makeContextMenu() -> NSMenu {
         let menu = NSMenu(title: "Web App")
 
         let home = NSMenuItem(
@@ -2620,6 +4338,42 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         reload.target = self
         reload.isEnabled = isResident
         menu.addItem(reload)
+        let iconState = faviconHomeURL.map {
+            WebsiteFaviconProvider.shared.iconControlState(for: $0)
+        } ?? WebsiteFaviconProvider.IconControlState(hasAcceptedIcon: false, isLocked: false)
+        let lockIcon = NSMenuItem(
+            title: "Lock Current Icon",
+            action: #selector(lockCurrentIconFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        lockIcon.target = self
+        lockIcon.state = iconState.isLocked ? .on : .off
+        lockIcon.isEnabled = iconState.hasAcceptedIcon && !iconState.isLocked
+        menu.addItem(lockIcon)
+        let unlockIcon = NSMenuItem(
+            title: "Unlock Icon",
+            action: #selector(unlockIconFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        unlockIcon.target = self
+        unlockIcon.isEnabled = iconState.hasAcceptedIcon && iconState.isLocked
+        menu.addItem(unlockIcon)
+        let refreshIcon = NSMenuItem(
+            title: "Refresh & Choose Icon",
+            action: #selector(refreshAndChooseIconFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        refreshIcon.target = self
+        refreshIcon.isEnabled = faviconHomeURL != nil
+        menu.addItem(refreshIcon)
+        let iconScope = NSMenuItem(
+            title: "Shared by tabs on this website",
+            action: nil,
+            keyEquivalent: ""
+        )
+        iconScope.isEnabled = false
+        iconScope.toolTip = "Tabs with the same website origin share one favicon and lock state."
+        menu.addItem(iconScope)
         menu.addItem(.separator())
 
         let websiteMode = NSMenuItem(title: "Website Mode", action: nil, keyEquivalent: "")
@@ -2798,6 +4552,59 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     @objc private func returnHomeFromMenu(_ sender: NSMenuItem) { onReturnHome?(slotID) }
     @objc private func reloadFromMenu(_ sender: NSMenuItem) { onReload?(slotID) }
 
+    @objc private func lockCurrentIconFromMenu(_ sender: NSMenuItem) {
+        guard let faviconHomeURL else { return }
+        presentFaviconControlFailure(
+            WebsiteFaviconProvider.shared.lockCurrentIcon(for: faviconHomeURL)
+        )
+    }
+
+    @objc private func unlockIconFromMenu(_ sender: NSMenuItem) {
+        guard let faviconHomeURL else { return }
+        presentFaviconControlFailure(
+            WebsiteFaviconProvider.shared.unlockIcon(for: faviconHomeURL)
+        )
+    }
+
+    @objc private func refreshAndChooseIconFromMenu(_ sender: NSMenuItem) {
+        guard let faviconHomeURL else { return }
+        WebsiteFaviconProvider.shared.refreshAndChooseIcon(for: faviconHomeURL) { [weak self] result in
+            self?.presentFaviconControlFailure(result)
+        }
+    }
+
+    private func presentFaviconControlFailure(
+        _ result: WebsiteFaviconProvider.IconControlResult
+    ) {
+        guard !result.succeeded else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        switch result {
+        case .capacityExceeded:
+            alert.messageText = "The icon could not be saved"
+            alert.informativeText = "The favicon asset store is full. Existing locked icons were kept."
+        case .corruptStorage:
+            alert.messageText = "The saved icon could not be read"
+            alert.informativeText = "The existing favicon file was left unchanged."
+        case .fetchFailed:
+            alert.messageText = "No new icon was selected"
+            alert.informativeText = "The current icon and lock state were kept."
+        case .noAcceptedIcon:
+            alert.messageText = "There is no accepted icon to lock"
+            alert.informativeText = "Choose a valid website icon first."
+        case .unavailable:
+            alert.messageText = "The icon could not be saved"
+            alert.informativeText = "The current icon and lock state were kept."
+        case .changed, .unchanged:
+            return
+        }
+        guard let window else {
+            NSSound.beep()
+            return
+        }
+        alert.beginSheetModal(for: window)
+    }
+
     @objc private func setWebsiteModeFromMenu(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let mode = WebsiteMode(rawValue: raw) else { return }
@@ -2876,13 +4683,50 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
 
     private func loadFaviconIfNeeded(from url: URL) {
         let key = WebsiteFaviconProvider.originKey(for: url)
-        guard key != faviconOriginKey else { return }
-        faviconOriginKey = key
-        setSourceIcon(Self.fallbackIcon())
-        WebsiteFaviconProvider.shared.load(for: url) { [weak self] image in
-            guard let self, self.faviconOriginKey == key else { return }
-            self.setSourceIcon(image ?? Self.fallbackIcon())
+        WebsiteFaviconProvider.shared.setAutomaticRetryDemand(
+            consumerID: faviconConsumerID,
+            enabled: isActive
+        )
+        if key != faviconOriginKey {
+            cancelFavicon(faviconConsumerID)
+            faviconOriginKey = key
+            loadedFaviconOriginKey = nil
+            subscribedFaviconOriginKey = nil
+            faviconRequestGeneration &+= 1
+            setSourceIcon(Self.fallbackIcon())
         }
+        guard let key,
+              loadedFaviconOriginKey != key,
+              subscribedFaviconOriginKey != key else { return }
+
+        subscribedFaviconOriginKey = key
+        let requestGeneration = faviconRequestGeneration
+        requestFavicon(url) { [weak self] image in
+            guard let self,
+                  self.faviconOriginKey == key,
+                  self.faviconRequestGeneration == requestGeneration else { return }
+            if image != nil {
+                self.loadedFaviconOriginKey = key
+            }
+            let projection = self.setSourceIcon(image ?? Self.fallbackIcon())
+            let outcome = image == nil && projection != .noImageDisplayed
+                ? WebsiteFaviconProvider.ProjectionOutcome.fallbackDisplayed
+                : projection
+            WebsiteFaviconProvider.shared.recordProjection(outcome, surface: "tab")
+        }
+        WebsiteFaviconProvider.shared.setAutomaticRetryDemand(
+            consumerID: faviconConsumerID,
+            enabled: isActive
+        )
+    }
+
+    override func viewWillMove(toSuperview newSuperview: NSView?) {
+        if newSuperview == nil {
+            cancelFavicon(faviconConsumerID)
+            subscribedFaviconOriginKey = nil
+            faviconRequestGeneration &+= 1
+        }
+        super.viewWillMove(toSuperview: newSuperview)
     }
 
     private func updateAppearance() {
@@ -2936,39 +4780,57 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         setAccessibilityLabel(parts.joined(separator: " · "))
     }
 
-    func setSourceIcon(_ image: NSImage?) {
+    @discardableResult
+    func setSourceIcon(_ image: NSImage?) -> WebsiteFaviconProvider.ProjectionOutcome {
         sourceIcon = image
         if let image, !image.isTemplate {
             grayscaleIcon = Self.grayscaleImage(from: image)
+            sourceIconLuminance = Self.averageVisibleLuminance(of: image)
         } else {
             grayscaleIcon = nil
+            sourceIconLuminance = nil
         }
         applyIconAppearance()
+        guard iconView.image != nil else { return .noImageDisplayed }
+        return image == nil ? .fallbackDisplayed : .iconDisplayed
     }
 
     private func applyIconAppearance(attentionForeground: NSColor? = nil) {
         let base = sourceIcon ?? Self.fallbackIcon()
-        let templateTint = isUnreadResponse
-            ? (attentionForeground ?? attentionStyle.configuration(for: attentionPalette).foregroundColor)
-            : NSColor.labelColor
-        if isResident {
-            // Runtime truth owns color: active, Hot, Warm cache and Cold grace
-            // all stay full color while a live WKWebView still exists.
+        if base?.isTemplate == true {
             iconView.image = base
-            iconView.alphaValue = 1
-            iconView.contentTintColor = base?.isTemplate == true ? templateTint : nil
+            iconView.contentTintColor = isResident
+                ? (isUnreadResponse
+                    ? (attentionForeground ?? attentionStyle.configuration(for: attentionPalette).foregroundColor)
+                    : .labelColor)
+                : .tertiaryLabelColor
         } else {
-            if base?.isTemplate == true {
-                iconView.image = base
-                iconView.contentTintColor = isUnreadResponse
-                    ? templateTint
-                    : (isActive ? .labelColor : .tertiaryLabelColor)
-            } else {
-                iconView.image = grayscaleIcon ?? Self.fallbackIcon()
-                iconView.contentTintColor = grayscaleIcon == nil ? .tertiaryLabelColor : nil
-            }
-            iconView.alphaValue = isHovered ? 0.74 : 0.56
+            iconView.image = isResident ? base : (grayscaleIcon ?? base)
+            iconView.contentTintColor = nil
         }
+        let contrastBackground = residentIconContrastBackgroundColor()
+        iconView.layer?.backgroundColor = contrastBackground?.cgColor
+        iconView.layer?.borderColor = contrastBackground.map {
+            $0.withAlphaComponent(0.28).cgColor
+        }
+        iconView.layer?.borderWidth = contrastBackground == nil ? 0 : 0.5
+        iconView.alphaValue = isResident ? 1 : (isHovered ? 0.60 : 0.38)
+    }
+
+    private func residentIconContrastBackgroundColor() -> NSColor? {
+        guard isResident,
+              sourceIcon?.isTemplate != true,
+              let sourceIconLuminance else {
+            return nil
+        }
+        let appearance = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])
+        if appearance == .darkAqua, sourceIconLuminance < 0.55 {
+            return NSColor.white.withAlphaComponent(0.92)
+        }
+        if appearance == .aqua, sourceIconLuminance > 0.82 {
+            return NSColor.black.withAlphaComponent(0.78)
+        }
+        return nil
     }
 
     private func updateRuntimeToolTip() {
@@ -3018,6 +4880,33 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         let result = NSImage(cgImage: cgImage, size: image.size)
         result.isTemplate = false
         return result
+    }
+
+    private static func averageVisibleLuminance(of image: NSImage) -> CGFloat? {
+        guard let data = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: data),
+              bitmap.pixelsWide > 0,
+              bitmap.pixelsHigh > 0 else {
+            return nil
+        }
+        var luminanceTotal: CGFloat = 0
+        var alphaTotal: CGFloat = 0
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else {
+                    continue
+                }
+                let alpha = color.alphaComponent
+                guard alpha > 0.02 else { continue }
+                let luminance = 0.2126 * color.redComponent
+                    + 0.7152 * color.greenComponent
+                    + 0.0722 * color.blueComponent
+                luminanceTotal += luminance * alpha
+                alphaTotal += alpha
+            }
+        }
+        guard alphaTotal > 0 else { return nil }
+        return luminanceTotal / alphaTotal
     }
 
     private static func fallbackIcon() -> NSImage? {

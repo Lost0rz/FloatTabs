@@ -10,6 +10,89 @@ enum PanelPresentationDisplayRelationship: String, Equatable {
     case unknown
 }
 
+/// A reload-only favicon refresh intent bound to one resident Runtime and one
+/// navigation generation. It cannot survive a Runtime swap, newer navigation,
+/// or consumption by the matching navigation finish.
+struct ManualFaviconReloadIntent: Equatable {
+    enum NavigationStartResult: Equatable {
+        case ignored
+        case captured
+        case invalidated
+    }
+
+    private enum Phase: Equatable {
+        case waitingForNavigationStart
+        case awaitingFinish(UInt64)
+        case consumed
+    }
+
+    let runtimeIdentity: WebRuntimeDiagnosticIdentity
+    let baselineNavigationGeneration: UInt64
+    let expiresAt: TimeInterval
+    private var phase: Phase = .waitingForNavigationStart
+
+    init(
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        baselineNavigationGeneration: UInt64,
+        requestedAt: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
+        self.runtimeIdentity = runtimeIdentity
+        self.baselineNavigationGeneration = baselineNavigationGeneration
+        expiresAt = requestedAt + 15
+    }
+
+    var capturedNavigationGeneration: UInt64? {
+        guard case let .awaitingFinish(generation) = phase else { return nil }
+        return generation
+    }
+
+    mutating func recordNavigationStart(
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        navigationGeneration: UInt64,
+        at now: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) -> NavigationStartResult {
+        guard runtimeIdentity == self.runtimeIdentity, now <= expiresAt else { return .invalidated }
+        switch phase {
+        case .waitingForNavigationStart:
+            guard navigationGeneration > baselineNavigationGeneration else { return .ignored }
+            phase = .awaitingFinish(navigationGeneration)
+            return .captured
+        case let .awaitingFinish(capturedGeneration):
+            return capturedGeneration == navigationGeneration ? .ignored : .invalidated
+        case .consumed:
+            return .invalidated
+        }
+    }
+
+    mutating func consumeNavigationFinish(
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        navigationGeneration: UInt64
+    ) -> Bool {
+        guard runtimeIdentity == self.runtimeIdentity,
+              phase == .awaitingFinish(navigationGeneration) else {
+            return false
+        }
+        phase = .consumed
+        return true
+    }
+
+    func matchesNavigationFailure(
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        navigationGeneration: UInt64?
+    ) -> Bool {
+        guard runtimeIdentity == self.runtimeIdentity else { return false }
+        switch phase {
+        case .waitingForNavigationStart:
+            guard let navigationGeneration else { return true }
+            return navigationGeneration > baselineNavigationGeneration
+        case let .awaitingFinish(capturedGeneration):
+            return navigationGeneration == capturedGeneration
+        case .consumed:
+            return false
+        }
+    }
+}
+
 /// Records the Shell's display at presentation start and any observed moves.
 struct PanelPresentationDisplayMovement {
     private(set) var initialDisplayID: CGDirectDisplayID?
@@ -421,6 +504,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         var state: RuntimeReadinessState
         var navigationGeneration: UInt64?
     }
+    private struct FaviconDOMReadRecord: Equatable {
+        let identity: WebRuntimeDiagnosticIdentity
+        let navigationGeneration: UInt64
+        let committedURL: URL
+        let isManualReloadRefresh: Bool
+    }
     private struct PendingColdUnreadAcknowledgement {
         let slotID: UUID
         let materializationGeneration: UInt64
@@ -436,6 +525,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// Exact Runtime readiness is a PanelController presentation fact. Pool
     /// residency and Slot identity alone never authorize Web content reveal.
     private var runtimeReadinessBySlot: [UUID: RuntimeReadinessRecord] = [:]
+    private var faviconDOMReadBySlot: [UUID: FaviconDOMReadRecord] = [:]
+    private var manualFaviconReloadIntentsBySlot: [UUID: ManualFaviconReloadIntent] = [:]
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
     private var debugInteractionSurfaceFactOverrides: [UUID: Bool] = [:]
@@ -1257,6 +1348,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
 
         super.init()
+
+        WebsiteFaviconProvider.shared.setDiagnosticRecorder(diagnostics)
 
         webViewPool.attentionStateQuery = { [weak attentionCoordinator] slotID in
             attentionCoordinator?.state(for: slotID) ?? .idle
@@ -3467,6 +3560,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeSlotState() {
+        let selectedSlotID = tabStore.activeTabID
+        for slotID in Array(manualFaviconReloadIntentsBySlot.keys)
+            where slotID != selectedSlotID {
+            manualFaviconReloadIntentsBySlot.removeValue(forKey: slotID)
+        }
+        for slotID in Array(faviconDOMReadBySlot.keys)
+            where slotID != selectedSlotID
+                && faviconDOMReadBySlot[slotID]?.isManualReloadRefresh == true {
+            faviconDOMReadBySlot.removeValue(forKey: slotID)
+        }
         if let pending = pendingRuntimeMaterialization,
            pending.slotID != tabStore.activeTabID {
             cancelPendingRuntimeMaterialization(reason: "active_slot_changed")
@@ -3627,6 +3730,14 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
             return
         }
+        if let identity = webViewPool.runtimeDiagnosticIdentity(for: activeProfile.id),
+           let generation = runtimeReadinessBySlot[activeProfile.id]?.navigationGeneration {
+            readFaviconDOMCandidatesIfCurrent(
+                slotID: activeProfile.id,
+                runtimeIdentity: identity,
+                navigationGeneration: generation
+            )
+        }
         if pendingRuntimeMaterialization?.slotID == activeProfile.id {
             cancelPendingRuntimeMaterialization(reason: "resident_presentation")
         }
@@ -3705,6 +3816,22 @@ final class PanelController: NSObject, NSWindowDelegate {
                   validSlotIDs.contains(slotID),
                   webViewPool.runtimeDiagnosticIdentity(for: slotID) == record.identity else {
                 runtimeReadinessBySlot.removeValue(forKey: slotID)
+                continue
+            }
+        }
+        for slotID in Array(faviconDOMReadBySlot.keys) {
+            guard validSlotIDs.contains(slotID),
+                  let read = faviconDOMReadBySlot[slotID],
+                  webViewPool.runtimeDiagnosticIdentity(for: slotID) == read.identity else {
+                faviconDOMReadBySlot.removeValue(forKey: slotID)
+                continue
+            }
+        }
+        for slotID in Array(manualFaviconReloadIntentsBySlot.keys) {
+            guard validSlotIDs.contains(slotID),
+                  let intent = manualFaviconReloadIntentsBySlot[slotID],
+                  webViewPool.runtimeDiagnosticIdentity(for: slotID) == intent.runtimeIdentity else {
+                manualFaviconReloadIntentsBySlot.removeValue(forKey: slotID)
                 continue
             }
         }
@@ -4166,6 +4293,17 @@ final class PanelController: NSObject, NSWindowDelegate {
             state: .loading,
             navigationGeneration: navigationGeneration
         )
+        if var intent = manualFaviconReloadIntentsBySlot[slotID] {
+            switch intent.recordNavigationStart(
+                runtimeIdentity: runtimeIdentity,
+                navigationGeneration: navigationGeneration
+            ) {
+            case .captured, .ignored:
+                manualFaviconReloadIntentsBySlot[slotID] = intent
+            case .invalidated:
+                manualFaviconReloadIntentsBySlot.removeValue(forKey: slotID)
+            }
+        }
         guard tabStore.activeTabID == slotID,
               requestedVisibility || panel.isVisible,
               let profile = tabStore.profiles.first(where: { $0.id == slotID }) else {
@@ -4297,6 +4435,31 @@ final class PanelController: NSObject, NSWindowDelegate {
             navigationGeneration: navigationGeneration ?? currentRecord?.navigationGeneration
         )
 
+        let isManualReloadRefresh: Bool
+        if let navigationGeneration,
+           var intent = manualFaviconReloadIntentsBySlot[slotID],
+           intent.consumeNavigationFinish(
+               runtimeIdentity: runtimeIdentity,
+               navigationGeneration: navigationGeneration
+           ) {
+            manualFaviconReloadIntentsBySlot.removeValue(forKey: slotID)
+            isManualReloadRefresh = true
+        } else {
+            isManualReloadRefresh = false
+            if manualFaviconReloadIntentsBySlot[slotID]?.runtimeIdentity != runtimeIdentity {
+                manualFaviconReloadIntentsBySlot.removeValue(forKey: slotID)
+            }
+        }
+
+        if let navigationGeneration {
+            readFaviconDOMCandidatesIfCurrent(
+                slotID: slotID,
+                runtimeIdentity: runtimeIdentity,
+                navigationGeneration: navigationGeneration,
+                isManualReloadRefresh: isManualReloadRefresh
+            )
+        }
+
         guard let pending = pendingRuntimeMaterialization,
               pending.slotID == slotID,
               isPendingRuntimeMaterializationCurrent(pending) else {
@@ -4308,6 +4471,124 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         guard pendingRuntimeMaterializationIdentity == runtimeIdentity else { return }
         completePendingRuntimeMaterialization(pending, runtimeIdentity: runtimeIdentity)
+    }
+
+    private func readFaviconDOMCandidatesIfCurrent(
+        slotID: UUID,
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        navigationGeneration: UInt64,
+        isManualReloadRefresh: Bool = false
+    ) {
+        guard navigationGeneration > 0,
+              tabStore.activeTabID == slotID,
+              runtimeReadinessBySlot[slotID]?.identity == runtimeIdentity,
+              runtimeReadinessBySlot[slotID]?.navigationGeneration == navigationGeneration,
+              webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
+              let webView = webViewPool.existingWebView(for: slotID),
+              let committedURL = webViewPool.committedURL(for: slotID) else {
+            return
+        }
+        if let existing = faviconDOMReadBySlot[slotID],
+           existing.identity == runtimeIdentity,
+           existing.navigationGeneration == navigationGeneration,
+           existing.committedURL == committedURL {
+            if existing.isManualReloadRefresh || !isManualReloadRefresh { return }
+        }
+        let candidateUpdateSource = WebsiteFaviconProvider.DOMCandidateUpdateSource.forDOMRead(
+            previousRuntimeIdentity: faviconDOMReadBySlot[slotID]?.identity,
+            currentRuntimeIdentity: runtimeIdentity
+        )
+        let read = FaviconDOMReadRecord(
+            identity: runtimeIdentity,
+            navigationGeneration: navigationGeneration,
+            committedURL: committedURL,
+            isManualReloadRefresh: isManualReloadRefresh
+        )
+        faviconDOMReadBySlot[slotID] = read
+
+        WebsiteFaviconProvider.readDOMFaviconCandidates(from: webView) { [weak self, weak webView] result in
+            guard let self,
+                  let webView,
+                  self.tabStore.activeTabID == slotID,
+                  self.webViewPool.existingWebView(for: slotID) === webView,
+                  self.webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
+                  self.webViewPool.committedURL(for: slotID) == committedURL,
+                  self.runtimeReadinessBySlot[slotID]?.identity == runtimeIdentity,
+                  self.runtimeReadinessBySlot[slotID]?.navigationGeneration == navigationGeneration,
+                  self.faviconDOMReadBySlot[slotID] == read,
+                  let activeProfile = self.tabStore.profiles.first(where: { $0.id == slotID }) else {
+                if let current = self?.faviconDOMReadBySlot[slotID],
+                   current == read {
+                    self?.faviconDOMReadBySlot.removeValue(forKey: slotID)
+                }
+                return
+            }
+            var fields = runtimeIdentity.fields
+            fields["slot_id"] = .string(slotID.uuidString)
+            fields["navigation_generation"] = .integer(Int64(navigationGeneration))
+            switch result {
+            case let .candidates(candidates):
+                fields["result"] = .string("candidates_found")
+                fields["candidate_count"] = .integer(Int64(candidates.count))
+                self.diagnostics.record(
+                    event: "favicon.dom_candidates",
+                    level: .info,
+                    subsystem: "favicon",
+                    fields: fields
+                )
+                if read.isManualReloadRefresh {
+                    WebsiteFaviconProvider.shared.refreshAfterManualReload(
+                        candidateReadResult: .candidates(candidates),
+                        committedURL: committedURL,
+                        for: [committedURL, activeProfile.homeURL]
+                    )
+                } else {
+                    WebsiteFaviconProvider.shared.setDOMCandidates(
+                        candidates,
+                        for: committedURL,
+                        source: candidateUpdateSource
+                    )
+                }
+            case .noCandidates:
+                fields["result"] = .string("no_candidates")
+                fields["candidate_count"] = .integer(0)
+                self.diagnostics.record(
+                    event: "favicon.dom_candidates",
+                    level: .notice,
+                    subsystem: "favicon",
+                    fields: fields
+                )
+                let provider = WebsiteFaviconProvider.shared
+                if read.isManualReloadRefresh {
+                    provider.refreshAfterManualReload(
+                        candidateReadResult: .noCandidates,
+                        committedURL: committedURL,
+                        for: [committedURL, activeProfile.homeURL]
+                    )
+                } else {
+                    provider.setDOMCandidates(
+                        [WebsiteFaviconProvider.Candidate](),
+                        for: committedURL,
+                        source: candidateUpdateSource
+                    )
+                }
+            case .readFailed:
+                fields["result"] = .string("read_failed")
+                self.diagnostics.record(
+                    event: "favicon.dom_candidates",
+                    level: .warning,
+                    subsystem: "favicon",
+                    fields: fields
+                )
+                if read.isManualReloadRefresh {
+                    WebsiteFaviconProvider.shared.refreshAfterManualReload(
+                        candidateReadResult: .readFailed,
+                        committedURL: committedURL,
+                        for: [committedURL, activeProfile.homeURL]
+                    )
+                }
+            }
+        }
     }
 
     private func completePendingRuntimeMaterialization(
@@ -4399,6 +4680,19 @@ final class PanelController: NSObject, NSWindowDelegate {
             state: .failed,
             navigationGeneration: navigationGeneration ?? currentRecord?.navigationGeneration
         )
+        if let intent = manualFaviconReloadIntentsBySlot[slotID],
+           intent.matchesNavigationFailure(
+               runtimeIdentity: runtimeIdentity,
+               navigationGeneration: navigationGeneration
+           ) {
+            manualFaviconReloadIntentsBySlot.removeValue(forKey: slotID)
+        }
+        if let read = faviconDOMReadBySlot[slotID],
+           read.isManualReloadRefresh,
+           read.identity == runtimeIdentity,
+           read.navigationGeneration == navigationGeneration {
+            faviconDOMReadBySlot.removeValue(forKey: slotID)
+        }
 
         let pending = pendingRuntimeMaterialization.flatMap { request in
             request.slotID == slotID
@@ -5266,7 +5560,31 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func reloadSlot(id: UUID) {
-        guard webViewPool.reload(slotID: id) else { return }
+        let manualIntent: ManualFaviconReloadIntent? = {
+            guard tabStore.activeTabID == id,
+                  let identity = webViewPool.runtimeDiagnosticIdentity(for: id),
+                  webViewPool.existingWebView(for: id) != nil,
+                  let readiness = runtimeReadinessBySlot[id],
+                  readiness.identity == identity,
+                  let baselineGeneration = readiness.navigationGeneration,
+                  baselineGeneration > 0 else {
+                return nil
+            }
+            return ManualFaviconReloadIntent(
+                runtimeIdentity: identity,
+                baselineNavigationGeneration: baselineGeneration
+            )
+        }()
+        if let manualIntent {
+            manualFaviconReloadIntentsBySlot[id] = manualIntent
+        }
+        guard webViewPool.reload(slotID: id) else {
+            if let manualIntent,
+               manualFaviconReloadIntentsBySlot[id] == manualIntent {
+                manualFaviconReloadIntentsBySlot.removeValue(forKey: id)
+            }
+            return
+        }
         if tabStore.activeTabID == id {
             focusActiveWebViewIfAvailable()
         }

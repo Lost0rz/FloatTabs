@@ -108,6 +108,7 @@
 		A00000000000000000000080 /* LongTermPerformanceObservationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000080 /* LongTermPerformanceObservationCoordinator.swift */; };
 		A00000000000000000000081 /* ChatGPTCompletionNotificationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000081 /* ChatGPTCompletionNotificationCoordinator.swift */; };
 		A00000000000000000000082 /* ChatGPTCompletionNotificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000082 /* ChatGPTCompletionNotificationTests.swift */; };
+		A00000000000000000000083 /* FaviconRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000083 /* FaviconRecoveryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -224,6 +225,7 @@
 		B00000000000000000000080 /* LongTermPerformanceObservationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LongTermPerformanceObservationCoordinator.swift; sourceTree = "<group>"; };
 		B00000000000000000000081 /* ChatGPTCompletionNotificationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTCompletionNotificationCoordinator.swift; sourceTree = "<group>"; };
 		B00000000000000000000082 /* ChatGPTCompletionNotificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTCompletionNotificationTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000083 /* FaviconRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaviconRecoveryTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -416,6 +418,7 @@
 		H00000000000000000000009 /* FloatTabsTests */ = {
 			isa = PBXGroup;
 			children = (
+				B00000000000000000000083 /* FaviconRecoveryTests.swift */,
 				B00000000000000000000040 /* UnsupportedBrowserProfileTests.swift */,
 				B00000000000000000000046 /* WebsiteCacheCleanupTests.swift */,
 				B0000000000000000000003B /* BrowserProfileAddTests.swift */,
@@ -660,6 +663,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A00000000000000000000083 /* FaviconRecoveryTests.swift in Sources */,
 				A0000000000000000000001D /* AppCommandControllerTests.swift in Sources */,
 				A00000000000000000000025 /* AppPreferencesStoreTests.swift in Sources */,
 				A00000000000000000000027 /* FloatTabsBackupServiceTests.swift in Sources */,
