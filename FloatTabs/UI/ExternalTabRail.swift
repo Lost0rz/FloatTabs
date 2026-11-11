@@ -2563,6 +2563,49 @@ final class WebsiteFaviconProvider {
         startRequest(for: key, fallbackURL: committedURL)
     }
 
+    /// A user initiated WebView reload is the only caller allowed to bypass
+    /// the local favicon cache while an image is already available. The old
+    /// image stays in `cache` until a fresh response has decoded and passed
+    /// visible-pixel validation; `finish` then notifies only current demands.
+    func refreshAfterManualReload(
+        candidateReadResult: DOMCandidateReadResult,
+        for targetURLs: [URL]
+    ) {
+        var refreshedOrigins = Set<String>()
+        for targetURL in targetURLs {
+            guard let key = Self.originKey(for: targetURL),
+                  refreshedOrigins.insert(key).inserted else {
+                continue
+            }
+
+            switch candidateReadResult {
+            case let .candidates(candidates):
+                let normalized = Self.orderedCandidates(candidates)
+                    .prefix(Self.maximumDeclaredCandidates)
+                storeDOMCandidates(Array(normalized), for: key)
+            case .noCandidates:
+                storeDOMCandidates([], for: key)
+            case .readFailed:
+                // A transient DOM read failure must not discard declarations
+                // which were validated for this origin on an earlier page.
+                break
+            }
+
+            // A manual refresh may need to update the Tab identity cache even
+            // while its view is detached. finish() notifies only demands that
+            // are still valid when the fresh result arrives.
+            scheduledRetries.removeValue(forKey: key)?.task.cancel()
+            cooldownUntil.removeValue(forKey: key)
+            inFlight.removeValue(forKey: key)?.task.cancel()
+            startRequest(
+                for: key,
+                fallbackURL: targetURL,
+                preferredURL: targetURL,
+                initialCachePolicy: .reloadIgnoringLocalCacheData
+            )
+        }
+    }
+
     func setDOMCandidates(_ candidates: [URL], for committedURL: URL) {
         setDOMCandidates(
             candidates.enumerated().map { Candidate.declared($0.element, sourceOrder: $0.offset) },
@@ -2589,17 +2632,24 @@ final class WebsiteFaviconProvider {
         startRequest(for: key, fallbackURL: fallbackURL)
     }
 
-    private func startRequest(for key: String, fallbackURL: URL) {
+    private func startRequest(
+        for key: String,
+        fallbackURL: URL,
+        preferredURL: URL? = nil,
+        initialCachePolicy: URLRequest.CachePolicy = .returnCacheDataElseLoad
+    ) {
         guard inFlight[key] == nil else { return }
         let requestID = UUID()
-        let initialURL = demands.values.first(where: { $0.originKey == key })?.url ?? fallbackURL
+        let initialURL = preferredURL
+            ?? demands.values.first(where: { $0.originKey == key })?.url
+            ?? fallbackURL
         let hints = domCandidates[key] ?? []
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             let initialReport = await self.fetchFavicon(
                 for: initialURL,
                 iconURLHints: hints,
-                cachePolicy: .returnCacheDataElseLoad
+                cachePolicy: initialCachePolicy
             )
             guard !Task.isCancelled,
                   self.inFlight[key]?.id == requestID else { return }
@@ -3181,6 +3231,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     private var faviconRequestGeneration: UInt64 = 0
     private var sourceIcon: NSImage?
     private var grayscaleIcon: NSImage?
+    private var sourceIconLuminance: CGFloat?
     private var isUnreadResponse = false
     private var attentionStyle: TabAttentionStyle = .dot
     private var attentionPalette: TabAttentionPalette = .red
@@ -3218,6 +3269,9 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         return label.textColor
     }
     var displayedIconTintColor: NSColor? { iconView.contentTintColor }
+    var displayedIconContrastBackgroundColor: NSColor? {
+        iconView.layer?.backgroundColor.flatMap(NSColor.init(cgColor:))
+    }
     var displayedAttentionStyle: TabAttentionStyle { attentionStyle }
     var displayedAttentionPalette: TabAttentionPalette { attentionPalette }
     var attentionSurfaceEffect: AttentionStyleEffect { attentionSurfaceView.renderedEffect }
@@ -3261,6 +3315,9 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         addSubview(attentionSurfaceView)
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.wantsLayer = true
+        iconView.layer?.masksToBounds = true
+        iconView.layer?.cornerRadius = 3.5
         setSourceIcon(Self.fallbackIcon())
         addSubview(iconView)
         unreadDotView.translatesAutoresizingMaskIntoConstraints = false
@@ -3875,8 +3932,10 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         sourceIcon = image
         if let image, !image.isTemplate {
             grayscaleIcon = Self.grayscaleImage(from: image)
+            sourceIconLuminance = Self.averageVisibleLuminance(of: image)
         } else {
             grayscaleIcon = nil
+            sourceIconLuminance = nil
         }
         applyIconAppearance()
         guard iconView.image != nil else { return .noImageDisplayed }
@@ -3896,7 +3955,29 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
             iconView.image = isActive ? base : (grayscaleIcon ?? base)
             iconView.contentTintColor = nil
         }
-        iconView.alphaValue = isActive ? 1 : (isHovered ? 0.74 : 0.56)
+        let contrastBackground = activeIconContrastBackgroundColor()
+        iconView.layer?.backgroundColor = contrastBackground?.cgColor
+        iconView.layer?.borderColor = contrastBackground.map {
+            $0.withAlphaComponent(0.28).cgColor
+        }
+        iconView.layer?.borderWidth = contrastBackground == nil ? 0 : 0.5
+        iconView.alphaValue = isActive ? 1 : (isHovered ? 0.60 : 0.38)
+    }
+
+    private func activeIconContrastBackgroundColor() -> NSColor? {
+        guard isActive,
+              sourceIcon?.isTemplate != true,
+              let sourceIconLuminance else {
+            return nil
+        }
+        let appearance = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])
+        if appearance == .darkAqua, sourceIconLuminance < 0.55 {
+            return NSColor.white.withAlphaComponent(0.92)
+        }
+        if appearance == .aqua, sourceIconLuminance > 0.82 {
+            return NSColor.black.withAlphaComponent(0.78)
+        }
+        return nil
     }
 
     private func updateRuntimeToolTip() {
@@ -3946,6 +4027,33 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         let result = NSImage(cgImage: cgImage, size: image.size)
         result.isTemplate = false
         return result
+    }
+
+    private static func averageVisibleLuminance(of image: NSImage) -> CGFloat? {
+        guard let data = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: data),
+              bitmap.pixelsWide > 0,
+              bitmap.pixelsHigh > 0 else {
+            return nil
+        }
+        var luminanceTotal: CGFloat = 0
+        var alphaTotal: CGFloat = 0
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else {
+                    continue
+                }
+                let alpha = color.alphaComponent
+                guard alpha > 0.02 else { continue }
+                let luminance = 0.2126 * color.redComponent
+                    + 0.7152 * color.greenComponent
+                    + 0.0722 * color.blueComponent
+                luminanceTotal += luminance * alpha
+                alphaTotal += alpha
+            }
+        }
+        guard alphaTotal > 0 else { return nil }
+        return luminanceTotal / alphaTotal
     }
 
     private static func fallbackIcon() -> NSImage? {

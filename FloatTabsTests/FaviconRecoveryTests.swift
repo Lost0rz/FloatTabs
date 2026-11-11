@@ -445,6 +445,222 @@ final class FaviconRecoveryTests: XCTestCase {
         provider.cancel(consumerID: menuID)
     }
 
+    func testManualReloadFetchesFreshBytesForSameResourceAndDeduplicatesOrigin() async throws {
+        let oldData = try fixtureImageData(color: .systemRed)
+        let newData = try fixtureImageData(color: .systemBlue)
+        let pageURL = try XCTUnwrap(URL(string: "https://reload-refresh.example.test/page"))
+        let iconURL = try XCTUnwrap(URL(string: "https://reload-refresh.example.test/icon.png"))
+        let sameOriginURL = try XCTUnwrap(URL(string: "https://reload-refresh.example.test/other"))
+        let loader = FaviconTestLoader { request, count in
+            let data = count == 1 ? oldData : newData
+            return (data, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let tabConsumer = UUID()
+        let menuConsumer = UUID()
+        let staleConsumer = UUID()
+        let initial = expectation(description: "all consumers receive the original icon")
+        initial.expectedFulfillmentCount = 3
+        let refreshed = expectation(description: "current Tab and menu consumers receive fresh bytes")
+        refreshed.expectedFulfillmentCount = 2
+        var tabImages: [NSImage?] = []
+        var menuImages: [NSImage?] = []
+        var staleImages: [NSImage?] = []
+        provider.setDOMCandidates([.declared(iconURL)], for: pageURL)
+        provider.subscribe(for: pageURL, consumerID: tabConsumer) { image in
+            tabImages.append(image)
+            if tabImages.count == 1 {
+                initial.fulfill()
+            } else {
+                refreshed.fulfill()
+            }
+        }
+        provider.subscribe(for: pageURL, consumerID: menuConsumer) { image in
+            menuImages.append(image)
+            if menuImages.count == 1 {
+                initial.fulfill()
+            } else {
+                refreshed.fulfill()
+            }
+        }
+        provider.subscribe(for: pageURL, consumerID: staleConsumer) { image in
+            staleImages.append(image)
+            initial.fulfill()
+        }
+        await fulfillment(of: [initial], timeout: 2)
+
+        provider.cancel(consumerID: staleConsumer)
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(iconURL)]),
+            for: [pageURL, sameOriginURL]
+        )
+        await fulfillment(of: [refreshed], timeout: 2)
+
+        XCTAssertEqual(loader.requests.count, 2)
+        XCTAssertEqual(loader.requests[0].cachePolicy, .returnCacheDataElseLoad)
+        XCTAssertEqual(loader.requests[1].cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(loader.requests.map(\.url), [iconURL, iconURL])
+        XCTAssertEqual(tabImages.count, 2)
+        XCTAssertEqual(menuImages.count, 2)
+        XCTAssertEqual(staleImages.count, 1, "cancelled consumer must not receive a stale completion")
+        XCTAssertNotEqual(
+            tabImages[0]?.tiffRepresentation,
+            tabImages[1]?.tiffRepresentation,
+            "same URL must be decoded again after an explicit Reload"
+        )
+        XCTAssertEqual(tabImages[1]?.tiffRepresentation, menuImages[1]?.tiffRepresentation)
+        provider.cancel(consumerID: tabConsumer)
+        provider.cancel(consumerID: menuConsumer)
+    }
+
+    func testManualReloadRefreshesTabAndCommittedOriginsSeparately() async throws {
+        let oldData = try fixtureImageData(color: .systemOrange)
+        let newData = try fixtureImageData(color: .systemTeal)
+        let tabHomeURL = try XCTUnwrap(URL(string: "https://bare-origin.example.test/home"))
+        let committedURL = try XCTUnwrap(URL(string: "https://www.example.test/page"))
+        let sharedIconURL = try XCTUnwrap(URL(string: "https://cdn.example.test/favicon.png"))
+        let loader = FaviconTestLoader { request, _ in
+            let data = request.cachePolicy == .reloadIgnoringLocalCacheData ? newData : oldData
+            return (data, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let provider = WebsiteFaviconProvider(dataLoader: { try await loader.load($0) })
+        let tabConsumer = UUID()
+        let menuConsumer = UUID()
+        let initial = expectation(description: "each origin receives its cached icon")
+        initial.expectedFulfillmentCount = 2
+        let refreshed = expectation(description: "both distinct origin consumers receive fresh icons")
+        refreshed.expectedFulfillmentCount = 2
+        var tabImages: [NSImage?] = []
+        var menuImages: [NSImage?] = []
+        provider.setDOMCandidates([.declared(sharedIconURL)], for: tabHomeURL)
+        provider.setDOMCandidates([.declared(sharedIconURL)], for: committedURL)
+        provider.subscribe(for: tabHomeURL, consumerID: tabConsumer) { image in
+            tabImages.append(image)
+            (tabImages.count == 1 ? initial : refreshed).fulfill()
+        }
+        provider.subscribe(for: committedURL, consumerID: menuConsumer) { image in
+            menuImages.append(image)
+            (menuImages.count == 1 ? initial : refreshed).fulfill()
+        }
+        await fulfillment(of: [initial], timeout: 2)
+
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(sharedIconURL)]),
+            for: [committedURL, tabHomeURL]
+        )
+        await fulfillment(of: [refreshed], timeout: 2)
+
+        XCTAssertEqual(loader.requests.count, 4)
+        XCTAssertEqual(loader.requests.filter { $0.cachePolicy == .returnCacheDataElseLoad }.count, 2)
+        XCTAssertEqual(loader.requests.filter { $0.cachePolicy == .reloadIgnoringLocalCacheData }.count, 2)
+        XCTAssertEqual(tabImages.count, 2)
+        XCTAssertEqual(menuImages.count, 2)
+        XCTAssertNotEqual(tabImages[0]?.tiffRepresentation, tabImages[1]?.tiffRepresentation)
+        XCTAssertNotEqual(menuImages[0]?.tiffRepresentation, menuImages[1]?.tiffRepresentation)
+        provider.cancel(consumerID: tabConsumer)
+        provider.cancel(consumerID: menuConsumer)
+    }
+
+    func testFailedManualReloadRefreshRetainsExistingImage() async throws {
+        let oldData = try fixtureImageData(color: .systemGreen)
+        let retryGate = FaviconRetryGate()
+        let pageURL = try XCTUnwrap(URL(string: "https://reload-retain.example.test/"))
+        let iconURL = try XCTUnwrap(URL(string: "https://reload-retain.example.test/icon.png"))
+        let loader = FaviconTestLoader { request, _ in
+            guard request.cachePolicy == .returnCacheDataElseLoad else {
+                throw URLError(.timedOut)
+            }
+            return (oldData, Self.response(for: request, status: 200, mimeType: "image/png"))
+        }
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            retryWaiter: { await retryGate.wait(for: $0) }
+        )
+        let consumerID = UUID()
+        var delivered: [NSImage?] = []
+        let loaded = expectation(description: "valid previous image is cached")
+        provider.setDOMCandidates([.declared(iconURL)], for: pageURL)
+        provider.subscribe(for: pageURL, consumerID: consumerID) { image in
+            delivered.append(image)
+            loaded.fulfill()
+        }
+        await fulfillment(of: [loaded], timeout: 2)
+        let originalImage = try XCTUnwrap(delivered.first ?? nil)
+
+        provider.refreshAfterManualReload(
+            candidateReadResult: .candidates([.declared(iconURL)]),
+            for: [pageURL]
+        )
+        await retryGate.waitUntilScheduled()
+
+        let retainedDuringRetry = await load(provider, from: pageURL)
+        XCTAssertTrue(retainedDuringRetry === originalImage)
+        XCTAssertEqual(delivered.count, 1, "failed fresh fetch must not clear or replace the old image")
+        XCTAssertTrue(loader.requests.dropFirst().allSatisfy {
+            $0.cachePolicy == .reloadIgnoringLocalCacheData
+        })
+        XCTAssertGreaterThan(loader.requests.count, 1)
+
+        provider.cancel(consumerID: consumerID)
+        retryGate.resumeNext()
+        let retainedAfterCancel = await load(provider, from: pageURL)
+        XCTAssertTrue(retainedAfterCancel === originalImage)
+    }
+
+    func testManualReloadIntentCapturesAndConsumesOnlyItsExactGeneration() {
+        let identity = WebRuntimeDiagnosticIdentity(
+            runtimeGeneration: 4,
+            webViewInstanceID: UUID()
+        )
+        let otherIdentity = WebRuntimeDiagnosticIdentity(
+            runtimeGeneration: 5,
+            webViewInstanceID: UUID()
+        )
+        var intent = ManualFaviconReloadIntent(
+            runtimeIdentity: identity,
+            baselineNavigationGeneration: 17
+        )
+
+        XCTAssertEqual(
+            intent.recordNavigationStart(runtimeIdentity: identity, navigationGeneration: 17),
+            .ignored
+        )
+        XCTAssertEqual(
+            intent.recordNavigationStart(runtimeIdentity: identity, navigationGeneration: 18),
+            .captured
+        )
+        XCTAssertFalse(intent.consumeNavigationFinish(runtimeIdentity: identity, navigationGeneration: 17))
+        XCTAssertFalse(intent.consumeNavigationFinish(runtimeIdentity: otherIdentity, navigationGeneration: 18))
+        XCTAssertTrue(intent.consumeNavigationFinish(runtimeIdentity: identity, navigationGeneration: 18))
+        XCTAssertFalse(intent.consumeNavigationFinish(runtimeIdentity: identity, navigationGeneration: 18))
+
+        var replacedRuntimeIntent = ManualFaviconReloadIntent(
+            runtimeIdentity: identity,
+            baselineNavigationGeneration: 17
+        )
+        XCTAssertEqual(
+            replacedRuntimeIntent.recordNavigationStart(
+                runtimeIdentity: otherIdentity,
+                navigationGeneration: 18
+            ),
+            .invalidated
+        )
+
+        var expiredIntent = ManualFaviconReloadIntent(
+            runtimeIdentity: identity,
+            baselineNavigationGeneration: 17,
+            requestedAt: 100
+        )
+        XCTAssertEqual(
+            expiredIntent.recordNavigationStart(
+                runtimeIdentity: identity,
+                navigationGeneration: 18,
+                at: 116
+            ),
+            .invalidated
+        )
+    }
+
     func testRemovingUncachedDOMCandidateFallsBackWithoutStrandingConsumer() async throws {
         let declaredData = try fixtureImageData(color: .systemRed)
         let fallbackData = try fixtureImageData(color: .systemBlue)
@@ -762,7 +978,7 @@ final class FaviconRecoveryTests: XCTestCase {
 
                 let displayed = try! XCTUnwrap(tab.displayedIcon)
                 let data = try! XCTUnwrap(displayed.tiffRepresentation)
-                XCTAssertEqual(tab.displayedIconAlpha, isActive ? 1 : 0.56, accuracy: 0.001)
+                XCTAssertEqual(tab.displayedIconAlpha, isActive ? 1 : 0.38, accuracy: 0.001)
                 if isActive {
                     XCTAssertTrue(displayed === icon)
                     activeImages[isResident] = data
@@ -776,6 +992,69 @@ final class FaviconRecoveryTests: XCTestCase {
 
         XCTAssertEqual(activeImages[false], activeImages[true])
         XCTAssertEqual(inactiveImages[false], inactiveImages[true])
+    }
+
+    func testActiveIconContrastBackgroundAdaptsToAppearanceWithoutChangingBrandOrGeometry() {
+        let profile = makeProfile(url: "https://www.google.com/")
+        let tab = ExternalWebAppTabView(slotID: UUID(), faviconLoader: { _, _ in })
+        tab.frame = NSRect(x: 0, y: 0, width: 220, height: 44)
+
+        tab.appearance = NSAppearance(named: .darkAqua)
+        tab.update(profile: profile, isActive: true, isResident: true)
+        let activeWidth = tab.preferredWidth
+        let blackBrandIcon = fixtureImage(color: .black)
+        tab.setSourceIcon(blackBrandIcon)
+        XCTAssertEqual(activeWidth, tab.preferredWidth)
+        tab.layoutSubtreeIfNeeded()
+        let darkIconFrame = tab.iconFrame
+        XCTAssertTrue(tab.displayedIcon === blackBrandIcon)
+        XCTAssertEqual(tab.displayedIconAlpha, 1, accuracy: 0.001)
+        XCTAssertNotNil(tab.displayedIconContrastBackgroundColor)
+
+        tab.update(profile: profile, isActive: false, isResident: true)
+        tab.layoutSubtreeIfNeeded()
+        XCTAssertNil(tab.displayedIconContrastBackgroundColor)
+        XCTAssertEqual(tab.displayedIconAlpha, 0.38, accuracy: 0.001)
+        XCTAssertFalse(tab.displayedIcon === blackBrandIcon)
+        XCTAssertEqual(tab.iconFrame, darkIconFrame)
+        tab.setHovered(true)
+        XCTAssertEqual(tab.displayedIconAlpha, 0.60, accuracy: 0.001)
+        XCTAssertLessThan(tab.displayedIconAlpha, 1)
+
+        tab.setHovered(false)
+        tab.update(profile: profile, isActive: true, isResident: true)
+        XCTAssertEqual(tab.preferredWidth, activeWidth)
+
+        let lightTab = ExternalWebAppTabView(slotID: UUID(), faviconLoader: { _, _ in })
+        lightTab.appearance = NSAppearance(named: .aqua)
+        lightTab.update(profile: profile, isActive: true, isResident: false)
+        lightTab.setSourceIcon(blackBrandIcon)
+        XCTAssertNil(lightTab.displayedIconContrastBackgroundColor)
+        let whiteBrandIcon = fixtureImage(color: .white)
+        lightTab.setSourceIcon(whiteBrandIcon)
+        XCTAssertTrue(lightTab.displayedIcon === whiteBrandIcon)
+        XCTAssertNotNil(lightTab.displayedIconContrastBackgroundColor)
+
+        let multicolorIcon = NSImage(size: NSSize(width: 16, height: 16))
+        multicolorIcon.lockFocus()
+        NSColor.systemBlue.setFill()
+        NSRect(x: 0, y: 0, width: 8, height: 16).fill()
+        NSColor.systemYellow.setFill()
+        NSRect(x: 8, y: 0, width: 8, height: 16).fill()
+        multicolorIcon.unlockFocus()
+        tab.setSourceIcon(multicolorIcon)
+        tab.update(profile: profile, isActive: true, isResident: false)
+        XCTAssertTrue(tab.displayedIcon === multicolorIcon)
+        XCTAssertEqual(tab.displayedIconAlpha, 1, accuracy: 0.001)
+
+        var faviconRequests = 0
+        let noRefetchTab = ExternalWebAppTabView(slotID: UUID(), faviconLoader: { _, completion in
+            faviconRequests += 1
+            completion(nil)
+        })
+        noRefetchTab.update(profile: profile, isActive: false, isResident: false)
+        noRefetchTab.update(profile: profile, isActive: true, isResident: true)
+        XCTAssertEqual(faviconRequests, 1, "Active state changes must not request another favicon")
     }
 
     func testActiveConsumerRetriesAfterCooldownWithoutAnotherUIUpdate() async throws {
