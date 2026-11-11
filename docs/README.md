@@ -25,7 +25,7 @@ This index maps **FloatTabs-specific** product/technical documents. [AGENTS.md](
 - Do not clear Profile, Cookie, Session or user configuration to conceal a Runtime fault. Diagnostics and reload/restart recovery do not establish root cause.
 - Public WebKit/macOS APIs cannot reliably attribute all app-owned WebContent/GPU RAM; Runtime count is not an exact GiB budget.
 
-The [Adaptive Lifecycle Restore V2](architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md), [Phase 8 Pressure/Efficiency Rescope V1](architecture/FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md) and other architecture-indexed documents own **bounded technical semantics**, not present task permission. Check their applicability against more recent accepted contracts and actual production source/tests.
+The [Adaptive Lifecycle Restore V2](architecture/FloatTabs_Adaptive_Lifecycle_Restore_Contract_V2.md) and [Runtime Lifecycle Policy V7](architecture/FloatTabs_Runtime_Lifecycle_Policy_V7.md) describe bounded technical behavior, while the [Phase 8 re-scope](architecture/FloatTabs_Runtime_Lifecycle_Phase8_Pressure_Efficiency_Rescope_Contract_V1.md) is historical evidence where superseded. Current source/tests resolve implementation state.
 
 The [Favicon Identity and Active-State Amendment V1](product/FloatTabs_Favicon_Active_State_Amendment_V1.md) records the current bounded Tab and menu-bar favicon projection contract; its rules do not assert live third-party resource availability.
 
