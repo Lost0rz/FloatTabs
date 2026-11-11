@@ -1836,7 +1836,7 @@ final class FaviconRecoveryTests: XCTestCase {
         )
         let restoredImage = await load(restartedProvider, from: pageURL)
         XCTAssertNotNil(restoredImage)
-        XCTAssertEqual(restoredImage?.tiffRepresentation, originalImage?.tiffRepresentation)
+        XCTAssertEqual(restoredImage?.size, originalImage?.size)
         XCTAssertEqual(
             restartedProvider.iconControlState(for: pageURL),
             WebsiteFaviconProvider.IconControlState(hasAcceptedIcon: true, isLocked: true)
@@ -1860,6 +1860,94 @@ final class FaviconRecoveryTests: XCTestCase {
         let recoveredImage = await load(recoveryProvider, from: corruptOrigin)
         XCTAssertNil(recoveredImage, "corrupt persisted data fails closed instead of being silently replaced")
         XCTAssertEqual(try Data(contentsOf: corruptURL), badBytes)
+    }
+
+    func testHighResolutionComplexIconsPersistAsCanonical32PixelPNGForIconAndMask() async throws {
+        let sourcePNG = try fixtureHighEntropyImageData()
+        XCTAssertGreaterThan(sourcePNG.count, 64 * 1024)
+        let sourceBitmap = try XCTUnwrap(NSBitmapImageRep(data: sourcePNG))
+        XCTAssertEqual(sourceBitmap.pixelsWide, 512)
+        XCTAssertEqual(sourceBitmap.pixelsHigh, 512)
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabs-Favicon-Normalized-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        for (index, kind) in [WebsiteFaviconProvider.Candidate.Kind.icon, .mask].enumerated() {
+            let host = "normalized-\(index).example.test"
+            let pageURL = try XCTUnwrap(URL(string: "https://\(host)/"))
+            let iconURL = try XCTUnwrap(URL(string: "https://\(host)/favicon.png"))
+            let originKey = try XCTUnwrap(WebsiteFaviconProvider.originKey(for: pageURL))
+            let loader = FaviconTestLoader { request, _ in
+                (sourcePNG, Self.response(for: request, status: 200, mimeType: "image/png"))
+            }
+            let assetStore = WebsiteFaviconAssetStore(directoryURL: directory)
+            let provider = WebsiteFaviconProvider(
+                dataLoader: { try await loader.load($0) },
+                assetStore: assetStore
+            )
+            provider.setDOMCandidates([
+                WebsiteFaviconProvider.Candidate(
+                    url: iconURL,
+                    kind: kind,
+                    sizes: "512x512",
+                    type: "image/png",
+                    mediaSpecific: false,
+                    sourceOrder: index
+                ),
+            ], for: pageURL)
+
+            let acceptedImage = await load(provider, from: pageURL)
+            XCTAssertNotNil(acceptedImage, "the first valid 512×512 icon must be accepted")
+            XCTAssertEqual(acceptedImage?.isTemplate, kind == .mask)
+            XCTAssertEqual(
+                provider.iconControlState(for: pageURL),
+                WebsiteFaviconProvider.IconControlState(hasAcceptedIcon: true, isLocked: false)
+            )
+
+            let acceptedRecord: WebsiteFaviconAssetStore.Record
+            if case let .record(record) = assetStore.load(originKey: originKey) {
+                acceptedRecord = record
+            } else {
+                XCTFail("accepted normalized favicon should be persisted")
+                continue
+            }
+            XCTAssertEqual(acceptedRecord.kind, kind.rawValue)
+            XCTAssertLessThanOrEqual(acceptedRecord.imageData.count, 64 * 1024)
+            print(
+                "Favicon persistence fixture: source PNG \(sourcePNG.count) bytes; "
+                    + "canonical PNG \(acceptedRecord.imageData.count) bytes (32×32, \(kind.rawValue))."
+            )
+            let persistedBitmap = try XCTUnwrap(NSBitmapImageRep(data: acceptedRecord.imageData))
+            XCTAssertEqual(persistedBitmap.pixelsWide, 32)
+            XCTAssertEqual(persistedBitmap.pixelsHigh, 32)
+
+            let restartLoader = FaviconTestLoader { request, _ in
+                throw URLError(.cannotFindHost)
+            }
+            let restartedStore = WebsiteFaviconAssetStore(directoryURL: directory)
+            let restartedProvider = WebsiteFaviconProvider(
+                dataLoader: { try await restartLoader.load($0) },
+                assetStore: restartedStore
+            )
+            let restoredImage = await load(restartedProvider, from: pageURL)
+            XCTAssertNotNil(restoredImage, "restart restoration validates the persisted pixel fingerprint")
+            XCTAssertEqual(restoredImage?.isTemplate, kind == .mask)
+            XCTAssertTrue(restartLoader.requests.isEmpty, "restored icon should be served before fetching")
+            var restoredRect = NSRect(origin: .zero, size: restoredImage?.size ?? .zero)
+            let restoredCGImage = restoredImage?.cgImage(
+                forProposedRect: &restoredRect,
+                context: nil,
+                hints: nil
+            )
+            XCTAssertEqual(restoredCGImage?.width, 32)
+            XCTAssertEqual(restoredCGImage?.height, 32)
+            if case let .record(restoredRecord) = restartedStore.load(originKey: originKey) {
+                XCTAssertEqual(restoredRecord.pixelSHA256, acceptedRecord.pixelSHA256)
+            } else {
+                XCTFail("restart should leave the validated favicon record intact")
+            }
+        }
     }
 
     func testFaviconAssetStoreEnforcesBoundsAndProtectsLockedOrigins() throws {
@@ -1995,6 +2083,43 @@ final class FaviconRecoveryTests: XCTestCase {
     ) throws -> Data {
         let tiff = try XCTUnwrap(fixtureImage(color: color, size: size).tiffRepresentation)
         let bitmap = try XCTUnwrap(NSBitmapImageRep(data: tiff))
+        return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+    }
+
+    private func fixtureHighEntropyImageData(width: Int = 512, height: Int = 512) throws -> Data {
+        let bytesPerRow = width * 4
+        var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
+        var state: UInt32 = 0x6d2b79f5
+        for pixel in 0..<(width * height) {
+            let offset = pixel * 4
+            for channel in 0..<3 {
+                state ^= state << 13
+                state ^= state >> 17
+                state ^= state << 5
+                pixels[offset + channel] = UInt8(truncatingIfNeeded: state)
+            }
+            pixels[offset + 3] = 255
+        }
+        let pixelData = Data(pixels)
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let provider = try XCTUnwrap(CGDataProvider(data: pixelData as CFData))
+        let bitmapInfo = CGBitmapInfo.byteOrder32Big.union(
+            CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        )
+        let cgImage = try XCTUnwrap(CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        ))
+        let bitmap = NSBitmapImageRep(cgImage: cgImage)
         return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
     }
 

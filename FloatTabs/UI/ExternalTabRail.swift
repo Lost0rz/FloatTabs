@@ -2,6 +2,7 @@ import AppKit
 import CoreImage
 import CryptoKit
 import Foundation
+import ImageIO
 import KeyboardShortcuts
 import QuartzCore
 import WebKit
@@ -3362,15 +3363,12 @@ final class WebsiteFaviconProvider {
         }
     }
 
-    private static func serializedImageData(_ image: NSImage) -> Data? {
-        guard let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff) else {
-            return nil
-        }
-        return bitmap.representation(using: .png, properties: [:])
-    }
+    private static let normalizedPixelSide = 32
+    private static let normalizedPixelBitmapInfo = CGBitmapInfo.byteOrder32Big.union(
+        CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+    )
 
-    private static func normalizedPixelSHA256(of image: NSImage) -> String? {
+    private static func normalizedPixelData(of image: NSImage) -> Data? {
         var proposedRect = NSRect(origin: .zero, size: image.size)
         guard let source = image.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil),
               image.size.width > 0,
@@ -3378,12 +3376,9 @@ final class WebsiteFaviconProvider {
               let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
             return nil
         }
-        let side = 32
+        let side = normalizedPixelSide
         let bytesPerRow = side * 4
         var pixels = [UInt8](repeating: 0, count: side * bytesPerRow)
-        let bitmapInfo = CGBitmapInfo.byteOrder32Big.union(
-            CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
-        )
         let drawn = pixels.withUnsafeMutableBytes { storage -> Bool in
             guard let context = CGContext(
                 data: storage.baseAddress,
@@ -3392,7 +3387,7 @@ final class WebsiteFaviconProvider {
                 bitsPerComponent: 8,
                 bytesPerRow: bytesPerRow,
                 space: colorSpace,
-                bitmapInfo: bitmapInfo.rawValue
+                bitmapInfo: normalizedPixelBitmapInfo.rawValue
             ) else {
                 return false
             }
@@ -3416,7 +3411,48 @@ final class WebsiteFaviconProvider {
             return true
         }
         guard drawn else { return nil }
-        let digest = SHA256.hash(data: Data(pixels))
+        return Data(pixels)
+    }
+
+    private static func serializedImageData(_ image: NSImage) -> Data? {
+        let side = normalizedPixelSide
+        let bytesPerRow = side * 4
+        guard let pixels = normalizedPixelData(of: image),
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let provider = CGDataProvider(data: pixels as CFData),
+              let canonicalImage = CGImage(
+                width: side,
+                height: side,
+                bitsPerComponent: 8,
+                bitsPerPixel: 32,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: normalizedPixelBitmapInfo,
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: true,
+                intent: .defaultIntent
+              ) else {
+            return nil
+        }
+
+        let pngData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            pngData as CFMutableData,
+            "public.png" as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+        CGImageDestinationAddImage(destination, canonicalImage, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return pngData as Data
+    }
+
+    private static func normalizedPixelSHA256(of image: NSImage) -> String? {
+        guard let pixels = normalizedPixelData(of: image) else { return nil }
+        let digest = SHA256.hash(data: pixels)
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
