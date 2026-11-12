@@ -31,6 +31,6 @@ Preserve single-writer state ownership. Do not conceal Runtime defects by resett
 
 ## Project CI environment and data safety
 
-- Product macOS builds run on Apple Silicon. The established self-hosted runner labels are `[self-hosted, macOS, ARM64, mac-mini-ci]`. Runner definitions and test commands live in `.github/workflows/` and `tools/ci/`, not in this file.
+- Product macOS builds run on Apple Silicon. The established self-hosted runner labels are `[self-hosted, macOS, ARM64, mac-mini-ci]`. Project test commands and Runner labels are described in `.github/ci-capabilities.json` and executed through the installed Governance plugin's pinned reusable workflow; project workflow files retain their CI execution and release wiring.
 - The repository is public: untrusted fork PR code must not run on the private self-hosted Mac runner.
 - Browser Profiles, Slot configuration, website/session data, preferences, backups, and recovery material are user data. Runtime recovery or diagnostics must not delete them, or turn unreadable persistent configuration into an empty fallback, without an explicit product/data-loss decision.
