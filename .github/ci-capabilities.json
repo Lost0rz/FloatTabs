@@ -380,6 +380,43 @@
       ],
       "timeout_minutes": 10,
       "fork_safe": true
+    },
+    {
+      "id": "benchmark-selftest",
+      "tier": "V1",
+      "paths": [
+        "tools/benchmark/**"
+      ],
+      "runner": [
+        "macos-26"
+      ],
+      "fork_safe": true,
+      "timeout_minutes": 12,
+      "setup": [
+        [
+          "python3",
+          "-m",
+          "py_compile",
+          "tools/benchmark/floattabs_benchmark.py",
+          "tools/benchmark/floattabs_phase7_acceptance.py",
+          "tools/benchmark/floattabs_lifecycle_benchmark.py"
+        ],
+        [
+          "python3",
+          "tools/benchmark/floattabs_benchmark.py",
+          "--self-test"
+        ],
+        [
+          "python3",
+          "tools/benchmark/floattabs_phase7_acceptance.py",
+          "--self-test"
+        ]
+      ],
+      "command": [
+        "python3",
+        "-c",
+        "import subprocess; r = subprocess.run([\"python3\", \"tools/benchmark/floattabs_lifecycle_benchmark.py\"], capture_output=True, text=True); assert r.returncode != 0 and \"RETIRED\" in (r.stdout + r.stderr), \"Stage 5E benchmark retirement invariant failed\""
+      ]
     }
   ]
 }
