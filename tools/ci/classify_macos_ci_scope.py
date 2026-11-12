@@ -28,6 +28,7 @@ CONFIG_PREFIXES = (
     "tools/ci/",
 )
 CONFIG_FILES = {
+    ".github/ci-capabilities.json",
     ".github/actionlint.yaml",
     ".github/actionlint.yml",
 }
