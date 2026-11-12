@@ -30,6 +30,13 @@ class MacOSCIScopeTests(unittest.TestCase):
         self.assertFalse(result["run_product_tests"])
         self.assertFalse(result["run_workflow_validation"])
 
+    def test_accepted_ci_capabilities_are_configuration_only(self):
+        result = classify_paths([".github/ci-capabilities.json"])
+        self.assertEqual(result["scope"], "workflow-config")
+        self.assertFalse(result["run_product_tests"])
+        self.assertTrue(result["run_workflow_validation"])
+        self.assertEqual(result["workflow_files"], [])
+
     def test_swift_product_source_runs_product_tests(self):
         result = classify_paths(["FloatTabs/Web/WebViewPool.swift"])
         self.assertTrue(result["run_product_tests"])
