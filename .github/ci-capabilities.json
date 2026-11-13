@@ -233,7 +233,6 @@
       "paths": [
         "FloatTabs/Panel/**",
         "FloatTabs/MenuBar/**",
-        "FloatTabs/App/AppCoordinator.swift",
         "FloatTabs/App/AppDelegate.swift",
         "FloatTabs/App/FloatTabsApp.swift",
         "FloatTabs/Web/WebViewContainer.swift",

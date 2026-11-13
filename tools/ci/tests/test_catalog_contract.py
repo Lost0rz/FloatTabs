@@ -103,6 +103,8 @@ class FloatTabsCapabilityContractTests(unittest.TestCase):
         self.assertIn("swift-integration",
                       selecting("FloatTabs.xcodeproj/xcshareddata/xcschemes/FloatTabs.xcscheme"))
         self.assertEqual(len(CATALOG["tests"]), 15)
+        self.assertLessEqual(len(selecting("FloatTabs/App/AppCoordinator.swift")), 4)
+        self.assertIn("swift-cross-feature", selecting("FloatTabs/App/AppCoordinator.swift"))
 
 
 if __name__ == "__main__":
