@@ -4,6 +4,8 @@ on:
   pull_request:
     branches: [main]
     types: [opened, reopened, synchronize, ready_for_review]
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       stage:
@@ -31,8 +33,8 @@ permissions:
 jobs:
   governed:
     # Drafts never consume Mac runner time; Ready PRs use the trusted main catalog.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    uses: Lost0rz/Engineering-Governance/.github/workflows/ci-router-reusable.yml@v0.10.0
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+    uses: Lost0rz/Engineering-Governance/.github/workflows/ci-router-reusable.yml@v0.10.1
     with:
       capabilities_path: .github/ci-capabilities.json
       stage: ${{ github.event_name == 'workflow_dispatch' && inputs.stage || 'auto' }}
@@ -64,3 +66,125 @@ jobs:
             exit 1
           fi
           echo "EG_ROUTED_READY_VERIFICATION_PASS"
+  push_route:
+    # Accepted main commits may use their own trusted capability map; do not
+    # promote every push to a full backend/frontend release suite.
+    name: Main push affected Domain plan
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      run_tests: ${{ steps.plan.outputs.run_tests }}
+      selected: ${{ steps.plan.outputs.selected }}
+      coverage: ${{ steps.plan.outputs.coverage }}
+      review_required: ${{ steps.plan.outputs.review_required }}
+    steps:
+      - name: Checkout accepted main commit and its history
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: project
+
+      - name: Checkout released Governance router
+        uses: actions/checkout@v4
+        with:
+          repository: Lost0rz/Engineering-Governance
+          ref: v0.10.1
+          persist-credentials: false
+          path: governance
+
+      - name: Select affected suites from accepted main catalog
+        id: plan
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Unusual history rewrites must not silently become green no-test runs.
+          if [[ ! "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ || "$BEFORE_SHA" =~ ^0+$ ]]; then
+            echo "::error::No valid previous main commit; manual review required."
+            exit 2
+          fi
+          test "$(git -C project rev-parse HEAD)" = "$HEAD_SHA"
+          git -C project cat-file -e "$BEFORE_SHA^{commit}"
+          if ! git -C project merge-base --is-ancestor "$BEFORE_SHA" "$HEAD_SHA"; then
+            echo "::error::Non-fast-forward main push; verify the changed scope manually."
+            exit 2
+          fi
+          python3 governance/skills/project-governance/scripts/ci-router.py plan \
+            --repo-root project \
+            --base "$BEFORE_SHA" --head "$HEAD_SHA" \
+            --config-ref "$HEAD_SHA" --config-source base \
+            --stage milestone \
+            --output "$RUNNER_TEMP/main-push-plan.json" \
+            --github-output "$GITHUB_OUTPUT"
+          python3 - "$RUNNER_TEMP/main-push-plan.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          print("MAIN_PUSH_STAGE=" + plan["stage"])
+          print("MAIN_PUSH_SELECTED=" + ",".join(plan["selected_test_ids"]))
+          print("MAIN_PUSH_COVERAGE=" + plan["coverage"])
+          if plan["unmapped_paths"] or plan["nonregular_paths"] or plan["review_required"]:
+              raise SystemExit("MAIN_PUSH_SCOPE_UNVERIFIED: unmapped or nonregular changes")
+          PY
+
+  push_execute:
+    name: Main push scoped test
+    needs: push_route
+    if: needs.push_route.result == 'success' && needs.push_route.outputs.run_tests == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.push_route.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout_minutes }}
+    steps:
+      - name: Checkout exact accepted main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Run selected accepted capability
+        shell: bash
+        run: ${{ matrix.script }}
+
+  push_result:
+    name: Main push scoped verification
+    needs: [push_route, push_execute]
+    if: always() && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report actual scoped result
+        shell: bash
+        env:
+          ROUTE_RESULT: ${{ needs.push_route.result }}
+          EXECUTE_RESULT: ${{ needs.push_execute.result }}
+          RUN_TESTS: ${{ needs.push_route.outputs.run_tests }}
+          SELECTED: ${{ needs.push_route.outputs.selected }}
+          COVERAGE: ${{ needs.push_route.outputs.coverage }}
+          REVIEW_REQUIRED: ${{ needs.push_route.outputs.review_required }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Main push affected verification"
+            echo "- Selected: ${SELECTED:-NONE}"
+            echo "- Coverage: ${COVERAGE:-UNKNOWN}"
+            echo "- Route: $ROUTE_RESULT"
+            echo "- Executor: $EXECUTE_RESULT"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [[ "$ROUTE_RESULT" == "success" ]] || exit 1
+          [[ "$REVIEW_REQUIRED" != "true" ]] || exit 1
+          [[ "$COVERAGE" != "PARTIAL_UNMAPPED" ]] || exit 1
+          if [[ "$RUN_TESTS" == "true" ]]; then
+            [[ "$EXECUTE_RESULT" == "success" ]] || exit 1
+            echo "MAIN_PUSH_SCOPED_TESTS_PASS (not FULL_SUITE_PASS)"
+          else
+            echo "MAIN_PUSH_NO_AFFECTED_TESTS (not FULL_SUITE_PASS)"
+          fi
+
+
