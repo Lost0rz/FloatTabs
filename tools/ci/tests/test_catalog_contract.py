@@ -30,7 +30,8 @@ class FloatTabsCapabilityContractTests(unittest.TestCase):
                     self.assertTrue(selecting(rel), rel)
 
     def test_localized_source_changes_do_not_select_all_xctests(self):
-        self.assertEqual(selecting("FloatTabs/Web/SlotLifecycleCoordinator.swift"), ["swift-runtime"])
+        self.assertEqual(selecting("FloatTabs/Web/SlotLifecycleCoordinator.swift"),
+                         ["swift-runtime", "swift-cross-feature"])
         self.assertEqual(selecting("FloatTabs/Web/ChatGPTAttentionBridge.swift"), ["swift-attention"])
         self.assertEqual(selecting("FloatTabs/Diagnostics/RuntimeDiagnostics.swift"), ["swift-diagnostics"])
         self.assertEqual(selecting("FloatTabs/Storage/WebsiteCacheCleanupService.swift"), ["swift-storage"])
