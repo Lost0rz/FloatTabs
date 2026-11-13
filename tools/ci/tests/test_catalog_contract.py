@@ -1,5 +1,5 @@
-import fnmatch
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -8,11 +8,34 @@ ROOT = Path(__file__).resolve().parents[3]
 CATALOG = json.loads((ROOT / ".github/ci-capabilities.json").read_text(encoding="utf-8"))
 
 
+def route_matches(pattern, path):
+    """Mirror Governance ci-router.py path matching: * never crosses a slash."""
+    fragments = ["^"]
+    index = 0
+    while index < len(pattern):
+        if pattern.startswith("**/", index):
+            fragments.append("(?:.*/)?")
+            index += 3
+        elif pattern.startswith("**", index):
+            fragments.append(".*")
+            index += 2
+        elif pattern[index] == "*":
+            fragments.append("[^/]*")
+            index += 1
+        elif pattern[index] == "?":
+            fragments.append("[^/]")
+            index += 1
+        else:
+            fragments.append(re.escape(pattern[index]))
+            index += 1
+    return bool(re.match("".join(fragments) + "$", path))
+
+
 def selecting(path):
     return [
         entry["id"]
         for entry in CATALOG["tests"]
-        if any(fnmatch.fnmatchcase(path, glob) for glob in entry["paths"])
+        if any(route_matches(pattern, path) for pattern in entry["paths"])
     ]
 
 
@@ -53,6 +76,15 @@ class FloatTabsCapabilityContractTests(unittest.TestCase):
                     self.assertFalse(test.get("fork_safe", False))
                 if test.get("fork_safe", False):
                     self.assertNotIn("self-hosted", test["runner"])
+
+    def test_route_globs_do_not_claim_nested_single_segment_matches(self):
+        self.assertFalse(route_matches("FloatTabsTests/BrowserProfile*.swift",
+                                       "FloatTabsTests/Nested/BrowserProfileAddTests.swift"))
+        self.assertTrue(route_matches("FloatTabs/Storage/**",
+                                      "FloatTabs/Storage/Nested/Cache.swift"))
+        self.assertTrue(route_matches("FloatTabsTests/BrowserProfile*.swift",
+                                      "FloatTabsTests/BrowserProfileAddTests.swift"))
+        self.assertEqual(selecting("FloatTabsTests/Nested/BrowserProfileAddTests.swift"), [])
 
     def test_current_xctest_groups_use_only_testing_filters(self):
         for test in CATALOG["tests"]:
