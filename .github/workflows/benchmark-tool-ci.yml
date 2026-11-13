@@ -1,14 +1,8 @@
 name: Benchmark Tool CI
 
-# PR benchmark changes are selected by the shared Governance router.
-# Keep the historical post-merge and manual self-test as project evidence.
+# PR and main-push benchmark changes use the shared Governance router.
+# Keep this project-owned workflow only for explicitly requested manual self-tests.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'tools/benchmark/**'
-      - '.github/workflows/benchmark-tool-ci.yml'
   workflow_dispatch:
 
 jobs:

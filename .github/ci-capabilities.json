@@ -47,7 +47,6 @@
         "-only-testing:FloatTabsTests/WebViewPoolTests",
         "-only-testing:FloatTabsTests/WebViewFactoryTests",
         "-only-testing:FloatTabsTests/WebAttentionLifecycleTests",
-        "-only-testing:FloatTabsTests/WebAttentionCrossFeatureTests",
         "test"
       ],
       "timeout_minutes": 55
@@ -56,19 +55,59 @@
       "id": "swift-attention",
       "tier": "V2",
       "paths": [
-        "FloatTabs/Web/ChatGPT*.swift",
+        "FloatTabs/Web/ChatGPTAdapter.swift",
+        "FloatTabs/Web/ChatGPTAttentionBridge.swift",
         "FloatTabs/Web/WebAttentionCoordinator.swift",
+        "FloatTabs/App/AppCoordinator.swift",
+        "FloatTabsTests/ChatGPTAttentionBridgeTests.swift",
+        "FloatTabsTests/ChatGPTGenerationDetectorTests.swift",
+        "FloatTabsTests/WebAttentionCoordinatorTests.swift",
+        "FloatTabsTests/WebAttentionLifecycleTests.swift"
+      ],
+      "runner": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "mac-mini-ci"
+      ],
+      "command": [
+        "xcodebuild",
+        "-project",
+        "FloatTabs.xcodeproj",
+        "-scheme",
+        "FloatTabs",
+        "-configuration",
+        "Debug",
+        "-destination",
+        "platform=macOS,arch=arm64",
+        "CODE_SIGNING_ALLOWED=NO",
+        "-only-testing:FloatTabsTests/ChatGPTAttentionBridgeTests",
+        "-only-testing:FloatTabsTests/ChatGPTGenerationDetectorTests",
+        "-only-testing:FloatTabsTests/WebAttentionCoordinatorTests",
+        "-only-testing:FloatTabsTests/WebAttentionLifecycleTests",
+        "test"
+      ],
+      "timeout_minutes": 55
+    },
+    {
+      "id": "swift-responses",
+      "tier": "V2",
+      "paths": [
+        "FloatTabs/Web/ChatGPTResponseBridge.swift",
+        "FloatTabs/Web/ChatGPTResponseExtraction.swift",
+        "FloatTabs/Web/ChatGPTUnreadResponseCoordinator.swift",
         "FloatTabs/App/ChatGPTCompletionNotificationCoordinator.swift",
         "FloatTabs/App/AttentionSound*.swift",
+        "FloatTabs/Persistence/UnreadResponseStore.swift",
         "FloatTabs/Panel/AttentionPresentation.swift",
         "FloatTabs/Panel/WebAttentionRouting.swift",
-        "FloatTabs/Panel/PanelController.swift",
-        "FloatTabs/Persistence/UnreadResponseStore.swift",
-        "FloatTabs/App/AppCoordinator.swift",
-        "FloatTabsTests/ChatGPT*.swift",
-        "FloatTabsTests/WebAttention*.swift",
         "FloatTabsTests/AttentionSoundTests.swift",
-        "FloatTabsTests/UnreadResponseTests.swift"
+        "FloatTabsTests/ChatGPTCompletionNotificationTests.swift",
+        "FloatTabsTests/ChatGPTResponseBridgeTests.swift",
+        "FloatTabsTests/ChatGPTResponseExtractionTests.swift",
+        "FloatTabsTests/UnreadResponseTests.swift",
+        "FloatTabsTests/WebAttentionIndicatorTests.swift",
+        "FloatTabsTests/WebAttentionPresentationTests.swift"
       ],
       "runner": [
         "self-hosted",
@@ -88,20 +127,15 @@
         "platform=macOS,arch=arm64",
         "CODE_SIGNING_ALLOWED=NO",
         "-only-testing:FloatTabsTests/AttentionSoundTests",
-        "-only-testing:FloatTabsTests/ChatGPTAttentionBridgeTests",
         "-only-testing:FloatTabsTests/ChatGPTCompletionNotificationTests",
-        "-only-testing:FloatTabsTests/ChatGPTGenerationDetectorTests",
         "-only-testing:FloatTabsTests/ChatGPTResponseBridgeTests",
         "-only-testing:FloatTabsTests/ChatGPTResponseExtractionTests",
         "-only-testing:FloatTabsTests/UnreadResponseTests",
-        "-only-testing:FloatTabsTests/WebAttentionCoordinatorTests",
-        "-only-testing:FloatTabsTests/WebAttentionCrossFeatureTests",
         "-only-testing:FloatTabsTests/WebAttentionIndicatorTests",
-        "-only-testing:FloatTabsTests/WebAttentionLifecycleTests",
         "-only-testing:FloatTabsTests/WebAttentionPresentationTests",
         "test"
       ],
-      "timeout_minutes": 55
+      "timeout_minutes": 35
     },
     {
       "id": "swift-profile-data",
@@ -155,15 +189,11 @@
       "timeout_minutes": 55
     },
     {
-      "id": "swift-focus-shell",
+      "id": "swift-focus",
       "tier": "V2",
       "paths": [
-        "FloatTabs/Panel/**",
         "FloatTabs/Hotkeys/**",
-        "FloatTabs/MenuBar/**",
         "FloatTabs/App/AppCoordinator.swift",
-        "FloatTabs/App/AppDelegate.swift",
-        "FloatTabs/App/FloatTabsApp.swift",
         "FloatTabs/Web/WebFocusRouter.swift",
         "FloatTabs/Web/WebNavigationCoordinator.swift",
         "FloatTabs/Web/SlotNavigationObserver.swift",
@@ -172,9 +202,6 @@
         "FloatTabs/Web/WebSiteAdapter.swift",
         "FloatTabs/Web/WebSiteAdapterRegistry.swift",
         "FloatTabsTests/AppCommandControllerTests.swift",
-        "FloatTabsTests/ExternalShellTests.swift",
-        "FloatTabsTests/FaviconRecoveryTests.swift",
-        "FloatTabsTests/ScreenPositioningTests.swift",
         "FloatTabsTests/WebFocusAdapterTests.swift"
       ],
       "runner": [
@@ -195,16 +222,51 @@
         "platform=macOS,arch=arm64",
         "CODE_SIGNING_ALLOWED=NO",
         "-only-testing:FloatTabsTests/AppCommandControllerTests",
-        "-only-testing:FloatTabsTests/FullscreenRestoreCompletionTests",
+        "-only-testing:FloatTabsTests/WebFocusAdapterTests",
+        "test"
+      ],
+      "timeout_minutes": 35
+    },
+    {
+      "id": "swift-panel",
+      "tier": "V2",
+      "paths": [
+        "FloatTabs/Panel/**",
+        "FloatTabs/MenuBar/**",
+        "FloatTabs/App/AppDelegate.swift",
+        "FloatTabs/App/FloatTabsApp.swift",
+        "FloatTabs/Web/WebViewContainer.swift",
+        "FloatTabsTests/ExternalShellTests.swift",
+        "FloatTabsTests/FaviconRecoveryTests.swift",
+        "FloatTabsTests/ScreenPositioningTests.swift",
+        "FloatTabsTests/AppCommandControllerTests.swift"
+      ],
+      "runner": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "mac-mini-ci"
+      ],
+      "command": [
+        "xcodebuild",
+        "-project",
+        "FloatTabs.xcodeproj",
+        "-scheme",
+        "FloatTabs",
+        "-configuration",
+        "Debug",
+        "-destination",
+        "platform=macOS,arch=arm64",
+        "CODE_SIGNING_ALLOWED=NO",
         "-only-testing:FloatTabsTests/ExternalShellTests",
         "-only-testing:FloatTabsTests/FaviconRecoveryTests",
+        "-only-testing:FloatTabsTests/FullscreenRestoreCompletionTests",
         "-only-testing:FloatTabsTests/PanelMetricsTests",
         "-only-testing:FloatTabsTests/ScreenPositioningTests",
         "-only-testing:FloatTabsTests/PanelFrameStoreTests",
         "-only-testing:FloatTabsTests/FloatingPanelResizePolicyTests",
         "-only-testing:FloatTabsTests/PanelRootViewLayoutTests",
         "-only-testing:FloatTabsTests/PanelMovementHitTestingTests",
-        "-only-testing:FloatTabsTests/WebFocusAdapterTests",
         "test"
       ],
       "timeout_minutes": 55
@@ -215,11 +277,9 @@
       "paths": [
         "FloatTabs/UI/**",
         "FloatTabs/Web/WebViewFactory.swift",
-        "FloatTabs/Panel/AttentionPresentation.swift",
         "FloatTabsTests/SettingsInformationArchitectureTests.swift",
         "FloatTabsTests/WebsiteLayoutGeometryRegressionTests.swift",
         "FloatTabsTests/WebAttentionIndicatorTests.swift",
-        "FloatTabsTests/WebAttentionPresentationTests.swift",
         "FloatTabsTests/UnsupportedBrowserProfileTests.swift"
       ],
       "runner": [
@@ -242,12 +302,10 @@
         "-only-testing:FloatTabsTests/SettingsInformationArchitectureTests",
         "-only-testing:FloatTabsTests/WebsiteLayoutGeometryRegressionTests",
         "-only-testing:FloatTabsTests/WebAttentionIndicatorTests",
-        "-only-testing:FloatTabsTests/WebAttentionPresentationTests",
-        "-only-testing:FloatTabsTests/ExternalShellTests",
         "-only-testing:FloatTabsTests/UnsupportedBrowserProfileTests",
         "test"
       ],
-      "timeout_minutes": 55
+      "timeout_minutes": 25
     },
     {
       "id": "swift-diagnostics",
@@ -313,13 +371,77 @@
       "timeout_minutes": 55
     },
     {
+      "id": "swift-cross-feature",
+      "tier": "V3",
+      "paths": [
+        "FloatTabs/App/AppCoordinator.swift",
+        "FloatTabs/Web/SlotLifecycleCoordinator.swift",
+        "FloatTabs/Web/WebViewPool.swift",
+        "FloatTabs/Panel/PanelController.swift",
+        "FloatTabs/Web/WebFocusRouter.swift",
+        "FloatTabsTests/WebAttentionCrossFeatureTests.swift"
+      ],
+      "runner": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "mac-mini-ci"
+      ],
+      "command": [
+        "xcodebuild",
+        "-project",
+        "FloatTabs.xcodeproj",
+        "-scheme",
+        "FloatTabs",
+        "-configuration",
+        "Debug",
+        "-destination",
+        "platform=macOS,arch=arm64",
+        "CODE_SIGNING_ALLOWED=NO",
+        "-only-testing:FloatTabsTests/WebAttentionCrossFeatureTests",
+        "test"
+      ],
+      "timeout_minutes": 55
+    },
+    {
+      "id": "swift-build",
+      "tier": "V2",
+      "paths": [
+        "FloatTabs.xcodeproj/project.pbxproj",
+        "FloatTabs.xcodeproj/project.xcworkspace/**",
+        "FloatTabs/Info.plist",
+        "FloatTabs/Resources/**",
+        "tools/release/**"
+      ],
+      "runner": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "mac-mini-ci"
+      ],
+      "command": [
+        "xcodebuild",
+        "-project",
+        "FloatTabs.xcodeproj",
+        "-scheme",
+        "FloatTabs",
+        "-configuration",
+        "Debug",
+        "-destination",
+        "platform=macOS,arch=arm64",
+        "CODE_SIGNING_ALLOWED=NO",
+        "build-for-testing"
+      ],
+      "timeout_minutes": 45
+    },
+    {
       "id": "swift-integration",
       "tier": "V3",
       "paths": [
-        "FloatTabs.xcodeproj/**",
+        "FloatTabs.xcodeproj/xcshareddata/xcschemes/**",
+        "FloatTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
         "Package.swift",
-        "Package.resolved",
-        "tools/release/**"
+        "Package.resolved"
       ],
       "runner": [
         "self-hosted",
@@ -364,7 +486,10 @@
         ".github/workflows/**",
         ".github/actions/**",
         ".github/ci-capabilities.json",
-        "tools/ci/**"
+        "tools/ci/**",
+        ".github/actionlint.yaml",
+        ".gitignore",
+        "tools/release/**"
       ],
       "runner": [
         "ubuntu-latest"
@@ -380,6 +505,30 @@
       ],
       "timeout_minutes": 10,
       "fork_safe": true
+    },
+    {
+      "id": "app-resources",
+      "tier": "V1",
+      "paths": [
+        "FloatTabs/Info.plist",
+        "FloatTabs/Resources/**"
+      ],
+      "runner": [
+        "ubuntu-latest"
+      ],
+      "fork_safe": true,
+      "timeout_minutes": 10,
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tools/ci/tests",
+        "-p",
+        "test_resource_contract.py",
+        "-v"
+      ]
     },
     {
       "id": "benchmark-selftest",
