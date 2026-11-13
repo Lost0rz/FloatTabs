@@ -238,7 +238,8 @@
         "FloatTabs/Web/WebViewContainer.swift",
         "FloatTabsTests/ExternalShellTests.swift",
         "FloatTabsTests/FaviconRecoveryTests.swift",
-        "FloatTabsTests/ScreenPositioningTests.swift"
+        "FloatTabsTests/ScreenPositioningTests.swift",
+        "FloatTabsTests/AppCommandControllerTests.swift"
       ],
       "runner": [
         "self-hosted",
@@ -429,7 +430,7 @@
         "-destination",
         "platform=macOS,arch=arm64",
         "CODE_SIGNING_ALLOWED=NO",
-        "build"
+        "build-for-testing"
       ],
       "timeout_minutes": 45
     },
@@ -487,7 +488,8 @@
         ".github/ci-capabilities.json",
         "tools/ci/**",
         ".github/actionlint.yaml",
-        ".gitignore"
+        ".gitignore",
+        "tools/release/**"
       ],
       "runner": [
         "ubuntu-latest"

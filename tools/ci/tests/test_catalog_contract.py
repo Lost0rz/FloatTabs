@@ -91,6 +91,33 @@ class FloatTabsCapabilityContractTests(unittest.TestCase):
             with self.subTest(klass):
                 self.assertLessEqual(len(lanes), 2, (klass, lanes))
 
+    def test_each_xctest_file_change_runs_every_class_defined_in_that_file(self):
+        import re
+
+        for file in (ROOT / "FloatTabsTests").rglob("*.swift"):
+            rel = file.relative_to(ROOT).as_posix()
+            definitions = set(re.findall(
+                r"\bclass\s+(\w+)\s*:\s*XCTestCase\b",
+                file.read_text(encoding="utf-8")
+            ))
+            selected = set(selecting(rel))
+            executing = {
+                arg.removeprefix("-only-testing:FloatTabsTests/")
+                for entry in CATALOG["tests"] if entry["id"] in selected
+                for arg in entry["command"]
+                if arg.startswith("-only-testing:FloatTabsTests/")
+            }
+            for klass in definitions:
+                with self.subTest(file=rel, klass=klass):
+                    self.assertIn(klass, executing, f"{rel} changes must execute {klass}")
+
+    def test_project_build_compiles_tests_and_release_scripts_have_syntax_checks(self):
+        lanes = {entry["id"]: entry for entry in CATALOG["tests"]}
+        self.assertEqual(lanes["swift-build"]["command"][-1], "build-for-testing")
+        self.assertNotIn("test", lanes["swift-build"]["command"])
+        self.assertIn("ci-contracts", selecting("tools/release/build_dmg.sh"))
+        self.assertIn("swift-panel", selecting("FloatTabsTests/AppCommandControllerTests.swift"))
+
     def test_normal_project_edits_do_not_select_full_integration(self):
         for rel in ("FloatTabs.xcodeproj/project.pbxproj",
                     "FloatTabs/Info.plist", "tools/release/build_dmg.sh"):

@@ -73,6 +73,17 @@ class GovernedCIWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("xcodebuild", MACOS_CI)
         self.assertIn("if: always() && github.event_name == 'pull_request'", MACOS_CI)
 
+    def test_release_shell_has_valid_syntax_without_building_dmg(self):
+        import subprocess
+
+        script = REPOSITORY_ROOT / "tools/release/build_dmg.sh"
+        check = subprocess.run(["bash", "-n", str(script)],
+                               capture_output=True, text=True, check=False)
+        self.assertEqual(check.returncode, 0, check.stderr)
+        self.assertIn("tools/release/**",
+                      next(t["paths"] for t in CAPABILITIES["tests"]
+                           if t["id"] == "ci-contracts"))
+
     def test_catalog_has_resource_and_build_separation(self):
         lanes = {entry["id"]: entry for entry in CAPABILITIES["tests"]}
         self.assertTrue(lanes["app-resources"]["fork_safe"])
