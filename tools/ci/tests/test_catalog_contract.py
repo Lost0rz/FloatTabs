@@ -37,8 +37,10 @@ class FloatTabsCapabilityContractTests(unittest.TestCase):
         self.assertEqual(selecting("FloatTabs/UI/ExternalTabRail.swift"), ["swift-ui"])
 
     def test_project_and_release_boundaries_select_integration(self):
-        self.assertIn("swift-integration", selecting("FloatTabs.xcodeproj/project.pbxproj"))
-        self.assertIn("swift-integration", selecting("tools/release/build_dmg.sh"))
+        self.assertIn("swift-build", selecting("FloatTabs.xcodeproj/project.pbxproj"))
+        self.assertNotIn("swift-integration", selecting("FloatTabs.xcodeproj/project.pbxproj"))
+        self.assertIn("swift-build", selecting("tools/release/build_dmg.sh"))
+        self.assertNotIn("swift-integration", selecting("tools/release/build_dmg.sh"))
         self.assertEqual(selecting(".github/ci-capabilities.json"), ["ci-contracts"])
 
     def test_runner_safety_and_explicit_test_selection(self):
@@ -53,10 +55,53 @@ class FloatTabsCapabilityContractTests(unittest.TestCase):
 
     def test_current_xctest_groups_use_only_testing_filters(self):
         for test in CATALOG["tests"]:
-            if test["id"].startswith("swift-") and test["id"] != "swift-integration":
+            if test["id"].startswith("swift-") and test["id"] not in ("swift-integration", "swift-build"):
                 with self.subTest(lane=test["id"]):
                     self.assertEqual(test["command"][0], "xcodebuild")
                     self.assertTrue(any(x.startswith("-only-testing:FloatTabsTests/") for x in test["command"]))
+
+
+    def test_non_swift_app_files_and_ci_config_have_explicit_lanes(self):
+        for path in (ROOT / "FloatTabs").rglob("*"):
+            if path.is_file() and path.suffix != ".swift":
+                rel = path.relative_to(ROOT).as_posix()
+                with self.subTest(rel):
+                    self.assertTrue(selecting(rel), rel)
+        self.assertEqual(selecting("FloatTabs/Info.plist"), ["swift-build", "app-resources"])
+        self.assertEqual(selecting("FloatTabs/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json"),
+                         ["swift-build", "app-resources"])
+        self.assertEqual(selecting(".github/actionlint.yaml"), ["ci-contracts"])
+
+    def test_xctest_filters_resolve_to_actual_classes(self):
+        import re
+        source = "\n".join(path.read_text(encoding="utf-8")
+                           for path in (ROOT / "FloatTabsTests").rglob("*.swift"))
+        available = set(re.findall(r"\bclass\s+(\w+)\s*:\s*XCTestCase\b", source))
+        consumers = {}
+        for lane in CATALOG["tests"]:
+            for arg in lane["command"]:
+                if arg.startswith("-only-testing:FloatTabsTests/"):
+                    klass = arg.split("/", 1)[1]
+                    self.assertIn(klass, available, (lane["id"], klass))
+                    consumers.setdefault(klass, []).append(lane["id"])
+        self.assertEqual(consumers.get("WebAttentionCrossFeatureTests"), ["swift-cross-feature"])
+        self.assertNotIn("swift-ui", consumers.get("ExternalShellTests", []))
+        for klass, lanes in consumers.items():
+            with self.subTest(klass):
+                self.assertLessEqual(len(lanes), 2, (klass, lanes))
+
+    def test_normal_project_edits_do_not_select_full_integration(self):
+        for rel in ("FloatTabs.xcodeproj/project.pbxproj",
+                    "FloatTabs/Info.plist", "tools/release/build_dmg.sh"):
+            self.assertNotIn("swift-integration", selecting(rel), rel)
+            self.assertIn("swift-build", selecting(rel), rel)
+        self.assertEqual(selecting("FloatTabs/Web/ChatGPTResponseBridge.swift"),
+                         ["swift-responses"])
+        self.assertEqual(selecting("FloatTabs/Web/SlotLifecycleCoordinator.swift"),
+                         ["swift-runtime", "swift-cross-feature"])
+        self.assertIn("swift-integration",
+                      selecting("FloatTabs.xcodeproj/xcshareddata/xcschemes/FloatTabs.xcscheme"))
+        self.assertEqual(len(CATALOG["tests"]), 15)
 
 
 if __name__ == "__main__":
