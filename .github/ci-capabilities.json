@@ -57,10 +57,12 @@
       "paths": [
         "FloatTabs/Web/ChatGPTAdapter.swift",
         "FloatTabs/Web/ChatGPTAttentionBridge.swift",
+        "FloatTabs/Web/UniversalWebActivityBridge.swift",
         "FloatTabs/Web/WebAttentionCoordinator.swift",
         "FloatTabs/App/AppCoordinator.swift",
         "FloatTabsTests/ChatGPTAttentionBridgeTests.swift",
         "FloatTabsTests/ChatGPTGenerationDetectorTests.swift",
+        "FloatTabsTests/UniversalWebActivityBridgeTests.swift",
         "FloatTabsTests/WebAttentionCoordinatorTests.swift",
         "FloatTabsTests/WebAttentionLifecycleTests.swift"
       ],
@@ -145,9 +147,10 @@
         "FloatTabs/Persistence/**",
         "FloatTabs/Web/BrowserProfileDataStoreProvider.swift",
         "FloatTabs/UI/GlobalSettingsController.swift",
-        "FloatTabsTests/BrowserProfile*.swift",
+        "FloatTabsTests/*BrowserProfile*.swift",
         "FloatTabsTests/AppPreferencesStoreTests.swift",
         "FloatTabsTests/FloatTabsBackupServiceTests.swift",
+        "FloatTabsTests/GroupsAndBookmarksTests.swift",
         "FloatTabsTests/ProfileRepositoryTests.swift",
         "FloatTabsTests/TabStoreTests.swift",
         "FloatTabsTests/UnsupportedBrowserProfileTests.swift"
@@ -410,6 +413,7 @@
         "FloatTabs.xcodeproj/project.pbxproj",
         "FloatTabs.xcodeproj/project.xcworkspace/**",
         "FloatTabs/Info.plist",
+        "FloatTabs/FloatTabs.entitlements",
         "FloatTabs/Resources/**",
         "tools/release/**"
       ],
