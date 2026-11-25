@@ -6,14 +6,31 @@ enum SiteCompatibilityPolicy {
         for renderingProfile: WebRenderingProfile,
         navigationURL: URL
     ) -> WebRenderingProfile {
+        runtimeRendering(
+            for: renderingProfile,
+            navigationURL: navigationURL,
+            slotHomeURL: navigationURL
+        )
+    }
+
+    static func runtimeRendering(
+        for renderingProfile: WebRenderingProfile,
+        navigationURL: URL,
+        slotHomeURL: URL
+    ) -> WebRenderingProfile {
         let rendering = renderingProfile.normalized()
         guard rendering.browserIdentity == .automatic,
-              rendering.websiteMode == .mobile,
-              requiresDesktopPointerIdentity(for: navigationURL) else {
+              rendering.websiteMode == .mobile else {
             return rendering
         }
 
-        return rendering.settingBrowserIdentity(.macosSafari)
+        if requiresDesktopPointerIdentity(for: navigationURL)
+            || (requiresDesktopPointerIdentity(for: slotHomeURL)
+                && PopupCoordinator.isAuthenticationURL(navigationURL)) {
+            return rendering.settingBrowserIdentity(.macosSafari)
+        }
+
+        return rendering
     }
 
     private static func requiresDesktopPointerIdentity(for url: URL) -> Bool {
@@ -112,7 +129,7 @@ final class WebViewPool {
     private enum ExistingRuntimeRenderingDecision {
         case noExistingRuntime
         case reuse(WebRenderingProfile)
-        case rebuild(navigationURL: URL)
+        case rebuild(navigationURL: URL, forceReloadCache: Bool)
     }
 
     private var webViews: [UUID: WKWebView] = [:]
@@ -121,9 +138,11 @@ final class WebViewPool {
     private var popupCoordinators: [UUID: PopupCoordinator] = [:]
     private var attentionBridges: [UUID: ChatGPTAttentionBridge] = [:]
     private var responseBridges: [UUID: ChatGPTResponseBridge] = [:]
+    private var universalActivityBridges: [UUID: UniversalWebActivityBridge] = [:]
     private var appliedRenderingProfiles: [UUID: WebRenderingProfile] = [:]
     private var appliedBrowserProfileIdentities: [UUID: BrowserProfileIdentity] = [:]
     private var lastKnownURLs: [UUID: URL] = [:]
+    private var desktopNavigationAnchors: [UUID: URL] = [:]
     private var deferredReloadSlotIDs = Set<UUID>()
     private var pendingTerminationIncidentContexts: [UUID: RuntimeDiagnosticIncidentContext] = [:]
     private var restoreSnapshots: [UUID: WebRuntimeRestoreSnapshot] = [:]
@@ -139,6 +158,7 @@ final class WebViewPool {
     /// no attention state here and assigns no visibility meaning.
     var onAttentionObservation: AttentionObservationHandler?
     var onAttentionEvent: AttentionEventHandler?
+    var onUniversalActivityEvent: (@MainActor (UUID, UniversalWebActivityEvent) -> Void)?
 
     /// Trusted page interactions are forwarded without retaining input or
     /// assigning unread policy in the pool.
@@ -155,11 +175,16 @@ final class WebViewPool {
     /// of the Slot, together with that Runtime's immutable diagnostic identity.
     /// Read-only seam: the pool keeps no presentation or readiness state.
     var onSlotNavigationStart: SlotNavigationReadinessProjectionHandler?
+    var onSlotNavigationInteractiveReady: SlotNavigationReadinessProjectionHandler?
     var onSlotNavigationFinish: SlotNavigationReadinessProjectionHandler?
     /// Bounded terminal-failure projection carrying the same exact-current-
     /// Runtime guard. A failed navigation must not leave presentation owners
     /// waiting forever; existing WebKit error/fallback behavior is unchanged.
     var onSlotNavigationFailure: SlotNavigationReadinessProjectionHandler?
+    /// Benign cancelled provisional navigation (`NSURLErrorCancelled` /
+    /// `WebKitErrorDomain` 102) on an already-committed Runtime restores
+    /// `.ready` ownership when no deferred materialization awaits it.
+    var onSlotNavigationProvisionalCancelled: SlotNavigationReadinessProjectionHandler?
     /// Bounded notification that the existing Runtime is about to reload
     /// after WebContent termination. Panel owns any visible Restoring state.
     var onRuntimeRecoveryStart: RuntimeRecoveryStartHandler?
@@ -245,10 +270,11 @@ final class WebViewPool {
     func webView(for profile: WebAppProfile) throws -> WKWebView {
         if let existing = webViews[profile.id] {
             switch existingRuntimeRenderingDecision(for: profile) {
-            case .rebuild(let navigationURL):
+            case .rebuild(let navigationURL, let forceReloadCache):
                 return try rebuildWebView(
                     for: profile,
-                    navigationURL: navigationURL
+                    navigationURL: navigationURL,
+                    forceReloadCache: forceReloadCache
                 )
 
             case .reuse(let desiredRuntimeRendering):
@@ -273,7 +299,27 @@ final class WebViewPool {
             }
         }
 
-        let navigationURL = profile.currentURL ?? profile.homeURL
+        let desiredNormalizedRendering = profile.renderingProfile.normalized()
+        let rawNavigationURL = profile.currentURL ?? profile.homeURL
+        let navigationURL: URL
+        let initialCachePolicy: URLRequest.CachePolicy
+        if desiredNormalizedRendering.effectiveWebsiteMode == .desktop {
+            let repairedURL = Self.desktopCounterpartURL(
+                for: rawNavigationURL,
+                homeURL: profile.homeURL,
+                anchorURL: desktopNavigationAnchors.removeValue(forKey: profile.id)
+            )
+            navigationURL = repairedURL
+            if repairedURL != rawNavigationURL {
+                initialCachePolicy = .reloadIgnoringLocalCacheData
+                onURLChange(profile.id, repairedURL)
+            } else {
+                initialCachePolicy = .useProtocolCachePolicy
+            }
+        } else {
+            navigationURL = rawNavigationURL
+            initialCachePolicy = .useProtocolCachePolicy
+        }
         let restoreSnapshot: WebRuntimeRestoreSnapshot?
         if ChatGPTSitePolicy.isSupportedChatGPTURL(navigationURL) {
             // ChatGPT owns loading older conversation content. A fresh Runtime
@@ -290,7 +336,7 @@ final class WebViewPool {
         return try createWebView(
             for: profile,
             navigationURL: navigationURL,
-            cachePolicy: .useProtocolCachePolicy,
+            cachePolicy: initialCachePolicy,
             restoreSnapshot: restoreSnapshot
         )
     }
@@ -643,14 +689,8 @@ final class WebViewPool {
 
     /// Resolves the same Store used by WebView creation. Cache cleanup must not
     /// manufacture a second provider or accidentally fall back to Default.
-    func websiteDataStore(for identity: BrowserProfileIdentity) throws -> WKWebsiteDataStore {
-        try browserProfileDataStoreProvider.dataStore(for: identity.browserProfileID)
-    }
-
-    /// The capability is owned by the provider; the pool only exposes the
-    /// narrow runtime-facing seam needed by Settings orchestration.
-    var customBrowserProfilesSupported: Bool {
-        browserProfileDataStoreProvider.customProfilesSupported
+    func websiteDataStore(for identity: BrowserProfileIdentity) -> WKWebsiteDataStore {
+        browserProfileDataStoreProvider.dataStore(for: identity.browserProfileID)
     }
 
     /// Returns the actual live runtimes to which an identity was applied. This
@@ -675,6 +715,10 @@ final class WebViewPool {
     /// WebKit data-store deletion remains exclusively owned by the provider.
     func removeCustomBrowserProfileDataStore(id: UUID) async throws {
         try await browserProfileDataStoreProvider.removeCustomDataStore(id: id)
+    }
+
+    func removeDefaultBrowserProfileWebsiteData() async throws {
+        try await browserProfileDataStoreProvider.removeDefaultWebsiteData()
     }
 
     var count: Int {
@@ -769,6 +813,7 @@ final class WebViewPool {
         // bridge installation itself stays usable for the recovered document.
         attentionBridges[slotID]?.handleWebContentProcessReplacement()
         responseBridges[slotID]?.handleRuntimeReplacement()
+        universalActivityBridges[slotID]?.handleRuntimeReplacement()
 
         switch Self.recoveryDisposition(
             isActive: isActive,
@@ -852,6 +897,93 @@ final class WebViewPool {
         return homeURL
     }
 
+    static func isMobileSubdomainHost(_ host: String?) -> Bool {
+        guard let normalized = host?.lowercased(), !normalized.isEmpty else {
+            return false
+        }
+        for prefix in ["m.", "mobile.", "wap.", "h5.", "touch."] {
+            if normalized.hasPrefix(prefix) {
+                let remainder = normalized.dropFirst(prefix.count)
+                if remainder.contains(".") {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    static func desktopCounterpartURL(
+        for candidate: URL,
+        homeURL: URL,
+        anchorURL: URL? = nil
+    ) -> URL {
+        guard WebAppURL.isSafe(candidate),
+              isMobileSubdomainHost(candidate.host) else {
+            return candidate
+        }
+        let desktopReference: URL? = [anchorURL, homeURL].compactMap { ref -> URL? in
+            guard let ref,
+                  WebAppURL.isSafe(ref),
+                  !isMobileSubdomainHost(ref.host),
+                  WebsiteFaviconProvider.belongsToSameSiteFamily(candidate, ref) else {
+                return nil
+            }
+            return ref
+        }.first
+        guard let desktopReference else {
+            return candidate
+        }
+        let trimmedPath = candidate.path.lowercased()
+        if let anchorURL,
+           anchorURL == desktopReference,
+           trimmedPath.isEmpty || trimmedPath == "/" || trimmedPath == "/index.html" || trimmedPath == "/m" || trimmedPath == "/m/" {
+            return anchorURL
+        }
+        guard var components = URLComponents(url: candidate, resolvingAgainstBaseURL: false),
+              let desktopHost = desktopReference.host else {
+            return desktopReference
+        }
+        components.scheme = desktopReference.scheme ?? components.scheme
+        components.host = desktopHost
+        components.port = desktopReference.port
+        if let rebuilt = components.url, WebAppURL.isSafe(rebuilt) {
+            return rebuilt
+        }
+        return desktopReference
+    }
+
+    static func resolvedNavigationURL(
+        initialURL: URL?,
+        visibleURL: URL?,
+        storedCurrentURL: URL?,
+        homeURL: URL,
+        desiredWebsiteMode: WebsiteMode,
+        desktopAnchorURL: URL? = nil
+    ) -> (url: URL, didRepairMobileURL: Bool) {
+        let baseURL = rebuildNavigationURL(
+            initialURL: initialURL,
+            visibleURL: visibleURL,
+            storedCurrentURL: storedCurrentURL,
+            homeURL: homeURL
+        )
+        guard desiredWebsiteMode == .desktop else {
+            return (baseURL, false)
+        }
+        let repaired = desktopCounterpartURL(
+            for: baseURL,
+            homeURL: homeURL,
+            anchorURL: desktopAnchorURL
+        )
+        let sawMobileRedirect = [initialURL, visibleURL, storedCurrentURL]
+            .compactMap { $0 }
+            .contains { candidate in
+                isMobileSubdomainHost(candidate.host)
+                    && !isMobileSubdomainHost(homeURL.host)
+                    && WebsiteFaviconProvider.belongsToSameSiteFamily(candidate, homeURL)
+            }
+        return (repaired, repaired != baseURL || sawMobileRedirect)
+    }
+
     /// Read-only projection of the exact compatibility decision used by
     /// `webView(for:)`. Presentation owners can establish Restoring before a
     /// visible selected Runtime is synchronously replaced, without duplicating
@@ -869,15 +1001,20 @@ final class WebViewPool {
         guard let existing = webViews[profile.id] else {
             return .noExistingRuntime
         }
+        let anchorURL = desktopNavigationAnchors[profile.id]
         guard let appliedRendering = appliedRenderingProfiles[profile.id],
               let appliedBrowserProfileIdentity = appliedBrowserProfileIdentities[profile.id] else {
+            let resolution = Self.resolvedNavigationURL(
+                initialURL: existing.backForwardList.currentItem?.initialURL,
+                visibleURL: existing.url,
+                storedCurrentURL: profile.currentURL,
+                homeURL: profile.homeURL,
+                desiredWebsiteMode: profile.renderingProfile.normalized().effectiveWebsiteMode,
+                desktopAnchorURL: anchorURL
+            )
             return .rebuild(
-                navigationURL: Self.rebuildNavigationURL(
-                    initialURL: existing.backForwardList.currentItem?.initialURL,
-                    visibleURL: existing.url,
-                    storedCurrentURL: profile.currentURL,
-                    homeURL: profile.homeURL
-                )
+                navigationURL: resolution.url,
+                forceReloadCache: resolution.didRepairMobileURL
             )
         }
 
@@ -889,7 +1026,8 @@ final class WebViewPool {
         )
         let desiredRuntimeRendering = SiteCompatibilityPolicy.runtimeRendering(
             for: profile.renderingProfile.normalized(),
-            navigationURL: compatibilityURL
+            navigationURL: compatibilityURL,
+            slotHomeURL: profile.homeURL
         )
         let desiredBrowserProfileIdentity = BrowserProfileIdentity(
             browserProfileID: profile.browserProfileID
@@ -900,24 +1038,54 @@ final class WebViewPool {
             return .reuse(desiredRuntimeRendering)
         }
 
+        let resolution = Self.resolvedNavigationURL(
+            initialURL: existing.backForwardList.currentItem?.initialURL,
+            visibleURL: existing.url,
+            storedCurrentURL: profile.currentURL,
+            homeURL: profile.homeURL,
+            desiredWebsiteMode: desiredRuntimeRendering.effectiveWebsiteMode,
+            desktopAnchorURL: anchorURL
+        )
         return .rebuild(
-            navigationURL: Self.rebuildNavigationURL(
-                initialURL: existing.backForwardList.currentItem?.initialURL,
-                visibleURL: existing.url,
-                storedCurrentURL: profile.currentURL,
-                homeURL: profile.homeURL
-            )
+            navigationURL: resolution.url,
+            forceReloadCache: resolution.didRepairMobileURL
         )
     }
 
     private func rebuildWebView(
         for profile: WebAppProfile,
-        navigationURL: URL
+        navigationURL: URL,
+        forceReloadCache: Bool = false
     ) throws -> WKWebView {
+        let previousRendering = appliedRenderingProfiles[profile.id]
+        let existingWebView = webViews[profile.id]
         let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
             for: profile.renderingProfile.normalized(),
-            navigationURL: navigationURL
+            navigationURL: navigationURL,
+            slotHomeURL: profile.homeURL
         )
+        if previousRendering?.effectiveWebsiteMode == .desktop,
+           runtimeRendering.effectiveWebsiteMode == .mobile {
+            let desktopAnchor = [
+                existingWebView?.backForwardList.currentItem?.initialURL,
+                existingWebView?.url,
+                lastKnownURLs[profile.id],
+                profile.currentURL,
+                profile.homeURL
+            ].compactMap { candidate -> URL? in
+                guard let candidate,
+                      WebAppURL.isSafe(candidate),
+                      !Self.isMobileSubdomainHost(candidate.host) else {
+                    return nil
+                }
+                return candidate
+            }.first
+            if let desktopAnchor {
+                desktopNavigationAnchors[profile.id] = desktopAnchor
+            }
+        } else if runtimeRendering.effectiveWebsiteMode == .desktop {
+            desktopNavigationAnchors.removeValue(forKey: profile.id)
+        }
         var rebuildFields = diagnostics.environmentFields()
         rebuildFields.merge(renderingDiagnosticFields(for: runtimeRendering)) {
             _, new in new
@@ -937,10 +1105,13 @@ final class WebViewPool {
         // dictionary entry is recreated; callers observe residency identity, not
         // WKWebView object identity.
         do {
+            if forceReloadCache, profile.currentURL != navigationURL {
+                onURLChange(profile.id, navigationURL)
+            }
             let webView = try createWebView(
                 for: profile,
                 navigationURL: navigationURL,
-                cachePolicy: .useProtocolCachePolicy,
+                cachePolicy: forceReloadCache ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy,
                 notifyResidentSetChange: false
             )
             var completedFields = diagnostics.environmentFields()
@@ -1030,13 +1201,14 @@ final class WebViewPool {
         let rendering = profile.renderingProfile.normalized()
         let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
             for: rendering,
-            navigationURL: navigationURL
+            navigationURL: navigationURL,
+            slotHomeURL: profile.homeURL
         )
         let runtimeFields = renderingDiagnosticFields(for: runtimeRendering)
         let browserProfileIdentity = BrowserProfileIdentity(
             browserProfileID: profile.browserProfileID
         )
-        let websiteDataStore = try browserProfileDataStoreProvider.dataStore(
+        let websiteDataStore = browserProfileDataStoreProvider.dataStore(
             for: profile.browserProfileID
         )
         // The bridge exists before its WKWebView: the Factory invokes
@@ -1071,18 +1243,26 @@ final class WebViewPool {
                 self?.onTrustedInteractionEvent?(slotID, event)
             }
         )
+        let universalActivityBridge = UniversalWebActivityBridge(
+            slotID: profile.id,
+            onEvent: { [weak self] slotID, event in
+                self?.onUniversalActivityEvent?(slotID, event)
+            }
+        )
         let webView = WebViewFactory.makeWebView(
             renderingProfile: runtimeRendering,
             websiteDataStore: websiteDataStore,
             configureUserContentController: { userContentController in
                 attentionBridge.install(into: userContentController)
                 responseBridge.install(into: userContentController)
+                universalActivityBridge.install(into: userContentController)
             }
         )
         let runtimeIdentity = WebRuntimeDiagnosticIdentitySequence.next()
         runtimeDiagnosticIdentities[profile.id] = runtimeIdentity
         attentionBridge.attach(to: webView)
         responseBridge.attach(to: webView)
+        universalActivityBridge.attach(to: webView)
         let observer = SlotNavigationObserver(
             slotID: profile.id,
             webView: webView,
@@ -1104,7 +1284,7 @@ final class WebViewPool {
             onIncidentRequest: { [weak self] slotID, context in
                 self?.handleIncidentRequest(slotID: slotID, context: context)
             },
-            onNavigationCommit: { [weak self, weak attentionBridge, weak webView] slotID, commitURL in
+            onNavigationCommit: { [weak self, weak attentionBridge, weak universalActivityBridge, weak webView] slotID, commitURL in
                 guard let self,
                       let webView,
                       self.existingWebView(for: slotID) === webView else {
@@ -1114,6 +1294,7 @@ final class WebViewPool {
                 attentionBridge?.cancelInstantBackHandoff()
                 attentionBridge?.handleRuntimeReplacement(committedURL: commitURL)
                 responseBridge.handleRuntimeReplacement()
+                universalActivityBridge?.handleNavigationCommit(committedURL: commitURL)
                 guard let committedURL else {
                     return
                 }
@@ -1127,6 +1308,15 @@ final class WebViewPool {
                     return
                 }
                 self.onSlotNavigationStart?(slotID, identity, navigationGeneration)
+            },
+            onNavigationInteractiveReady: { [weak self, weak webView] slotID, _, navigationGeneration in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView,
+                      let identity = self.runtimeDiagnosticIdentities[slotID] else {
+                    return
+                }
+                self.onSlotNavigationInteractiveReady?(slotID, identity, navigationGeneration)
             },
             onNavigationFinish: { [weak self, weak webView] slotID, _, navigationGeneration in
                 guard let self,
@@ -1145,6 +1335,19 @@ final class WebViewPool {
                     return
                 }
                 self.onSlotNavigationFailure?(slotID, identity, navigationGeneration)
+            },
+            onProvisionalNavigationCancelled: { [weak self, weak webView] slotID, navigationGeneration in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView,
+                      let identity = self.runtimeDiagnosticIdentities[slotID] else {
+                    return
+                }
+                if self.committedURL(for: slotID) != nil {
+                    self.onSlotNavigationProvisionalCancelled?(slotID, identity, navigationGeneration)
+                } else {
+                    self.onSlotNavigationFailure?(slotID, identity, navigationGeneration)
+                }
             },
             onInstantBackRequest: { [weak self, weak attentionBridge, weak webView] slotID, targetURL in
                 guard let self,
@@ -1170,6 +1373,9 @@ final class WebViewPool {
                 }
                 self.attentionBridges[slotID]?.confirmInstantBackHandoff()
                 self.responseBridges[slotID]?.handleRuntimeReplacement()
+                self.universalActivityBridges[slotID]?.handleInstantBackActivation(
+                    committedURL: self.committedURL(for: slotID)
+                )
                 // Confirmed Instant Back resets and resyncs through the bridge
                 // handoff, but it must not reuse ordinary didCommit projection
                 // semantics or create a duplicate replacement boundary.
@@ -1186,7 +1392,9 @@ final class WebViewPool {
         )
         let popupCoordinator = PopupCoordinator(
             parentWebView: webView,
-            downloadCoordinator: downloadCoordinator
+            downloadCoordinator: downloadCoordinator,
+            slotID: profile.id,
+            diagnostics: diagnostics
         )
         webView.uiDelegate = popupCoordinator
 
@@ -1196,6 +1404,7 @@ final class WebViewPool {
         popupCoordinators[profile.id] = popupCoordinator
         attentionBridges[profile.id] = attentionBridge
         responseBridges[profile.id] = responseBridge
+        universalActivityBridges[profile.id] = universalActivityBridge
 
         // A recreated runtime may inherit `currentURL` from arbitrary page
         // navigation. Only the configured Home URL can reuse persisted entry
@@ -1220,7 +1429,7 @@ final class WebViewPool {
         let request = URLRequest(
             url: navigationURL,
             cachePolicy: cachePolicy,
-            timeoutInterval: 60
+            timeoutInterval: 30
         )
         var createdFields = runtimeFields
         createdFields["slot_id"] = .string(profile.id.uuidString)
@@ -1281,7 +1490,8 @@ final class WebViewPool {
 
         let desiredRendering = SiteCompatibilityPolicy.runtimeRendering(
             for: profile.renderingProfile.normalized(),
-            navigationURL: navigationURL
+            navigationURL: navigationURL,
+            slotHomeURL: profile.homeURL
         )
         let compatible = snapshot.browserProfileIdentity == BrowserProfileIdentity(
             browserProfileID: profile.browserProfileID
@@ -1344,6 +1554,7 @@ final class WebViewPool {
 
         invalidateAttentionBridge(slotID: slotID)
         invalidateResponseBridge(slotID: slotID)
+        invalidateUniversalActivityBridge(slotID: slotID)
         discardPopupCoordinator(slotID: slotID)
         navigationObservers[slotID]?.invalidate()
         removed?.navigationDelegate = nil
@@ -1358,6 +1569,8 @@ final class WebViewPool {
         pendingTerminationIncidentContexts.removeValue(forKey: slotID)
         if disposition == .rebuild {
             restoreSnapshots.removeValue(forKey: slotID)
+        } else if disposition == .release {
+            desktopNavigationAnchors.removeValue(forKey: slotID)
         }
         _ = webViews.removeValue(forKey: slotID)
         removed?.removeFromSuperview()
@@ -1499,7 +1712,7 @@ final class WebViewPool {
         URLRequest(
             url: url,
             cachePolicy: .useProtocolCachePolicy,
-            timeoutInterval: 60
+            timeoutInterval: 30
         )
     }
 
@@ -1513,6 +1726,11 @@ final class WebViewPool {
 
     private func invalidateResponseBridge(slotID: UUID) {
         guard let bridge = responseBridges.removeValue(forKey: slotID) else { return }
+        bridge.invalidate()
+    }
+
+    private func invalidateUniversalActivityBridge(slotID: UUID) {
+        guard let bridge = universalActivityBridges.removeValue(forKey: slotID) else { return }
         bridge.invalidate()
     }
 

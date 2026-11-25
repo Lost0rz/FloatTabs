@@ -12,8 +12,7 @@ final class BrowserProfileSettingsTests: XCTestCase {
             snapshot: {
                 BrowserProfileManagementSnapshot(
                     customProfiles: [company, personal],
-                    referencedProfileIDs: [],
-                    customProfilesSupported: true
+                    referencedProfileIDs: []
                 )
             }
         )
@@ -38,8 +37,7 @@ final class BrowserProfileSettingsTests: XCTestCase {
                 name: "Jack",
                 color: defaultColor
             ),
-            referencedProfileIDs: [],
-            customProfilesSupported: true
+            referencedProfileIDs: []
         )
         let manager = BrowserProfileManagementClient(
             snapshot: { snapshot },
@@ -52,8 +50,11 @@ final class BrowserProfileSettingsTests: XCTestCase {
         controller.loadView()
 
         XCTAssertEqual(controller.displayedBrowserProfileNames, ["Jack", "Company"])
-        XCTAssertEqual(controller.displayedBrowserProfileActionTitles, [["Rename…"], ["Rename…", "Delete…"]])
-        XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [false, true])
+        XCTAssertEqual(
+            controller.displayedBrowserProfileActionTitles,
+            [["Rename…", "Delete…"], ["Rename…", "Delete…"]]
+        )
+        XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [true, true])
         XCTAssertEqual(manager.snapshot().defaultProfilePresentation.color, defaultColor)
         XCTAssertEqual(manager.snapshot().customProfiles.first?.color, companyColor)
         XCTAssertFalse(allSubviews(in: controller.view).contains { $0 is NSPopUpButton })
@@ -65,8 +66,12 @@ final class BrowserProfileSettingsTests: XCTestCase {
         controller.loadView()
 
         XCTAssertEqual(controller.displayedBrowserProfileNames, ["Default"])
-        XCTAssertEqual(controller.displayedBrowserProfileActionTitles, [["Rename…"]])
+        XCTAssertEqual(controller.displayedBrowserProfileActionTitles, [["Rename…", "Delete…"]])
         XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [false])
+        XCTAssertEqual(
+            controller.displayedBrowserProfileDeleteToolTips,
+            [BrowserProfilesSettingsViewController.lastRemainingProfileTooltip]
+        )
     }
 
     func testReferencedProfilePreflightThrowsReferenced() {
@@ -75,8 +80,7 @@ final class BrowserProfileSettingsTests: XCTestCase {
             snapshot: {
                 BrowserProfileManagementSnapshot(
                     customProfiles: [profile],
-                    referencedProfileIDs: [profile.id],
-                    customProfilesSupported: true
+                    referencedProfileIDs: [profile.id]
                 )
             }
         )
@@ -95,15 +99,14 @@ final class BrowserProfileSettingsTests: XCTestCase {
                 BrowserProfileManagementSnapshot(
                     customProfiles: [profile],
                     referencedProfileIDs: [profile.id],
-                    referencingWebAppNamesByProfileID: [profile.id: ["Pro", "Free"]],
-                    customProfilesSupported: true
+                    referencingWebAppNamesByProfileID: [profile.id: ["Pro", "Free"]]
                 )
             }
         )
 
         controller.loadView()
 
-        XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [false, false])
+        XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [true, false])
         XCTAssertEqual(
             controller.displayedBrowserProfileDeleteToolTips,
             [nil, "Used by Tabs: Pro, Free. Switch them to another Profile before deleting."]
@@ -118,8 +121,7 @@ final class BrowserProfileSettingsTests: XCTestCase {
                 BrowserProfileManagementSnapshot(
                     customProfiles: [profile],
                     referencedProfileIDs: names.isEmpty ? [] : [profile.id],
-                    referencingWebAppNamesByProfileID: names.isEmpty ? [:] : [profile.id: names],
-                    customProfilesSupported: true
+                    referencingWebAppNamesByProfileID: names.isEmpty ? [:] : [profile.id: names]
                 )
             }
         )
@@ -144,8 +146,7 @@ final class BrowserProfileSettingsTests: XCTestCase {
             snapshot: {
                 BrowserProfileManagementSnapshot(
                     customProfiles: [profile],
-                    referencedProfileIDs: [],
-                    customProfilesSupported: true
+                    referencedProfileIDs: []
                 )
             }
         )
@@ -178,8 +179,7 @@ final class BrowserProfileSettingsTests: XCTestCase {
             snapshot: {
                 BrowserProfileManagementSnapshot(
                     customProfiles: [profile],
-                    referencedProfileIDs: [],
-                    customProfilesSupported: true
+                    referencedProfileIDs: []
                 )
             },
             create: { _ in profile },
@@ -261,28 +261,6 @@ final class BrowserProfileSettingsTests: XCTestCase {
         usageDefaults.removePersistentDomain(forName: usageSuite)
     }
 
-    func testUnsupportedOSShowsDefaultExplanationAndNeverCallsCreate() {
-        var createCallCount = 0
-        let controller = makeSettingsController(
-            customProfilesSupported: false,
-            create: { _ in
-                createCallCount += 1
-                return self.makeBrowserProfile(name: "Unexpected")
-            }
-        )
-        controller.loadView()
-
-        controller.submitNewProfileNameForTesting("Company")
-
-        XCTAssertEqual(controller.displayedBrowserProfileNames, ["Default"])
-        XCTAssertFalse(controller.isNewProfileEnabled)
-        XCTAssertEqual(
-            controller.profileSupportDescription,
-            "Additional Profiles require macOS 14 or later."
-        )
-        XCTAssertEqual(createCallCount, 0)
-    }
-
     func testSuccessfulDeleteOrdersRuntimeReleaseStoreRemovalThenMetadataDelete() async throws {
         let repository = StageDProfileRepository()
         let store = TabStore(repository: repository)
@@ -350,23 +328,83 @@ final class BrowserProfileSettingsTests: XCTestCase {
         XCTAssertTrue(pool.residentSlotIDs(using: .custom(browserProfile.id)).isEmpty)
     }
 
-    func testDefaultRowAllowsRenameButNotDelete() {
+    func testDefaultRowAllowsRenameAndDeleteWhenCustomProfileExists() {
         let profile = makeBrowserProfile(name: "Company")
         let controller = makeSettingsController(
             snapshot: {
                 BrowserProfileManagementSnapshot(
                     customProfiles: [profile],
-                    referencedProfileIDs: [],
-                    customProfilesSupported: true
+                    referencedProfileIDs: []
                 )
             }
         )
         controller.loadView()
 
-        XCTAssertEqual(controller.displayedBrowserProfileActionTitles.first, ["Rename…"])
+        XCTAssertEqual(controller.displayedBrowserProfileActionTitles.first, ["Rename…", "Delete…"])
         XCTAssertEqual(controller.displayedBrowserProfileActionTitles.dropFirst().first, ["Rename…", "Delete…"])
-        XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [false, true])
+        XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [true, true])
         XCTAssertNil(controller.displayedBrowserProfileDeleteToolTips.first!)
+    }
+
+    func testDefaultProfileCanBeDeletedWhenCustomProfileExistsAndLastRemainingProfileIsProtected() async throws {
+        let repository = StageDProfileRepository()
+        let store = TabStore(repository: repository)
+        let company = try XCTUnwrap(store.createBrowserProfile(name: "Company"))
+        let tab = try XCTUnwrap(
+            store.add(
+                name: "Workspace",
+                homeURL: URL(string: "https://example.com")!,
+                browserProfileID: company.id
+            )
+        )
+        XCTAssertEqual(tab.browserProfileID, company.id)
+
+        var defaultCleaned = false
+        let pool = makePool(
+            { _ in },
+            defaultWebsiteDataCleaner: {
+                defaultCleaned = true
+            }
+        )
+        let controller = makePanelController(store: store, pool: pool)
+
+        XCTAssertTrue(store.totalBrowserProfileCount == 2)
+        try await controller.deleteBrowserProfile(id: nil)
+
+        XCTAssertTrue(defaultCleaned)
+        XCTAssertTrue(store.isDefaultBrowserProfileDeleted)
+        XCTAssertEqual(store.totalBrowserProfileCount, 1)
+        XCTAssertEqual(store.defaultNewSlotBrowserProfileID, company.id)
+
+        let settings = BrowserProfilesSettingsViewController(
+            browserProfileManager: controller.browserProfileManagementClient()
+        )
+        settings.loadView()
+        XCTAssertEqual(settings.displayedBrowserProfileNames, ["Company"])
+        XCTAssertEqual(settings.displayedBrowserProfileDeleteEnabled, [false])
+
+        // Even once the referencing tab is removed, the sole remaining profile cannot be deleted.
+        XCTAssertTrue(store.remove(id: tab.id))
+        settings.refreshProfiles()
+        XCTAssertEqual(settings.displayedBrowserProfileDeleteEnabled, [false])
+        XCTAssertEqual(
+            settings.displayedBrowserProfileDeleteToolTips,
+            [BrowserProfilesSettingsViewController.lastRemainingProfileTooltip]
+        )
+
+        do {
+            try await controller.deleteBrowserProfile(id: company.id)
+            XCTFail("Expected deleting the last remaining profile to fail.")
+        } catch let error as BrowserProfileManagementError {
+            XCTAssertEqual(error, .lastRemainingProfile)
+        }
+
+        let options = WebAppEditorController.browserProfileOptions(
+            browserProfiles: store.browserProfiles,
+            defaultProfileName: store.defaultBrowserProfilePresentation.name,
+            includesDefaultProfile: !store.isDefaultBrowserProfileDeleted
+        )
+        XCTAssertEqual(options.map(\.name), ["Company"])
     }
 
     func testManagementSnapshotDerivesReferenceNamesInSlotOrder() throws {
@@ -396,14 +434,12 @@ final class BrowserProfileSettingsTests: XCTestCase {
 
     private func makeSettingsController(
         snapshot: (() -> BrowserProfileManagementSnapshot)? = nil,
-        customProfilesSupported: Bool = true,
         create: ((String) throws -> BrowserProfile)? = nil
     ) -> AccountLanguageSettingsViewController {
         let resolvedSnapshot = snapshot ?? {
             BrowserProfileManagementSnapshot(
                 customProfiles: [],
-                referencedProfileIDs: [],
-                customProfilesSupported: customProfilesSupported
+                referencedProfileIDs: []
             )
         }
         let manager = BrowserProfileManagementClient(
@@ -449,13 +485,14 @@ final class BrowserProfileSettingsTests: XCTestCase {
     }
 
     private func makePool(
-        _ remover: @escaping @MainActor (UUID) async throws -> Void
+        _ remover: @escaping @MainActor (UUID) async throws -> Void,
+        defaultWebsiteDataCleaner: @escaping @MainActor () async throws -> Void = {}
     ) -> WebViewPool {
         let store = WKWebsiteDataStore.nonPersistent()
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { _ in store },
-            customStoreRemover: remover
+            customStoreRemover: remover,
+            defaultWebsiteDataCleaner: defaultWebsiteDataCleaner
         )
         return WebViewPool(
             onURLChange: { _, _ in },

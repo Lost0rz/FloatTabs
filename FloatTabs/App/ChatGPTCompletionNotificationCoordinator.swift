@@ -206,7 +206,9 @@ final class SystemChatGPTCompletionNotificationBackend: ChatGPTCompletionNotific
 final class ChatGPTCompletionNotificationCoordinator: NSObject, UNUserNotificationCenterDelegate {
     static let notificationIdentifierPrefix = "floattabs.chatgpt-completion."
     static let notificationTitleFallback = "ChatGPT"
-    static let notificationBodyFallback = "A ChatGPT response is ready."
+    static var notificationBodyFallback: String {
+        L10n.tr("A ChatGPT response is ready.", "ChatGPT 已完成回复。")
+    }
     static let titleCharacterLimit = 80
     static let bodyCharacterLimit = 240
 
@@ -239,6 +241,13 @@ final class ChatGPTCompletionNotificationCoordinator: NSObject, UNUserNotificati
         notificationIdentifierPrefix + slotID.uuidString
     }
 
+    func withdrawNotification(for slotID: UUID) {
+        let identifier = Self.notificationIdentifier(for: slotID)
+        Task { @MainActor [weak self] in
+            await self?.backend.withdraw(identifier: identifier)
+        }
+    }
+
     /// Production entry point: one call per durable unread `.marked`
     /// completion handoff. `displayName` and `assistantPreview` are ephemeral
     /// projection input only — they are never persisted or logged. Missing or
@@ -246,13 +255,15 @@ final class ChatGPTCompletionNotificationCoordinator: NSObject, UNUserNotificati
     func notify(
         slotID: UUID,
         displayName: String?,
-        assistantPreview: String?
+        assistantPreview: String?,
+        fallbackBody: String? = nil
     ) {
         Task { @MainActor [weak self] in
             await self?.performNotify(
                 slotID: slotID,
                 displayName: displayName,
-                assistantPreview: assistantPreview
+                assistantPreview: assistantPreview,
+                fallbackBody: fallbackBody
             )
         }
     }
@@ -260,7 +271,8 @@ final class ChatGPTCompletionNotificationCoordinator: NSObject, UNUserNotificati
     func performNotify(
         slotID: UUID,
         displayName: String?,
-        assistantPreview: String?
+        assistantPreview: String?,
+        fallbackBody: String? = nil
     ) async {
         diagnostics.record(
             event: "notification.requested",
@@ -316,7 +328,7 @@ final class ChatGPTCompletionNotificationCoordinator: NSObject, UNUserNotificati
         let request = ChatGPTCompletionNotificationRequest(
             identifier: identifier,
             title: Self.normalizedTitle(displayName),
-            body: Self.normalizedBody(assistantPreview),
+            body: Self.normalizedBody(assistantPreview, fallback: fallbackBody),
             payload: ChatGPTCompletionNotificationPayload(
                 version: ChatGPTCompletionNotificationPayload.currentVersion,
                 kind: ChatGPTCompletionNotificationPayload.kind,
@@ -368,10 +380,17 @@ final class ChatGPTCompletionNotificationCoordinator: NSObject, UNUserNotificati
     /// completion body. The value is projection-only input and is never
     /// logged.
     static func normalizedBody(_ assistantPreview: String?) -> String {
-        normalizeUserPerceivedText(
-            assistantPreview,
-            limit: bodyCharacterLimit
-        ) ?? notificationBodyFallback
+        normalizedBody(assistantPreview, fallback: nil)
+    }
+
+    static func normalizedBody(_ assistantPreview: String?, fallback: String?) -> String {
+        if let preview = normalizeUserPerceivedText(assistantPreview, limit: bodyCharacterLimit) {
+            return preview
+        }
+        if let fallback = normalizeUserPerceivedText(fallback, limit: bodyCharacterLimit) {
+            return fallback
+        }
+        return notificationBodyFallback
     }
 
     private static func normalizeUserPerceivedText(

@@ -34,6 +34,11 @@ protocol RuntimeDiagnosticWriting: AnyObject {
         timeout: TimeInterval,
         completion: @escaping @Sendable () -> Void
     )
+
+    func readRecentEvents(
+        limit: Int,
+        completion: @escaping @Sendable ([RuntimeDiagnosticEvent]) -> Void
+    )
 }
 
 final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendable {
@@ -45,6 +50,12 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
         let dateKey: String
         let index: Int
     }
+
+    private static let utcCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        return calendar
+    }()
 
     static var defaultDirectory: URL {
         let base = FileManager.default.urls(
@@ -75,6 +86,11 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
         subsystem: "com.lost0rz.FloatTabs",
         category: "RuntimeDiagnosticsWriter"
     )
+    private let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
 
     private var currentFileURL: URL?
     private var currentFileHandle: FileHandle?
@@ -136,8 +152,6 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
             self.flushBuffer()
             self.pruneFilesIfNeeded(now: self.dateProvider(), force: true)
             do {
-                let encoder = JSONEncoder()
-                encoder.dateEncodingStrategy = .iso8601
                 var output = Data()
 
                 let files = (try? self.fileManager.contentsOfDirectory(
@@ -168,7 +182,7 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
                     output.append(try Data(contentsOf: segment.url))
                 }
 
-                output.append(try encoder.encode(
+                output.append(try self.encoder.encode(
                     RuntimeDiagnosticPrivacy.sanitizedEvent(metadata)
                 ))
                 output.append(0x0A)
@@ -196,9 +210,7 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
         queue.async { [weak self] in
             guard let self, !self.isDisabled else { return }
             do {
-                let encoder = JSONEncoder()
-                encoder.dateEncodingStrategy = .iso8601
-                var line = try encoder.encode(event)
+                var line = try self.encoder.encode(event)
                 line.append(0x0A)
                 self.bufferedLines.append(line)
                 self.bufferedBytes += line.count
@@ -217,6 +229,80 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
                 self.disableAfterFailure("encode", error: error)
             }
         }
+    }
+
+    func readRecentEvents(
+        limit: Int,
+        completion: @escaping @Sendable ([RuntimeDiagnosticEvent]) -> Void
+    ) {
+        guard limit > 0 else {
+            completion([])
+            return
+        }
+        queue.async { [weak self] in
+            guard let self else {
+                completion([])
+                return
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            var collectedNewestFirst: [RuntimeDiagnosticEvent] = []
+            collectedNewestFirst.reserveCapacity(min(limit, 512))
+
+            for lineData in self.bufferedLines.reversed() {
+                if collectedNewestFirst.count >= limit { break }
+                guard let decoded = Self.decodeEventLine(lineData, using: decoder) else { continue }
+                collectedNewestFirst.append(decoded)
+            }
+
+            if collectedNewestFirst.count < limit {
+                let files = (try? self.fileManager.contentsOfDirectory(
+                    at: self.directory,
+                    includingPropertiesForKeys: [.contentModificationDateKey]
+                )) ?? []
+                let segmentsNewestFirst = files.compactMap { file in
+                    Self.managedRuntimeSegment(for: file, fileManager: self.fileManager)
+                }.sorted { lhs, rhs in
+                    if lhs.dateKey != rhs.dateKey {
+                        return lhs.dateKey > rhs.dateKey
+                    }
+                    if lhs.index != rhs.index {
+                        return lhs.index > rhs.index
+                    }
+                    return lhs.url.lastPathComponent > rhs.url.lastPathComponent
+                }
+
+                for segment in segmentsNewestFirst {
+                    guard collectedNewestFirst.count < limit else { break }
+                    guard let data = try? Data(contentsOf: segment.url),
+                          !data.isEmpty else { continue }
+                    for lineSlice in data.split(separator: 0x0A, omittingEmptySubsequences: true).reversed() {
+                        if collectedNewestFirst.count >= limit { break }
+                        guard let decoded = Self.decodeEventLine(Data(lineSlice), using: decoder) else {
+                            continue
+                        }
+                        collectedNewestFirst.append(decoded)
+                    }
+                }
+            }
+
+            collectedNewestFirst.reverse()
+            completion(collectedNewestFirst)
+        }
+    }
+
+    private static func decodeEventLine(
+        _ lineData: Data,
+        using decoder: JSONDecoder
+    ) -> RuntimeDiagnosticEvent? {
+        let trimmedData: Data
+        if lineData.last == 0x0A {
+            trimmedData = lineData.dropLast()
+        } else {
+            trimmedData = lineData
+        }
+        guard !trimmedData.isEmpty else { return nil }
+        return try? decoder.decode(RuntimeDiagnosticEvent.self, from: trimmedData)
     }
 
     func requestFinalFlush(
@@ -441,12 +527,11 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
     }
 
     private static func dateKey(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyyMMdd"
-        return formatter.string(from: date)
+        let components = utcCalendar.dateComponents([.year, .month, .day], from: date)
+        let year = components.year ?? 1970
+        let month = components.month ?? 1
+        let day = components.day ?? 1
+        return String(format: "%04d%02d%02d", year, month, day)
     }
 
     private func isReservedExportDestination(_ destination: URL) -> Bool {
@@ -541,14 +626,23 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
 
     private static func dateFromKey(_ key: String) -> Date? {
         guard key.count == 8,
+              isASCIIDigits(key),
               let year = Int(String(key.prefix(4))),
               let month = Int(String(key.dropFirst(4).prefix(2))),
-              let day = Int(String(key.dropFirst(6))) else {
+              let day = Int(String(key.dropFirst(6))),
+              year >= 1,
+              (1...12).contains(month),
+              (1...31).contains(day),
+              let date = utcCalendar.date(from: DateComponents(
+                  timeZone: TimeZone(secondsFromGMT: 0),
+                  year: year,
+                  month: month,
+                  day: day
+              )),
+              Self.dateKey(date) == key else {
             return nil
         }
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        return calendar.date(from: DateComponents(year: year, month: month, day: day))
+        return date
     }
 
     private static func isASCIIDigits(_ value: String) -> Bool {
@@ -574,6 +668,11 @@ final class RuntimeDiagnosticInMemoryWriter: RuntimeDiagnosticWriting {
     private let lock = NSLock()
     private var storedEvents: [RuntimeDiagnosticEvent] = []
     private var storedLines: [Data] = []
+    private let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
 
     var events: [RuntimeDiagnosticEvent] {
         lock.lock()
@@ -588,12 +687,14 @@ final class RuntimeDiagnosticInMemoryWriter: RuntimeDiagnosticWriting {
     }
 
     func enqueue(_ event: RuntimeDiagnosticEvent) {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        guard var line = try? encoder.encode(event) else { return }
-        line.append(0x0A)
+        let sanitized = RuntimeDiagnosticPrivacy.sanitizedEvent(event)
         lock.lock()
-        storedEvents.append(event)
+        guard var line = try? encoder.encode(sanitized) else {
+            lock.unlock()
+            return
+        }
+        line.append(0x0A)
+        storedEvents.append(sanitized)
         storedLines.append(line)
         lock.unlock()
     }
@@ -603,13 +704,16 @@ final class RuntimeDiagnosticInMemoryWriter: RuntimeDiagnosticWriting {
         to destination: URL,
         completion: @escaping @Sendable (Result<Void, RuntimeDiagnosticExportError>) -> Void
     ) {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        let metadataLine: Data?
+        lock.lock()
+        let snapshotLines = storedLines
+        metadataLine = try? encoder.encode(RuntimeDiagnosticPrivacy.sanitizedEvent(metadata))
+        lock.unlock()
         var output = Data()
-        for line in lines {
+        for line in snapshotLines {
             output.append(line)
         }
-        guard let metadataLine = try? encoder.encode(metadata) else {
+        guard let metadataLine else {
             completion(.failure(.encode))
             return
         }
@@ -629,6 +733,18 @@ final class RuntimeDiagnosticInMemoryWriter: RuntimeDiagnosticWriting {
     ) {
         _ = timeout
         DispatchQueue.global(qos: .utility).async(execute: completion)
+    }
+
+    func readRecentEvents(
+        limit: Int,
+        completion: @escaping @Sendable ([RuntimeDiagnosticEvent]) -> Void
+    ) {
+        guard limit > 0 else {
+            completion([])
+            return
+        }
+        let snapshot = Array(events.suffix(limit))
+        completion(snapshot)
     }
 }
 
@@ -654,6 +770,14 @@ final class RuntimeDiagnosticNoopWriter: RuntimeDiagnosticWriting {
     ) {
         _ = timeout
         DispatchQueue.global(qos: .utility).async(execute: completion)
+    }
+
+    func readRecentEvents(
+        limit: Int,
+        completion: @escaping @Sendable ([RuntimeDiagnosticEvent]) -> Void
+    ) {
+        _ = limit
+        completion([])
     }
 }
 

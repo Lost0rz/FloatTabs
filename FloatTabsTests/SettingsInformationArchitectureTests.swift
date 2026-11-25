@@ -7,11 +7,14 @@ final class SettingsInformationArchitectureTests: XCTestCase {
     func testSettingsUsesFiveConsolidatedTopLevelPages() {
         XCTAssertEqual(
             GlobalSettingsPage.allCases.map(\.title),
-            ["General", "Browser", "Audio", "Shortcuts", "Advanced"]
+            ["General", "Bookmarks", "Profiles & Storage", "Alerts", "Shortcuts", "Advanced"]
         )
         XCTAssertFalse(
             GlobalSettingsPage.allCases.map(\.title).contains {
-                ["Appearance", "Performance", "Notifications", "Diagnostics", "Account & Language"].contains($0)
+                [
+                    "Appearance", "Browser", "Performance", "Audio",
+                    "Notifications", "Diagnostics", "Account & Language",
+                ].contains($0)
             }
         )
     }
@@ -19,15 +22,19 @@ final class SettingsInformationArchitectureTests: XCTestCase {
     func testSettingsPagesRetainAllExistingFeatureSections() {
         XCTAssertEqual(
             GlobalSettingsPage.general.sections,
-            [.interfaceAppearance, .unreadTabAttention]
+            [.interfaceAppearance]
         )
         XCTAssertEqual(
-            GlobalSettingsPage.browserPerformance.sections,
+            GlobalSettingsPage.bookmarks.sections,
+            [.bookmarks]
+        )
+        XCTAssertEqual(
+            GlobalSettingsPage.profilesStorage.sections,
             [.browserProfiles, .performance]
         )
         XCTAssertEqual(
-            GlobalSettingsPage.audio.sections,
-            [.readyAlerts]
+            GlobalSettingsPage.alerts.sections,
+            [.unreadTabAttention, .readyAlerts]
         )
         XCTAssertEqual(GlobalSettingsPage.shortcuts.sections, [.shortcuts])
         XCTAssertEqual(
@@ -55,28 +62,28 @@ final class SettingsInformationArchitectureTests: XCTestCase {
         XCTAssertFalse(strings.contains("Dot"))
     }
 
-    func testGeneralAndAudioComposeOneDedicatedAttentionController() throws {
+    func testGeneralAndAlertsComposeDedicatedControllers() throws {
         let settings = GlobalSettingsController(preferencesStore: AppPreferencesStore())
         let general = try XCTUnwrap(
             settings.makeSettingsPage(for: .general) as? SettingsPageViewController
         )
-        let audio = try XCTUnwrap(
-            settings.makeSettingsPage(for: .audio) as? SettingsPageViewController
+        let alerts = try XCTUnwrap(
+            settings.makeSettingsPage(for: .alerts) as? SettingsPageViewController
         )
 
         XCTAssertEqual(
             general.embeddedControllers.map { String(describing: type(of: $0)) },
-            ["AppearanceSettingsViewController", "UnreadTabAttentionSettingsViewController"]
+            ["AppearanceSettingsViewController"]
         )
         XCTAssertEqual(
-            audio.embeddedControllers.map { String(describing: type(of: $0)) },
-            ["NotificationsSettingsViewController"]
+            alerts.embeddedControllers.map { String(describing: type(of: $0)) },
+            ["UnreadTabAttentionSettingsViewController", "NotificationsSettingsViewController"]
         )
         XCTAssertEqual(
-            general.embeddedControllers.filter { $0 is UnreadTabAttentionSettingsViewController }.count,
+            alerts.embeddedControllers.filter { $0 is UnreadTabAttentionSettingsViewController }.count,
             1
         )
-        XCTAssertFalse(audio.embeddedControllers.contains { $0 is UnreadTabAttentionSettingsViewController })
+        XCTAssertFalse(general.embeddedControllers.contains { $0 is UnreadTabAttentionSettingsViewController })
     }
 
     func testUnreadAttentionStyleGridIsResponsiveTwoColumnLayoutAndKeepsPaletteLayout() throws {
@@ -191,8 +198,7 @@ final class SettingsInformationArchitectureTests: XCTestCase {
                 snapshot: {
                     BrowserProfileManagementSnapshot(
                         customProfiles: [profile],
-                        referencedProfileIDs: [],
-                        customProfilesSupported: true
+                        referencedProfileIDs: []
                     )
                 },
                 create: { _ in profile },
@@ -358,6 +364,75 @@ final class SettingsInformationArchitectureTests: XCTestCase {
             AppReleaseInfo.displayVersion(shortVersion: "0.4.0", build: "17"),
             "Version 0.4.0"
         )
+    }
+
+    func testShortcutsUsesTabsHeadingAndPerformanceDescribesThirtyMinuteLifecycle() {
+        let shortcuts = ShortcutsSettingsViewController()
+        shortcuts.loadViewIfNeeded()
+        let shortcutStrings = allControlStrings(in: shortcuts.view)
+        XCTAssertTrue(shortcutStrings.contains("Tabs"))
+        XCTAssertFalse(shortcutStrings.contains("Slots"))
+
+        let performance = PerformanceSettingsViewController(
+            preferencesStore: AppPreferencesStore()
+        )
+        performance.loadViewIfNeeded()
+        let performanceStrings = allControlStrings(in: performance.view)
+        XCTAssertTrue(performanceStrings.contains("Runtime Lifecycle"))
+        XCTAssertEqual(
+            performanceStrings.contains {
+                $0.contains("30 minutes") && $0.contains("Keep Loaded")
+            },
+            true
+        )
+    }
+
+    func testRuntimeDiagnosticsSettingsExposesViewerAndReleaseSnapshotWithLiveStatus() throws {
+        var snapshotCalls = 0
+        let controller = RuntimeDiagnosticsSettingsViewController(
+            preferencesStore: AppPreferencesStore(),
+            captureIncidentHandler: {
+                snapshotCalls += 1
+                return "Snapshot captured cleanly."
+            },
+            liveStatusProvider: {
+                RuntimeDiagnosticsLiveStatusSnapshot(
+                    diagnosticsSummary: RuntimeDiagnosticsSessionSummary(
+                        mode: .standard,
+                        sessionID: UUID(),
+                        sessionEventCount: 12,
+                        sessionWarningCount: 1,
+                        sessionErrorCount: 0,
+                        sessionIncidentEventCount: 1
+                    ),
+                    residentSlotCount: 2,
+                    totalSlotCount: 4,
+                    activeSlotName: "ChatGPT",
+                    hostResidentSizeBytes: 64 * 1024 * 1024
+                )
+            },
+            recentEventsLoader: { _, completion in
+                completion([])
+            }
+        )
+        controller.loadView()
+
+        XCTAssertEqual(controller.viewDiagnosticsButton.title, "View Recent Diagnostics…")
+        XCTAssertTrue(controller.viewDiagnosticsButton.isEnabled)
+        XCTAssertEqual(controller.captureStuckTabButton.title, "Capture Current Tab Snapshot")
+
+        _ = NSApp.sendAction(
+            try XCTUnwrap(controller.captureStuckTabButton.action),
+            to: controller.captureStuckTabButton.target,
+            from: controller.captureStuckTabButton
+        )
+        XCTAssertEqual(snapshotCalls, 1)
+
+        let strings = allControlStrings(in: controller.view)
+        XCTAssertTrue(strings.contains("Snapshot captured cleanly."))
+        XCTAssertTrue(strings.contains {
+            $0.contains("Resident Tabs: 2/4") && $0.contains("excludes WebKit processes")
+        })
     }
 
     private func descendantViews(of view: NSView) -> [NSView] {

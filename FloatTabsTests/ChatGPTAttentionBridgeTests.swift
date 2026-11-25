@@ -3996,6 +3996,68 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         ])
     }
 
+    func testAttentionMutationFilterSkipsLeafStyleClassMutationsAndAcceptsStopMutations() throws {
+        let context = try XCTUnwrap(JSContext())
+        context.evaluateScript("""
+        globalThis.window = globalThis;
+        window.top = window;
+        globalThis.location = { hostname: "chatgpt.com" };
+        window.webkit = { messageHandlers: { floatTabsChatGPTAttention: { postMessage: function() {} } } };
+        window.crypto = { randomUUID: function() { return "mutation-filter-token-0001"; } };
+        globalThis.crypto = window.crypto;
+        globalThis.document = {
+          documentElement: {},
+          visibilityState: "visible",
+          addEventListener: function() {},
+          querySelector: function() { return null; },
+          querySelectorAll: function() { return []; }
+        };
+        window.addEventListener = function() {};
+        window.getComputedStyle = function() { return { display: "block", visibility: "visible" }; };
+        window.__mutationCallbacks = [];
+        globalThis.MutationObserver = class {
+          constructor(callback) { window.__mutationCallbacks.push(callback); }
+          observe() {}
+          disconnect() {}
+        };
+        globalThis.PerformanceObserver = undefined;
+        globalThis.PerformanceResourceTiming = undefined;
+        globalThis.performance = { now: function() { return 1; } };
+        window.__timeoutCount = 0;
+        globalThis.setTimeout = function() { window.__timeoutCount += 1; return window.__timeoutCount; };
+        """)
+        context.evaluateScript(ChatGPTAttentionBridge.scriptSource)
+        XCTAssertNil(context.exception, context.exception?.toString() ?? "Failed to parse script")
+
+        // Pure class/style attribute mutations on leaf nodes without any stop/button
+        // ancestor or descendant should be skipped without scheduling evaluation.
+        context.evaluateScript("""
+        const leafNode = {
+          matches: function() { return false; },
+          closest: function() { return null; },
+          querySelector: function() { return null; }
+        };
+        window.__mutationCallbacks[0]([
+          { type: "attributes", attributeName: "class", target: leafNode },
+          { type: "attributes", attributeName: "style", target: leafNode }
+        ]);
+        """)
+        XCTAssertEqual(context.evaluateScript("window.__timeoutCount")?.toInt32(), 0)
+
+        // Class mutation on a container wrapping a button or a button itself schedules evaluation.
+        context.evaluateScript("""
+        const buttonContainer = {
+          matches: function() { return false; },
+          closest: function() { return null; },
+          querySelector: function(sel) { return sel.includes("button") ? {} : null; }
+        };
+        window.__mutationCallbacks[0]([
+          { type: "attributes", attributeName: "class", target: buttonContainer }
+        ]);
+        """)
+        XCTAssertEqual(context.evaluateScript("window.__timeoutCount")?.toInt32(), 1)
+    }
+
     // MARK: - Helpers
 
     private func makeChatGPTProfile() -> WebAppProfile {

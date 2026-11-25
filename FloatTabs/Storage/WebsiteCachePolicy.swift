@@ -29,10 +29,10 @@ enum WebsiteCacheRetentionOption: String, CaseIterable, Codable, Equatable {
 
     var displayName: String {
         switch self {
-        case .sevenDays: return "7 days"
-        case .thirtyDays: return "30 days"
-        case .ninetyDays: return "90 days"
-        case .never: return "Never"
+        case .sevenDays: return L10n.tr("7 days", "7 天")
+        case .thirtyDays: return L10n.tr("30 days", "30 天")
+        case .ninetyDays: return L10n.tr("90 days", "90 天")
+        case .never: return L10n.tr("Never", "从不")
         }
     }
 
@@ -74,7 +74,7 @@ enum WebsiteCacheLimitOption: String, CaseIterable, Codable, Equatable {
         case .gigabytes1_5: return "1.5 GB"
         case .gigabytes2: return "2 GB"
         case .gigabytes5: return "5 GB"
-        case .unlimited: return "Unlimited"
+        case .unlimited: return L10n.tr("Unlimited", "不限制")
         }
     }
 

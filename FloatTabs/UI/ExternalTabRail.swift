@@ -31,7 +31,7 @@ struct BrowserProfileMenuOption: Equatable {
     ) -> BrowserProfileMenuOption {
         BrowserProfileMenuOption(
             id: nil,
-            name: name,
+            name: L10n.defaultDisplayName(name),
             color: color,
             isEnabled: true
         )
@@ -66,6 +66,9 @@ struct ExternalTabMetrics {
     static let systemControlHoverWidth: CGFloat = hoverWidth
     static let systemControlBottomOffset: CGFloat = 18
     static let systemControlGap: CGFloat = 4
+    static let groupInactiveWidth: CGFloat = 46
+    static let groupActiveWidth: CGFloat = 58
+    static let groupSectionDividerGap: CGFloat = 7
 
     /// Dock-like magnification is proximity driven instead of a binary hover.
     /// At one row away the neighboring tab still grows noticeably; the effect
@@ -166,7 +169,7 @@ enum AttentionStyleEffect: String, CaseIterable, Identifiable, Equatable {
     var id: String { rawValue }
 }
 
-enum TabAttentionPalette: String, CaseIterable, Identifiable, Equatable {
+enum TabAttentionPalette: String, Codable, CaseIterable, Identifiable, Equatable {
     case red
     case amber
     case blue
@@ -178,12 +181,12 @@ enum TabAttentionPalette: String, CaseIterable, Identifiable, Equatable {
 
     var displayName: String {
         switch self {
-        case .red: "Red"
-        case .amber: "Amber"
-        case .blue: "Blue"
-        case .violet: "Violet"
-        case .mint: "Mint"
-        case .spectrum: "Spectrum"
+        case .red: return L10n.tr("Red", "红色")
+        case .amber: return L10n.tr("Amber", "琥珀橙")
+        case .blue: return L10n.tr("Blue", "蓝色")
+        case .violet: return L10n.tr("Violet", "紫罗兰")
+        case .mint: return L10n.tr("Mint", "薄荷绿")
+        case .spectrum: return L10n.tr("Spectrum", "全彩光谱")
         }
     }
 
@@ -220,7 +223,7 @@ enum TabAttentionPalette: String, CaseIterable, Identifiable, Equatable {
     }
 }
 
-enum TabAttentionStyle: String, CaseIterable, Identifiable, Equatable {
+enum TabAttentionStyle: String, Codable, CaseIterable, Identifiable, Equatable {
     case dot
     case beacon
     case orbit
@@ -230,10 +233,10 @@ enum TabAttentionStyle: String, CaseIterable, Identifiable, Equatable {
 
     var displayName: String {
         switch self {
-        case .dot: "Dot"
-        case .beacon: "Beacon"
-        case .orbit: "Orbit"
-        case .pulse: "Pulse"
+        case .dot: return L10n.tr("Dot", "圆点")
+        case .beacon: return L10n.tr("Beacon", "信标")
+        case .orbit: return L10n.tr("Orbit", "流光轨道")
+        case .pulse: return L10n.tr("Pulse", "呼吸脉冲")
         }
     }
 
@@ -835,7 +838,9 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
             menuItem.representedObject = item.slotID.uuidString
             if item.isUnread {
                 menuItem.image = Self.unreadMarkerImage()
-                menuItem.setAccessibilityLabel("\(item.title) · Unread response")
+                menuItem.setAccessibilityLabel(
+                    L10n.tr("\(item.title) · Unread response", "\(item.title) · 有未读回复")
+                )
             }
             menu.addItem(menuItem)
         }
@@ -847,22 +852,25 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
         refreshAppearance()
     }
 
-    func setItems(_ items: [RailOverflowItem]) {
-        self.items = items
+    func refreshLocalization() {
         let label = items.isEmpty
-            ? "More Tabs"
-            : "More Tabs (\(items.count) hidden)"
+            ? L10n.tr("More Tabs", "更多标签")
+            : L10n.tr("More Tabs (\(items.count) hidden)", "更多标签（已收纳 \(items.count) 个）")
         toolTip = label
-        setAccessibilityLabel(label)
+        setAccessibilityLabel(
+            hasUnreadItem
+                ? L10n.tr("\(label) · Unread response", "\(label) · 有未读回复")
+                : label
+        )
         imageView.image = NSImage(
             systemSymbolName: "ellipsis",
             accessibilityDescription: label
         )
-        setAccessibilityLabel(
-            hasUnreadItem
-                ? "\(label) · Unread response"
-                : label
-        )
+    }
+
+    func setItems(_ items: [RailOverflowItem]) {
+        self.items = items
+        refreshLocalization()
         refreshAppearance()
     }
 
@@ -943,6 +951,12 @@ final class ExternalControlZoneView: NSView {
     var onSetBrowserProfile: ((UUID, UUID?) -> Void)?
     var onOpenInNewTabWithBrowserProfile: ((UUID, UUID?) -> Void)?
     var onManageBrowserProfiles: (() -> Void)?
+    var onSaveToBookmarks: ((UUID) -> Void)?
+    var onMoveSlotToGroup: ((UUID, UUID?) -> Void)?
+    var onSelectGroup: ((UUID?) -> Void)?
+    var onCreateGroup: (() -> Void)?
+    var onEditGroup: ((UUID?) -> Void)?
+    var onDeleteGroup: ((UUID) -> Void)?
     var onReorder: ((UUID, Int) -> Void)?
     var onSettings: (() -> Void)?
     var onTogglePin: (() -> Void)?
@@ -961,6 +975,22 @@ final class ExternalControlZoneView: NSView {
     private let settingsControl = GlobalSettingsControl()
     private let pinControl = PinPanelControl()
     private let tabOverflowControl = RailOverflowControl()
+    private let groupSectionDividerView = NSView()
+    private var globalBorderTheme: PanelBorderTheme = .rainbow
+    private var globalCustomBorderColor: NSColor = .systemBlue
+    private var groupMenuOptions: [WebAppGroupMenuOption] = [
+        WebAppGroupMenuOption(
+            id: nil,
+            name: DefaultWebAppGroupPresentation.defaultName,
+            borderTheme: nil,
+            customBorderColorHex: nil,
+            isDefault: true,
+            isActive: true,
+            slotCount: 0
+        )
+    ]
+    private var groupControls: [WebAppGroupControl] = []
+    private var visibleGroupControlIdentifiers = Set<String>()
     private var trackingAreaReference: NSTrackingArea?
     private var pointerLocation: NSPoint?
     private var pointerY: CGFloat?
@@ -969,11 +999,16 @@ final class ExternalControlZoneView: NSView {
     private var browserProfileAssignmentEnabled = true
     private var browserProfileDuplicationEnabled = true
     private var railVisibilityGeneration = 0
+    private var isPresentationVisible = true
     private(set) var isRailCollapsed = false
     private(set) var isUsingCompactLayout = false
     private(set) var visibleTabIDs: [UUID] = []
     private(set) var overflowTabIDs: [UUID] = []
     private(set) var isModalPresentationActive = false
+
+    var visibleGroupControlsForTesting: [WebAppGroupControl] {
+        groupControls.filter { visibleGroupControlIdentifiers.contains($0.stableIdentifier) }
+    }
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -988,6 +1023,10 @@ final class ExternalControlZoneView: NSView {
         addSubview(settingsControl)
         addSubview(pinControl)
         addSubview(tabOverflowControl)
+        groupSectionDividerView.wantsLayer = true
+        groupSectionDividerView.layer?.cornerRadius = 0.5
+        groupSectionDividerView.isHidden = true
+        addSubview(groupSectionDividerView)
         addControl.onActivate = { [weak self] in self?.onAdd?() }
         settingsControl.onActivate = { [weak self] in self?.onSettings?() }
         pinControl.onActivate = { [weak self] in self?.onTogglePin?() }
@@ -1004,6 +1043,7 @@ final class ExternalControlZoneView: NSView {
         tabOverflowControl.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
+        reconcileGroupControls()
     }
 
     convenience init() {
@@ -1147,6 +1187,17 @@ final class ExternalControlZoneView: NSView {
         pinControl.setPinned(isPinned)
     }
 
+    func setPresentationVisible(_ visible: Bool) {
+        guard isPresentationVisible != visible else { return }
+        isPresentationVisible = visible
+        for tab in tabViews.values {
+            tab.setAttentionPresentationVisible(visible && !isRailCollapsed && !tab.isHidden)
+        }
+        tabOverflowControl.setAttentionPresentationVisible(
+            visible && !isRailCollapsed && !tabOverflowControl.isHidden
+        )
+    }
+
     func setAttentionStyle(_ style: TabAttentionStyle, palette: TabAttentionPalette? = nil) {
         let nextPalette = palette ?? attentionPalette
         guard attentionStyle != style || attentionPalette != nextPalette else { return }
@@ -1206,6 +1257,38 @@ final class ExternalControlZoneView: NSView {
         }
     }
 
+    func setGroupsSnapshot(
+        options: [WebAppGroupMenuOption],
+        activeGroupID _: UUID?,
+        globalBorderTheme: PanelBorderTheme? = nil,
+        globalCustomBorderColor: NSColor? = nil
+    ) {
+        if let globalBorderTheme {
+            self.globalBorderTheme = globalBorderTheme
+        }
+        if let globalCustomBorderColor {
+            self.globalCustomBorderColor = globalCustomBorderColor
+        }
+        groupMenuOptions = options.isEmpty
+            ? [
+                WebAppGroupMenuOption(
+                    id: nil,
+                    name: DefaultWebAppGroupPresentation.defaultName,
+                    borderTheme: nil,
+                    customBorderColorHex: nil,
+                    isDefault: true,
+                    isActive: true,
+                    slotCount: profiles.count
+                )
+            ]
+            : options
+        reconcileGroupControls()
+        for tab in tabViews.values {
+            tab.setGroupMenuSnapshot(options: groupMenuOptions)
+        }
+        needsLayout = true
+    }
+
     func refreshAppearance() {
         for tab in tabViews.values {
             tab.refreshAppearance()
@@ -1214,6 +1297,21 @@ final class ExternalControlZoneView: NSView {
         settingsControl.refreshAppearance()
         pinControl.refreshAppearance()
         tabOverflowControl.refreshAppearance()
+        groupControls.forEach { $0.refreshAppearance() }
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            groupSectionDividerView.layer?.backgroundColor = NSColor.separatorColor
+                .withAlphaComponent(0.45)
+                .cgColor
+        }
+    }
+
+    func refreshLocalization() {
+        tabViews.values.forEach { $0.refreshLocalization() }
+        addControl.refreshLocalization()
+        settingsControl.refreshLocalization()
+        pinControl.refreshLocalization()
+        tabOverflowControl.refreshLocalization()
+        groupControls.forEach { $0.refreshLocalization() }
     }
 
     func setCollapsed(_ collapsed: Bool, animated: Bool) {
@@ -1337,13 +1435,20 @@ final class ExternalControlZoneView: NSView {
     private var railContentViews: [NSView] {
         Array(tabViews.values)
             + [
-                addControl, settingsControl, pinControl, tabOverflowControl,
+                addControl, settingsControl, pinControl, tabOverflowControl, groupSectionDividerView,
             ]
+            + groupControls
     }
 
     private func isHiddenByOverflow(_ view: NSView) -> Bool {
         if let tab = view as? ExternalWebAppTabView {
             return overflowTabIDs.contains(tab.slotID)
+        }
+        if let groupControl = view as? WebAppGroupControl {
+            return !visibleGroupControlIdentifiers.contains(groupControl.stableIdentifier)
+        }
+        if view === groupSectionDividerView {
+            return isUsingCompactLayout || visibleGroupControlIdentifiers.isEmpty
         }
         return view === tabOverflowControl && overflowTabIDs.isEmpty
     }
@@ -1355,9 +1460,9 @@ final class ExternalControlZoneView: NSView {
             let isHidden = collapsed || isHiddenByOverflow(view)
             view.isHidden = isHidden
             if let tab = view as? ExternalWebAppTabView {
-                tab.setAttentionPresentationVisible(!isHidden)
+                tab.setAttentionPresentationVisible(isPresentationVisible && !isHidden)
             } else if view === tabOverflowControl {
-                tabOverflowControl.setAttentionPresentationVisible(!isHidden)
+                tabOverflowControl.setAttentionPresentationVisible(isPresentationVisible && !isHidden)
             }
         }
         onActiveTabGeometryChange?()
@@ -1373,15 +1478,20 @@ final class ExternalControlZoneView: NSView {
             assignmentEnabled: browserProfileAssignmentEnabled,
             duplicationEnabled: browserProfileDuplicationEnabled
         )
+        view.setGroupMenuSnapshot(options: groupMenuOptions)
         view.alphaValue = isRailCollapsed ? 0 : 1
         view.isHidden = isRailCollapsed
-        view.setAttentionPresentationVisible(!isRailCollapsed)
+        view.setAttentionPresentationVisible(isPresentationVisible && !isRailCollapsed)
         tabViews[id] = view
         addSubview(view, positioned: .above, relativeTo: addControl)
 
         view.onSelect = { [weak self] slotID in self?.onSelect?(slotID) }
         view.onReturnHome = { [weak self] slotID in self?.onReturnHome?(slotID) }
         view.onReload = { [weak self] slotID in self?.onReload?(slotID) }
+        view.onSaveToBookmarks = { [weak self] slotID in self?.onSaveToBookmarks?(slotID) }
+        view.onMoveToGroup = { [weak self] slotID, groupID in
+            self?.onMoveSlotToGroup?(slotID, groupID)
+        }
         view.onEdit = { [weak self] slotID in self?.onEdit?(slotID) }
         view.onRemove = { [weak self] slotID in self?.onRemove?(slotID) }
         view.onSetWebsiteMode = { [weak self] slotID, mode in
@@ -1440,6 +1550,9 @@ final class ExternalControlZoneView: NSView {
             location.map { settingsControl.frame.contains($0) } ?? false
         )
         pinControl.setHovered(location.map { pinControl.frame.contains($0) } ?? false)
+        for groupControl in groupControls where !groupControl.isHidden {
+            groupControl.setHovered(location.map { groupControl.frame.contains($0) } ?? false)
+        }
         if let location {
             tabOverflowControl.refreshAppearance(
                 isHovered: tabOverflowControl.frame.contains(location)
@@ -1453,11 +1566,15 @@ final class ExternalControlZoneView: NSView {
         let updateFrames = {
             let ids = self.previewOrderIDs ?? self.profiles.map(\.id)
             let standardTabEnd = self.tabEndY(for: ids.count)
+            let standardGroupVisibleCount = min(self.groupControls.count, 4)
+            let reservedBottomRows = max(standardGroupVisibleCount + 1, 5)
+            let dividerGap = standardGroupVisibleCount > 0 ? ExternalTabMetrics.groupSectionDividerGap : 0
             let standardControlsTop = max(
                 self.bounds.height
                     - ExternalTabMetrics.systemControlBottomOffset
                     - ExternalTabMetrics.systemControlHeight
-                    - 5 * (ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.systemControlGap),
+                    - CGFloat(reservedBottomRows) * (ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.systemControlGap)
+                    - dividerGap,
                 0
             )
             let compact = standardTabEnd
@@ -1513,12 +1630,12 @@ final class ExternalControlZoneView: NSView {
                 guard visibleSet.contains(id) else {
                     tab.setDockInfluence(0)
                     tab.isHidden = self.isRailCollapsed || overflowIDs.contains(id)
-                    tab.setAttentionPresentationVisible(!tab.isHidden)
+                    tab.setAttentionPresentationVisible(self.isPresentationVisible && !tab.isHidden)
                     self.setFrame(.zero, for: tab, animated: animated)
                     continue
                 }
                 tab.isHidden = self.isRailCollapsed
-                tab.setAttentionPresentationVisible(!tab.isHidden)
+                tab.setAttentionPresentationVisible(self.isPresentationVisible && !tab.isHidden)
                 let centerY = y + ExternalTabMetrics.tabHeight / 2
                 let influence = self.pointerY.map {
                     ExternalTabMetrics.dockInfluence(forDistance: $0 - centerY)
@@ -1552,7 +1669,7 @@ final class ExternalControlZoneView: NSView {
                 )
                 self.tabOverflowControl.isHidden = self.isRailCollapsed
                 self.tabOverflowControl.setAttentionPresentationVisible(
-                    !self.tabOverflowControl.isHidden
+                    self.isPresentationVisible && !self.tabOverflowControl.isHidden
                 )
                 y += ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.addGap
             } else {
@@ -1624,6 +1741,7 @@ final class ExternalControlZoneView: NSView {
             pinControl,
             tabOverflowControl,
         ])
+        owners.append(contentsOf: groupControls)
         return owners
     }
 
@@ -1653,6 +1771,8 @@ final class ExternalControlZoneView: NSView {
             control.setDockInfluence(influence)
         case let control as PinPanelControl:
             control.setDockInfluence(influence)
+        case let control as WebAppGroupControl:
+            control.setDockInfluence(influence)
         default:
             break
         }
@@ -1666,20 +1786,39 @@ final class ExternalControlZoneView: NSView {
             return control.preferredWidth
         case let control as PinPanelControl:
             return control.preferredWidth
+        case let control as WebAppGroupControl:
+            return control.preferredWidth
         default:
             return ExternalTabMetrics.systemControlNormalWidth
         }
     }
 
     private func layoutStandardSystemControls(animated: Bool) {
+        let visibleGroups = resolvedStandardGroupControls()
+        let visibleIdentifiers = Set(visibleGroups.map(\.stableIdentifier))
+        visibleGroupControlIdentifiers = visibleIdentifiers
+        let hiddenGroupsHaveUnread = groupControls.contains { control in
+            !visibleIdentifiers.contains(control.stableIdentifier) && control.option.unreadCount > 0
+        }
         var y = max(
             bounds.height
                 - ExternalTabMetrics.systemControlBottomOffset
                 - ExternalTabMetrics.systemControlHeight,
             0
         )
-        let controls: [NSView] = [pinControl, settingsControl]
-        for control in controls {
+        let controls: [NSView] = [pinControl, settingsControl] + visibleGroups.reversed()
+        let showDivider = !visibleGroups.isEmpty
+        if !showDivider {
+            groupSectionDividerView.isHidden = true
+        }
+        for (index, control) in controls.enumerated() {
+            if let groupControl = control as? WebAppGroupControl {
+                groupControl.setAlwaysOpensMenu(groupControls.count > visibleGroups.count)
+                groupControl.setHasHiddenGroupUnread(
+                    hiddenGroupsHaveUnread && groupControl === visibleGroups.last
+                )
+                groupControl.isHidden = isRailCollapsed
+            }
             let centerY = y + ExternalTabMetrics.systemControlHeight / 2
             let influence = pointerY.map {
                 ExternalTabMetrics.dockInfluence(forDistance: $0 - centerY)
@@ -1700,28 +1839,122 @@ final class ExternalControlZoneView: NSView {
                     - ExternalTabMetrics.systemControlHeight,
                 0
             )
+            if index == 1 && showDivider {
+                let gapSpan = ExternalTabMetrics.systemControlGap + ExternalTabMetrics.groupSectionDividerGap
+                let dividerY = y + ExternalTabMetrics.systemControlHeight + (gapSpan - 1) / 2
+                let dividerWidth = max(bounds.width - PanelMetrics.interactionBorderOutset - 14, 16)
+                groupSectionDividerView.isHidden = isRailCollapsed
+                setFrame(
+                    NSRect(x: 7, y: dividerY, width: dividerWidth, height: 1),
+                    for: groupSectionDividerView,
+                    animated: animated
+                )
+                y = max(y - ExternalTabMetrics.groupSectionDividerGap, 0)
+            }
+        }
+        for groupControl in groupControls where !visibleGroupControlIdentifiers.contains(groupControl.stableIdentifier) {
+            groupControl.setHasHiddenGroupUnread(false)
+            groupControl.isHidden = true
+            groupControl.frame = .zero
         }
     }
 
     private func layoutCompactSystemControls(animated: Bool) {
+        groupSectionDividerView.isHidden = true
+        let activeGroupControl = groupControls.first(where: { $0.option.isActive }) ?? groupControls.first
+        let compactHiddenGroupsHaveUnread = groupControls.contains {
+            $0 !== activeGroupControl && $0.option.unreadCount > 0
+        }
+        if let activeGroupControl {
+            visibleGroupControlIdentifiers = [activeGroupControl.stableIdentifier]
+            activeGroupControl.setAlwaysOpensMenu(true)
+            activeGroupControl.setHasHiddenGroupUnread(compactHiddenGroupsHaveUnread)
+            setDockInfluence(0, for: activeGroupControl)
+            activeGroupControl.isHidden = isRailCollapsed
+            let compactGroupWidth = max(
+                bounds.width - PanelMetrics.interactionBorderOutset,
+                ExternalTabMetrics.systemControlNormalWidth
+            )
+            setFrame(
+                attachedFrame(
+                    preferredWidth: compactGroupWidth,
+                    y: compactControlsTopY,
+                    height: ExternalTabMetrics.systemControlHeight
+                ),
+                for: activeGroupControl,
+                animated: animated
+            )
+        } else {
+            visibleGroupControlIdentifiers.removeAll()
+        }
+        for groupControl in groupControls where groupControl !== activeGroupControl {
+            groupControl.setHasHiddenGroupUnread(false)
+            groupControl.isHidden = true
+            groupControl.frame = .zero
+        }
+
         let width = min(
             ExternalTabMetrics.systemControlNormalWidth,
             max((bounds.width - ExternalTabMetrics.systemControlGap) / 2, 0)
         )
         let controls: [NSView] = [settingsControl, pinControl]
+        let bottomRowY = compactControlsTopY
+            + ExternalTabMetrics.systemControlHeight
+            + ExternalTabMetrics.systemControlGap
         for (index, control) in controls.enumerated() {
             setDockInfluence(0, for: control)
-            let row = index / 2
-            let column = index % 2
             let frame = NSRect(
-                x: CGFloat(column) * (width + ExternalTabMetrics.systemControlGap),
-                y: compactControlsTopY
-                    + CGFloat(row)
-                        * (ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.systemControlGap),
+                x: CGFloat(index) * (width + ExternalTabMetrics.systemControlGap),
+                y: bottomRowY,
                 width: width,
                 height: ExternalTabMetrics.systemControlHeight
             )
             setFrame(frame, for: control, animated: animated)
+        }
+    }
+
+    private func resolvedStandardGroupControls() -> [WebAppGroupControl] {
+        let maxVisible = 4
+        guard groupControls.count > maxVisible else { return groupControls }
+        var selected = Array(groupControls.prefix(maxVisible))
+        if let activeControl = groupControls.first(where: { $0.option.isActive }),
+           !selected.contains(where: { $0 === activeControl }) {
+            selected[maxVisible - 1] = activeControl
+        }
+        return selected
+    }
+
+    private func reconcileGroupControls() {
+        for existing in groupControls {
+            existing.removeFromSuperview()
+        }
+        groupControls = groupMenuOptions.map { option in
+            let control = WebAppGroupControl(
+                option: option,
+                allOptions: groupMenuOptions,
+                globalBorderTheme: globalBorderTheme,
+                globalCustomBorderColor: globalCustomBorderColor
+            )
+            control.isHidden = isRailCollapsed
+            control.alphaValue = isRailCollapsed ? 0 : 1
+            control.setHoverInteractionSuspended(isModalPresentationActive)
+            control.onSelectGroup = { [weak self] groupID in
+                self?.onSelectGroup?(groupID)
+            }
+            control.onCreateGroup = { [weak self] in
+                self?.onCreateGroup?()
+            }
+            control.onEditGroup = { [weak self] groupID in
+                self?.onEditGroup?(groupID)
+            }
+            control.onDeleteGroup = { [weak self] groupID in
+                self?.onDeleteGroup?(groupID)
+            }
+            control.onPointerMoved = { [weak self] event in
+                self?.updateDockPointer(with: event)
+            }
+            addSubview(control, positioned: .below, relativeTo: settingsControl)
+            return control
         }
     }
 
@@ -1782,16 +2015,28 @@ final class ExternalControlZoneView: NSView {
 
 /// Bottom-left mirror of the native-looking resize grip. Three themed strokes
 /// sit entirely inside the Web surface and fan open / tuck inward with the rail.
+/// Click toggles the Tab Rail; dragging resizes the window from the bottom-left
+/// corner cleanly without accidentally folding the rail.
 @MainActor
 final class RailFoldControl: NSView {
+    private static let dragActivationThreshold: CGFloat = 4
+
     var onActivate: (() -> Void)?
+    var onViewportSizeChange: ((NSSize) -> Void)?
+    var onResizeEnded: (() -> Void)?
+    weak var resizeTargetWindow: NSWindow?
 
     private let strokeLayers = [CAShapeLayer(), CAShapeLayer(), CAShapeLayer()]
     private var trackingAreaReference: NSTrackingArea?
     private var borderTheme: PanelBorderTheme = .rainbow
     private var customBorderColor: NSColor = .systemBlue
+    private var isPresentationVisible = true
     private(set) var isExpanded = true
     private var isHovered = false
+    private var mouseDownScreenLocation: NSPoint?
+    private var startingWindowFrame: NSRect?
+    private var isDragResizing = false
+    private var resizeCursorIsPushed = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1805,9 +2050,7 @@ final class RailFoldControl: NSView {
             layer?.addSublayer(stroke)
         }
 
-        toolTip = "Hide Tab Rail"
-        setAccessibilityRole(.button)
-        setAccessibilityLabel(toolTip)
+        refreshLocalization()
         applyColorAppearance()
     }
 
@@ -1823,7 +2066,8 @@ final class RailFoldControl: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(point) ? self : nil
+        guard !isHidden, alphaValue > 0, frame.contains(point) else { return nil }
+        return self
     }
 
     override func updateTrackingAreas() {
@@ -1843,12 +2087,16 @@ final class RailFoldControl: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
-        NSCursor.arrow.set()
+        if !isDragResizing {
+            NSCursor.arrow.set()
+        }
         refreshAppearance()
     }
 
     override func mouseMoved(with event: NSEvent) {
-        NSCursor.arrow.set()
+        if !isDragResizing {
+            NSCursor.arrow.set()
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -1856,7 +2104,68 @@ final class RailFoldControl: NSView {
         refreshAppearance()
     }
 
+    override func mouseDown(with event: NSEvent) {
+        beginPointerInteraction(atScreenLocation: NSEvent.mouseLocation)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        updatePointerInteraction(atScreenLocation: NSEvent.mouseLocation)
+    }
+
     override func mouseUp(with event: NSEvent) {
+        finishPointerInteraction()
+    }
+
+    func beginPointerInteraction(atScreenLocation screenLocation: NSPoint) {
+        mouseDownScreenLocation = screenLocation
+        startingWindowFrame = (resizeTargetWindow ?? window)?.frame
+        isDragResizing = false
+    }
+
+    func updatePointerInteraction(atScreenLocation screenLocation: NSPoint) {
+        guard let mouseDownScreenLocation else { return }
+        let deltaX = screenLocation.x - mouseDownScreenLocation.x
+        let deltaY = screenLocation.y - mouseDownScreenLocation.y
+
+        if !isDragResizing {
+            guard hypot(deltaX, deltaY) >= Self.dragActivationThreshold else { return }
+            isDragResizing = true
+            if !resizeCursorIsPushed {
+                PanelResizeCorner.bottomLeft.cursor.push()
+                resizeCursorIsPushed = true
+            }
+        }
+
+        guard let targetWindow = resizeTargetWindow ?? window,
+              let startingWindowFrame else {
+            return
+        }
+        let resized = PanelResizeHandleView.resizedFrame(
+            startingFrame: startingWindowFrame,
+            deltaX: deltaX,
+            deltaY: deltaY,
+            corner: .bottomLeft,
+            visibleFrame: targetWindow.screen?.visibleFrame
+        )
+        targetWindow.setFrame(resized, display: true)
+        onViewportSizeChange?(PanelMetrics.viewportSize(forPanelSize: resized.size))
+    }
+
+    func finishPointerInteraction() {
+        if resizeCursorIsPushed {
+            NSCursor.pop()
+            resizeCursorIsPushed = false
+        }
+        mouseDownScreenLocation = nil
+        startingWindowFrame = nil
+
+        if isDragResizing {
+            isDragResizing = false
+            NSCursor.arrow.set()
+            onResizeEnded?()
+            return
+        }
+
         NSCursor.arrow.set()
         let press = CASpringAnimation(keyPath: "transform.scale")
         press.fromValue = 0.82
@@ -1904,12 +2213,22 @@ final class RailFoldControl: NSView {
         }
     }
 
+    func refreshLocalization() {
+        let accessibilityTitle = isExpanded
+            ? L10n.tr("Hide Tab Rail", "隐藏标签侧栏")
+            : L10n.tr("Show Tab Rail", "展开标签侧栏")
+        toolTip = isExpanded
+            ? L10n.tr("Click to Hide Tab Rail · Drag to Resize", "点击隐藏侧栏 · 拖拽调整窗口大小")
+            : L10n.tr("Click to Show Tab Rail · Drag to Resize", "点击展开侧栏 · 拖拽调整窗口大小")
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(accessibilityTitle)
+    }
+
     func setExpanded(_ expanded: Bool, animated: Bool) {
         guard isExpanded != expanded else { return }
         let oldPaths = strokeLayers.indices.map { gripPath(index: $0, expanded: isExpanded) }
         isExpanded = expanded
-        toolTip = expanded ? "Hide Tab Rail" : "Show Tab Rail"
-        setAccessibilityLabel(toolTip)
+        refreshLocalization()
 
         for (index, stroke) in strokeLayers.enumerated() {
             let newPath = gripPath(index: index, expanded: expanded)
@@ -1948,12 +2267,21 @@ final class RailFoldControl: NSView {
         return path
     }
 
+    func setPresentationVisible(_ visible: Bool) {
+        guard isPresentationVisible != visible else { return }
+        isPresentationVisible = visible
+        applyColorAppearance()
+    }
+
     private func applyColorAppearance() {
         strokeLayers.forEach { $0.removeAnimation(forKey: "FloatTabs.railGripRainbow") }
         if borderTheme == .rainbow {
             let colors = [NSColor.systemBlue, .systemPurple, .systemPink, .systemOrange]
+            let animate = isPresentationVisible
+                && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             for (index, stroke) in strokeLayers.enumerated() {
                 stroke.strokeColor = colors[index].cgColor
+                guard animate else { continue }
                 let flow = CAKeyframeAnimation(keyPath: "strokeColor")
                 flow.values = (0...3).map { colors[(index + $0) % colors.count].cgColor }
                     + [colors[index].cgColor]
@@ -2020,6 +2348,32 @@ final class WebsiteFaviconAssetStore {
         }
     }
 
+    struct SlotRecord: Codable, Equatable {
+        static let currentVersion = 1
+
+        let version: Int
+        let slotID: UUID
+        let scopeKey: String
+        let imageData: Data
+        let pixelSHA256: String
+        let kind: String
+
+        init(
+            slotID: UUID,
+            scopeKey: String,
+            imageData: Data,
+            pixelSHA256: String,
+            kind: String
+        ) {
+            version = Self.currentVersion
+            self.slotID = slotID
+            self.scopeKey = scopeKey
+            self.imageData = imageData
+            self.pixelSHA256 = pixelSHA256
+            self.kind = kind
+        }
+    }
+
     enum ReadResult {
         case record(Record)
         case missing
@@ -2052,6 +2406,7 @@ final class WebsiteFaviconAssetStore {
     private var memoryRecords: [String: Record] = [:]
     private var memoryOrder: [String] = []
     private var corruptOrigins: Set<String> = []
+    private var memorySlotRecords: [UUID: SlotRecord] = [:]
 
     /// A nil directory is a bounded in-memory store for provider tests. The
     /// production singleton uses the isolated Application Support directory.
@@ -2066,6 +2421,81 @@ final class WebsiteFaviconAssetStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         self.encoder = encoder
+    }
+
+    func loadSlotIcon(slotID: UUID, scopeKey: String) -> SlotRecord? {
+        guard Self.isSafeScopeKey(scopeKey) else { return nil }
+        if directoryURL == nil {
+            guard let record = memorySlotRecords[slotID],
+                  Self.isValid(record, for: slotID, scopeKey: scopeKey, maximumImageBytes: limits.maximumImageBytes) else {
+                return nil
+            }
+            return record
+        }
+        let fileURL = Self.slotRecordURL(for: slotID, in: directoryURL!)
+        guard fileManager.fileExists(atPath: fileURL.path),
+              let data = try? Data(contentsOf: fileURL),
+              let record = try? decoder.decode(SlotRecord.self, from: data),
+              Self.isValid(record, for: slotID, scopeKey: scopeKey, maximumImageBytes: limits.maximumImageBytes) else {
+            return nil
+        }
+        return record
+    }
+
+    @discardableResult
+    func saveSlotIcon(_ record: SlotRecord) -> WriteResult {
+        guard Self.isValid(record, for: record.slotID, scopeKey: record.scopeKey, maximumImageBytes: limits.maximumImageBytes),
+              let encoded = try? encoder.encode(record) else {
+            return .invalidRecord
+        }
+        if let directoryURL {
+            do {
+                try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+                let fileURL = Self.slotRecordURL(for: record.slotID, in: directoryURL)
+                try encoded.write(to: fileURL, options: [.atomic])
+                return .saved
+            } catch {
+                return .unavailable
+            }
+        } else {
+            memorySlotRecords[record.slotID] = record
+            return .saved
+        }
+    }
+
+    func removeSlotIcon(slotID: UUID) {
+        memorySlotRecords.removeValue(forKey: slotID)
+        if let directoryURL {
+            let fileURL = Self.slotRecordURL(for: slotID, in: directoryURL)
+            try? fileManager.removeItem(at: fileURL)
+        }
+    }
+
+    /// Removes persisted `slot-<uuid>.json` icon files whose Slot ID no longer exists.
+    func pruneSlotIcons(keeping validSlotIDs: Set<UUID>) {
+        for slotID in memorySlotRecords.keys where !validSlotIDs.contains(slotID) {
+            memorySlotRecords.removeValue(forKey: slotID)
+        }
+        guard let directoryURL,
+              let files = try? fileManager.contentsOfDirectory(
+                  at: directoryURL,
+                  includingPropertiesForKeys: nil,
+                  options: []
+              ) else {
+            return
+        }
+        for fileURL in files {
+            let name = fileURL.lastPathComponent
+            guard name.hasPrefix("slot-"), name.hasSuffix(".json") else { continue }
+            let start = name.index(name.startIndex, offsetBy: "slot-".count)
+            let end = name.index(name.endIndex, offsetBy: -".json".count)
+            guard start < end,
+                  let slotID = UUID(uuidString: String(name[start..<end])),
+                  !validSlotIDs.contains(slotID) else {
+                continue
+            }
+            try? fileManager.removeItem(at: fileURL)
+        }
     }
 
     func load(originKey: String) -> ReadResult {
@@ -2226,7 +2656,7 @@ final class WebsiteFaviconAssetStore {
             at: directoryURL,
             includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
             options: []
-        ).filter { $0.pathExtension == "json" }
+        ).filter { !$0.lastPathComponent.hasPrefix("slot-") && $0.pathExtension == "json" }
         return urls.map { url in
             let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
             let size = values?.fileSize ?? ((try? Data(contentsOf: url).count) ?? 0)
@@ -2297,6 +2727,42 @@ final class WebsiteFaviconAssetStore {
         return true
     }
 
+    private static func isValid(
+        _ record: SlotRecord,
+        for slotID: UUID,
+        scopeKey: String,
+        maximumImageBytes: Int
+    ) -> Bool {
+        record.version == SlotRecord.currentVersion
+            && record.slotID == slotID
+            && record.scopeKey == scopeKey
+            && isSafeScopeKey(record.scopeKey)
+            && record.imageData.count <= maximumImageBytes
+            && record.pixelSHA256.count == 64
+            && record.pixelSHA256.allSatisfy(\.isHexDigit)
+            && ["icon", "appleTouch", "mask", "conventional"].contains(record.kind)
+    }
+
+    private static func isSafeScopeKey(_ value: String) -> Bool {
+        guard let components = URLComponents(string: value),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              components.host != nil,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil,
+              !components.path.contains("..") else {
+            return false
+        }
+        let segments = components.path.split(separator: "/", omittingEmptySubsequences: true)
+        return segments.count <= 1
+    }
+
+    private static func slotRecordURL(for slotID: UUID, in directoryURL: URL) -> URL {
+        directoryURL.appendingPathComponent("slot-\(slotID.uuidString.lowercased()).json", isDirectory: false)
+    }
+
     private static func recordURL(for originKey: String, in directoryURL: URL) -> URL {
         let digest = SHA256.hash(data: Data(originKey.utf8))
             .map { String(format: "%02x", $0) }
@@ -2353,6 +2819,7 @@ final class WebsiteFaviconProvider {
 
     private enum FailureStage: String, Hashable {
         case noCandidates = "no_candidates"
+        case authenticationRedirect = "auth_redirect"
         case requestFailed = "request_failed"
         case requestTimedOut = "request_timed_out"
         case httpStatus = "http_status"
@@ -2534,9 +3001,27 @@ final class WebsiteFaviconProvider {
         let controlResult: IconControlResult?
     }
 
+    struct SessionFaviconExtractionResult: Equatable {
+        let renderedPNGData: Data?
+        let renderedKind: Candidate.Kind?
+        let renderedResourceURL: URL?
+        let candidates: [Candidate]
+        let readSucceeded: Bool
+    }
+
     private struct ConsumerDemand {
         let originKey: String
         var url: URL
+        var automaticallyRetries: Bool
+        var completion: Completion
+    }
+
+    private struct SlotDemand {
+        let slotID: UUID
+        let consumerID: UUID
+        let scopeKey: String
+        let originKey: String
+        let homeURL: URL
         var automaticallyRetries: Bool
         var completion: Completion
     }
@@ -2561,6 +3046,7 @@ final class WebsiteFaviconProvider {
     private static let maximumDiscoveryPages = 2
     private static let maximumCachedOrigins = 256
     private static let maximumDOMCandidateOrigins = 128
+    private static let extractionWorld = WKContentWorld.world(name: "FloatTabsFaviconExtraction")
     private static let requestTimeout: TimeInterval = 8
     private static let requestBudget: TimeInterval = 25
     private static let faviconSession: URLSession = {
@@ -2568,6 +3054,10 @@ final class WebsiteFaviconProvider {
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.httpCookieAcceptPolicy = .never
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersion
+        configuration.httpAdditionalHeaders = [
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X \(osVersion.majorVersion)_\(osVersion.minorVersion)_\(osVersion.patchVersion)) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+        ]
         return URLSession(configuration: configuration)
     }()
 
@@ -2578,6 +3068,9 @@ final class WebsiteFaviconProvider {
     private weak var diagnosticRecorder: (any RuntimeDiagnosticRecording)?
     private var cache: [String: CachedFavicon] = [:]
     private var cacheOrder: [String] = []
+    private var slotIcons: [UUID: (scopeKey: String, entry: CachedFavicon)] = [:]
+    private var slotDemands: [UUID: SlotDemand] = [:]
+    private var slotInFlight: [UUID: (scopeKey: String, task: Task<Void, Never>)] = [:]
     private var pendingFavicons: [String: PendingFavicon] = [:]
     private var domCandidates: [String: [Candidate]] = [:]
     private var domCandidateOrder: [String] = []
@@ -2616,11 +3109,18 @@ final class WebsiteFaviconProvider {
         diagnosticRecorder = recorder
     }
 
+    func pruneOrphanSlotIcons(keeping validSlotIDs: Set<UUID>) {
+        for slotID in slotIcons.keys where !validSlotIDs.contains(slotID) {
+            slotIcons.removeValue(forKey: slotID)
+        }
+        assetStore.pruneSlotIcons(keeping: validSlotIDs)
+    }
+
     func recordProjection(_ outcome: ProjectionOutcome, surface: String) {
         guard ["tab", "menu_bar"].contains(surface) else { return }
         diagnosticRecorder?.record(
             event: "favicon.ui_projection",
-            level: outcome == .noImageDisplayed ? .warning : .notice,
+            level: outcome == .noImageDisplayed ? .warning : .debug,
             subsystem: "favicon",
             fields: [
                 "surface": .string(surface),
@@ -2641,6 +3141,387 @@ final class WebsiteFaviconProvider {
         let port = url.port.flatMap { $0 == defaultPort ? nil : $0 }
             .map { ":\($0)" } ?? ""
         return "\(scheme)://\(host)\(port)"
+    }
+
+    static func slotScopeKey(for url: URL) -> String? {
+        guard let origin = originKey(for: url) else { return nil }
+        let segments = url.path.split(separator: "/", omittingEmptySubsequences: true)
+        if let first = segments.first,
+           !first.isEmpty,
+           let encoded = String(first).lowercased()
+               .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
+            return "\(origin)/\(encoded)"
+        }
+        return origin
+    }
+
+    static func siblingWWWOriginKey(for originKey: String) -> String? {
+        guard var components = URLComponents(string: originKey),
+              let host = components.host?.lowercased(),
+              !host.isEmpty,
+              host != "localhost" else {
+            return nil
+        }
+        let labels = host.split(separator: ".").map(String.init)
+        if labels.count == 4, labels.allSatisfy({ Int($0) != nil }) {
+            return nil
+        }
+        if host.hasPrefix("www.") {
+            let bare = String(host.dropFirst(4))
+            let bareLabels = bare.split(separator: ".")
+            guard bareLabels.count >= 2 else { return nil }
+            components.host = bare
+            return components.string
+        }
+        guard labels.count >= 2 else { return nil }
+        components.host = "www.\(host)"
+        return components.string
+    }
+
+    /// Distinguishes genuine SSO / authentication interstitial pages from
+    /// normal application pages on hosts (such as `github.com`) whose root or
+    /// repository URLs appear in `PopupCoordinator.isAuthenticationURL`.
+    nonisolated static func isAuthenticationInterstitialURL(_ url: URL?) -> Bool {
+        guard let url,
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let rawHost = url.host?.lowercased(),
+              !rawHost.isEmpty else {
+            return false
+        }
+
+        let dedicatedIdPHosts: Set<String> = [
+            "accounts.google.com",
+            "appleid.apple.com",
+            "auth.openai.com",
+            "login.microsoftonline.com",
+            "login.live.com",
+        ]
+        if dedicatedIdPHosts.contains(rawHost)
+            || rawHost.hasPrefix("accounts.")
+            || rawHost.hasPrefix("auth.")
+            || rawHost.hasPrefix("id.")
+            || rawHost.hasPrefix("login.")
+            || rawHost.hasPrefix("signin.")
+            || rawHost.hasPrefix("sso.") {
+            return true
+        }
+
+        var pathSegments = url.path
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map { $0.lowercased() }
+
+        while let first = pathSegments.first {
+            if first.hasPrefix("v"),
+               first.count >= 2,
+               first.dropFirst().allSatisfy(\.isNumber) {
+                pathSegments.removeFirst()
+                continue
+            }
+            if first == "u",
+               pathSegments.count >= 2,
+               pathSegments[1].allSatisfy(\.isNumber) {
+                pathSegments.removeFirst(2)
+                continue
+            }
+            break
+        }
+
+        let authenticationPathSegments: Set<String> = [
+            "auth",
+            "authenticate",
+            "authentication",
+            "authorize",
+            "authorization",
+            "consent",
+            "login",
+            "mfa",
+            "oauth",
+            "oauth2",
+            "passkey",
+            "saml",
+            "session",
+            "sessions",
+            "sign-in",
+            "signin",
+            "sso",
+            "two-factor",
+            "2fa",
+            "webauthn",
+        ]
+        if pathSegments.prefix(2).contains(where: authenticationPathSegments.contains) {
+            return true
+        }
+
+        if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           let queryItems = components.queryItems {
+            let queryNames = Set(queryItems.map { $0.name.lowercased() })
+            if queryNames.contains("samlrequest")
+                || queryNames.contains("oauth_token")
+                || (queryNames.contains("client_id")
+                    && (queryNames.contains("redirect_uri")
+                        || queryNames.contains("response_type"))) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    static func belongsToSameSiteFamily(_ lhs: URL, _ rhs: URL) -> Bool {
+        guard let lhsSite = registrableSiteHost(for: lhs),
+              let rhsSite = registrableSiteHost(for: rhs) else {
+            return false
+        }
+        return lhsSite == rhsSite
+    }
+
+    static func registrableSiteHost(for url: URL) -> String? {
+        guard isHTTPURL(url),
+              let rawHost = url.host?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")),
+              !rawHost.isEmpty else {
+            return nil
+        }
+        let host: String = if rawHost.hasPrefix("www."), rawHost.count > 4 {
+            String(rawHost.dropFirst(4))
+        } else {
+            rawHost
+        }
+        let labels = host.split(separator: ".").map(String.init)
+        guard labels.count >= 2 else { return host }
+        // Keep IPv4 addresses verbatim rather than slicing trailing octets.
+        if labels.count == 4, labels.allSatisfy({ Int($0) != nil }) {
+            return host
+        }
+        let twoLabelPublicSuffixes: Set<String> = [
+            "co.uk", "org.uk", "ac.uk", "gov.uk",
+            "com.cn", "net.cn", "org.cn", "gov.cn", "edu.cn",
+            "com.hk", "org.hk", "edu.hk",
+            "com.tw", "org.tw", "net.tw",
+            "co.jp", "ne.jp", "or.jp", "ac.jp",
+            "com.au", "net.au", "org.au",
+            "com.br", "com.sg", "co.kr", "com.mx"
+        ]
+        if labels.count >= 3 {
+            let lastTwo = "\(labels[labels.count - 2]).\(labels[labels.count - 1])"
+            if twoLabelPublicSuffixes.contains(lastTwo) {
+                return "\(labels[labels.count - 3]).\(lastTwo)"
+            }
+        }
+        return "\(labels[labels.count - 2]).\(labels[labels.count - 1])"
+    }
+
+    /// Reads icon `<link>` declarations plus same-origin Web App Manifest entries
+    /// inside an isolated WebKit world, and rasterizes the top non-mask icon
+    /// inside the loaded WebView session so authenticated/SVG icons resolve
+    /// without replaying requests on an anonymous `URLSession`.
+    static func extractSessionFavicon(
+        from webView: WKWebView,
+        completion: @escaping @MainActor (SessionFaviconExtractionResult) -> Void
+    ) {
+        let script = #"""
+        const records = [];
+        let nextOrder = 0;
+        for (const link of Array.from(document.querySelectorAll("link[rel]"))) {
+          const rel = (link.getAttribute("rel") || "").toLowerCase();
+          const tokens = rel.split(/\s+/).filter(Boolean);
+          const kind = tokens.includes("icon") ? "icon"
+            : tokens.includes("apple-touch-icon-precomposed") ? "appleTouch"
+            : tokens.includes("apple-touch-icon") ? "appleTouch"
+            : tokens.includes("mask-icon") ? "mask" : null;
+          if (!kind) continue;
+          const media = link.getAttribute("media") || "";
+          const matchesMedia = !media || (() => {
+            try { return window.matchMedia(media).matches; }
+            catch (_) { return false; }
+          })();
+          if (!matchesMedia || !/^(?:https?:\/\/|data:image\/)/i.test(link.href || "")) continue;
+          if ((link.href || "").startsWith("data:") && link.href.length > 65536) continue;
+          records.push({
+            href: link.href,
+            kind,
+            sizes: link.getAttribute("sizes") || "",
+            type: (link.getAttribute("type") || "").toLowerCase(),
+            mediaSpecific: Boolean(media),
+            sourceOrder: nextOrder++
+          });
+        }
+
+        try {
+          for (const manifestLink of Array.from(document.querySelectorAll("link[rel~='manifest']"))) {
+            const manifestHref = manifestLink.href || "";
+            if (!manifestHref) continue;
+            const sameOriginManifest = new URL(manifestHref).origin === window.location.origin;
+            const resp = await fetch(
+              manifestHref,
+              sameOriginManifest ? { credentials: "same-origin" } : { mode: "cors", credentials: "omit" }
+            );
+            if (!resp.ok) continue;
+            const manifest = await resp.json();
+            if (!manifest || !Array.isArray(manifest.icons)) continue;
+            for (const icon of manifest.icons) {
+              if (!icon || typeof icon.src !== "string") continue;
+              const resolvedHref = new URL(icon.src, manifestHref).href;
+              if (!/^(?:https?:\/\/|data:image\/)/i.test(resolvedHref)) continue;
+              if (resolvedHref.startsWith("data:") && resolvedHref.length > 65536) continue;
+              const sizes = typeof icon.sizes === "string" ? icon.sizes : "";
+              const type = typeof icon.type === "string" ? icon.type.toLowerCase() : "";
+              records.push({
+                href: resolvedHref,
+                kind: "icon",
+                sizes,
+                type,
+                mediaSpecific: false,
+                sourceOrder: nextOrder++
+              });
+            }
+            break;
+          }
+        } catch (_) {}
+
+        const priority = item => {
+          const kindRank = ({ icon: 0, appleTouch: 1, mask: 2 }[item.kind] ?? 3) * 1000;
+          const mediaRank = item.mediaSpecific ? 100 : 0;
+          const sizes = (item.sizes || "").toLowerCase().split(/\s+/).filter(Boolean);
+          const sizeRank = sizes.includes("any") || sizes.includes("32x32") ? 0
+            : sizes.includes("16x16") ? 1 : sizes.length === 0 ? 2 : 3;
+          const typeRank = item.type === "image/png" || item.type === "image/svg+xml" ? 0
+            : item.type === "image/x-icon" || item.type === "image/vnd.microsoft.icon" ? 1
+            : item.type.startsWith("image/") ? 2 : 3;
+          return kindRank + mediaRank + sizeRank * 10 + typeRank;
+        };
+
+        const seen = new Set();
+        const selected = records
+          .sort((a, b) => priority(a) - priority(b) || a.sourceOrder - b.sourceOrder)
+          .filter(item => seen.has(item.href) ? false : (seen.add(item.href), true))
+          .slice(0, 8);
+
+        let renderedDataURL = null;
+        let renderedKind = null;
+        let renderedURL = null;
+
+        const drawToPNG = async (src) => {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error("timeout")), 4000);
+            img.onload = () => { clearTimeout(timer); resolve(); };
+            img.onerror = () => { clearTimeout(timer); reject(new Error("error")); };
+            img.src = src;
+          });
+          const canvas = document.createElement("canvas");
+          canvas.width = 32;
+          canvas.height = 32;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return null;
+          const w = img.naturalWidth > 0 ? img.naturalWidth : 32;
+          const h = img.naturalHeight > 0 ? img.naturalHeight : 32;
+          if (w <= 0 || h <= 0) return null;
+          ctx.drawImage(img, 0, 0, 32, 32);
+          return canvas.toDataURL("image/png");
+        };
+
+        const rasterize = async (href) => {
+          if (href.startsWith("data:image/")) {
+            return await drawToPNG(href);
+          }
+          const isSameOrigin = new URL(href).origin === window.location.origin;
+          const resp = await fetch(
+            href,
+            isSameOrigin ? { credentials: "same-origin" } : { mode: "cors", credentials: "omit" }
+          );
+          if (!resp.ok) return null;
+          const blob = await resp.blob();
+          if (!blob || blob.size === 0 || blob.size > 524288) return null;
+          const objectURL = URL.createObjectURL(blob);
+          try {
+            return await drawToPNG(objectURL);
+          } finally {
+            URL.revokeObjectURL(objectURL);
+          }
+        };
+
+        for (const item of selected) {
+          if (item.kind === "mask") continue;
+          try {
+            const dataURL = await rasterize(item.href);
+            if (dataURL && dataURL.startsWith("data:image/png;base64,")) {
+              renderedDataURL = dataURL;
+              renderedKind = item.kind;
+              renderedURL = item.href.startsWith("data:") ? null : item.href;
+              break;
+            }
+          } catch (_) {}
+        }
+
+        return JSON.stringify({
+          candidates: selected,
+          renderedDataURL,
+          renderedKind,
+          renderedURL
+        });
+        """#
+        webView.callAsyncJavaScript(
+            script,
+            arguments: [:],
+            in: nil,
+            in: extractionWorld
+        ) { result in
+            Task { @MainActor in
+                completion(parseSessionFaviconExtractionResult(result))
+            }
+        }
+    }
+
+    static func parseSessionFaviconExtractionResult(
+        _ result: Result<Any, Error>
+    ) -> SessionFaviconExtractionResult {
+        guard case let .success(rawValue) = result,
+              let json = rawValue as? String,
+              let data = json.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return SessionFaviconExtractionResult(
+                renderedPNGData: nil,
+                renderedKind: nil,
+                renderedResourceURL: nil,
+                candidates: [],
+                readSucceeded: false
+            )
+        }
+        let rawRecords = payload["candidates"] as? [[String: Any]] ?? []
+        let candidates = rawRecords.enumerated().compactMap { order, record -> Candidate? in
+            guard let href = record["href"] as? String,
+                  let url = URL(string: href),
+                  Self.originKey(for: url) != nil,
+                  let kind = Self.candidateKind(from: record["kind"] as? String) else {
+                return nil
+            }
+            return Candidate(
+                url: url,
+                kind: kind,
+                sizes: record["sizes"] as? String ?? "",
+                type: record["type"] as? String ?? "",
+                mediaSpecific: record["mediaSpecific"] as? Bool ?? false,
+                sourceOrder: record["sourceOrder"] as? Int ?? order
+            )
+        }
+        let ordered = Array(orderedCandidates(candidates).prefix(maximumDeclaredCandidates))
+        var pngData: Data?
+        if let dataURL = payload["renderedDataURL"] as? String,
+           let prefixRange = dataURL.range(of: "data:image/png;base64,") {
+            let base64 = String(dataURL[prefixRange.upperBound...])
+            pngData = Data(base64Encoded: base64)
+        }
+        let renderedKind = (payload["renderedKind"] as? String).flatMap(candidateKind(from:))
+        let renderedResourceURL = (payload["renderedURL"] as? String).flatMap(URL.init(string:))
+        return SessionFaviconExtractionResult(
+            renderedPNGData: pngData,
+            renderedKind: renderedKind,
+            renderedResourceURL: renderedResourceURL,
+            candidates: ordered,
+            readSucceeded: true
+        )
     }
 
     private static func candidate(_ candidate: Candidate, shouldReplace cached: CachedFavicon) -> Bool {
@@ -2848,6 +3729,313 @@ final class WebsiteFaviconProvider {
 
     /// One stable subscriber per UI consumer. Repeating the call for the same
     /// consumer replaces its callback instead of accumulating stale waiters.
+    func subscribeSlot(
+        slotID: UUID,
+        homeURL: URL,
+        consumerID: UUID,
+        automaticallyRetries: Bool = false,
+        completion: @escaping Completion
+    ) {
+        demands.removeValue(forKey: consumerID)
+        guard let scopeKey = Self.slotScopeKey(for: homeURL),
+              let originKey = Self.originKey(for: homeURL) else {
+            cancel(consumerID: consumerID)
+            completion(nil)
+            return
+        }
+        if let existing = slotDemands[slotID], existing.scopeKey != scopeKey {
+            slotIcons.removeValue(forKey: slotID)
+            slotInFlight.removeValue(forKey: slotID)?.task.cancel()
+        }
+        slotDemands[slotID] = SlotDemand(
+            slotID: slotID,
+            consumerID: consumerID,
+            scopeKey: scopeKey,
+            originKey: originKey,
+            homeURL: homeURL,
+            automaticallyRetries: automaticallyRetries,
+            completion: completion
+        )
+        if let cached = cachedSlotFavicon(slotID: slotID, scopeKey: scopeKey) {
+            completion(cached.image)
+            return
+        }
+        if scopeKey == originKey,
+           let originCached = cachedFavicon(for: originKey)
+               ?? Self.siblingWWWOriginKey(for: originKey).flatMap({ cachedFavicon(for: $0) }) {
+            saveSlotEntry(originCached, slotID: slotID, scopeKey: scopeKey)
+            completion(originCached.image)
+            return
+        }
+        startSlotColdFetchIfNeeded(
+            slotID: slotID,
+            homeURL: homeURL,
+            scopeKey: scopeKey,
+            originKey: originKey,
+            cachePolicy: .returnCacheDataElseLoad,
+            forceReload: false
+        )
+    }
+
+    func acceptSessionRenderedIcon(
+        pngData: Data?,
+        kind: Candidate.Kind?,
+        resourceURL: URL?,
+        forSlotID slotID: UUID?,
+        committedURL: URL,
+        homeURL: URL?,
+        fallbackCandidates: [Candidate] = [],
+        forceRefreshSlot: Bool = false
+    ) {
+        guard Self.isHTTPURL(committedURL),
+              !Self.isAuthenticationInterstitialURL(committedURL),
+              let committedOriginKey = Self.originKey(for: committedURL) else {
+            return
+        }
+
+        if let pngData,
+           let rawImage = NSImage(data: pngData),
+           Self.hasVisiblePixels(rawImage) {
+            rawImage.size = NSSize(width: 16, height: 16)
+            let resolvedKind = kind ?? .icon
+            rawImage.isTemplate = resolvedKind == .mask
+            if let pixelSHA256 = Self.normalizedPixelSHA256(of: rawImage) {
+                let resourceIdentity = resourceURL.map {
+                    Candidate(
+                        url: $0,
+                        kind: resolvedKind,
+                        sizes: "",
+                        type: "",
+                        mediaSpecific: false,
+                        sourceOrder: 0
+                    ).resourceIdentity
+                }
+                let entry = CachedFavicon(
+                    image: rawImage,
+                    pixelSHA256: pixelSHA256,
+                    priority: resolvedKind.preference * 1000,
+                    resourceIdentity: resourceIdentity,
+                    kind: resolvedKind,
+                    isLocked: false
+                )
+
+                // Populate or confirm origin cache for menu bar / URL-based readers.
+                // An explicit manual reload promotes directly via explicitChoice.
+                let acceptanceMode: AcceptanceMode = forceRefreshSlot ? .explicitChoice : .automatic
+                let fetched = FetchedFavicon(
+                    image: rawImage,
+                    pixelSHA256: pixelSHA256,
+                    priority: entry.priority,
+                    resourceIdentity: resourceIdentity ?? committedURL.absoluteString,
+                    kind: resolvedKind
+                )
+                let originAcceptance = accept(fetched, for: committedOriginKey, mode: acceptanceMode)
+                if originAcceptance.cacheOutcome == .updated
+                    || originAcceptance.cacheOutcome == .memoryOnlyUpdated {
+                    notifyDemands(for: committedOriginKey, with: rawImage)
+                }
+
+                if let slotID,
+                   let targetHomeURL = homeURL ?? slotDemands[slotID]?.homeURL,
+                   let scopeKey = Self.slotScopeKey(for: targetHomeURL),
+                   Self.belongsToSameSiteFamily(committedURL, targetHomeURL) {
+                    if let targetOriginKey = Self.originKey(for: targetHomeURL),
+                       scopeKey == targetOriginKey,
+                       targetOriginKey != committedOriginKey,
+                       forceRefreshSlot || cachedFavicon(for: targetOriginKey) == nil {
+                        let targetAcceptance = accept(fetched, for: targetOriginKey, mode: acceptanceMode)
+                        if targetAcceptance.cacheOutcome == .updated
+                            || targetAcceptance.cacheOutcome == .memoryOnlyUpdated {
+                            notifyDemands(for: targetOriginKey, with: rawImage)
+                        }
+                    }
+
+                    let existing = slotIcons[slotID]?.scopeKey == scopeKey ? slotIcons[slotID]?.entry : nil
+                    let unchanged = existing?.pixelSHA256 == entry.pixelSHA256 && existing?.kind == entry.kind
+                    if !unchanged {
+                        saveSlotEntry(entry, slotID: slotID, scopeKey: scopeKey)
+                    }
+                    if (!unchanged || forceRefreshSlot),
+                       let demand = slotDemands[slotID],
+                       demand.scopeKey == scopeKey {
+                        demand.completion(entry.image)
+                    }
+                }
+                return
+            }
+        }
+
+        // Cross-origin CDN favicons (or sites with only conventional `/favicon.ico`)
+        // fall back to fetching candidates for this Slot when no rendered icon succeeded.
+        if let slotID,
+           let targetHomeURL = homeURL ?? slotDemands[slotID]?.homeURL,
+           let scopeKey = Self.slotScopeKey(for: targetHomeURL),
+           let targetOriginKey = Self.originKey(for: targetHomeURL),
+           Self.belongsToSameSiteFamily(committedURL, targetHomeURL),
+           (forceRefreshSlot || !fallbackCandidates.isEmpty || slotIcons[slotID]?.scopeKey != scopeKey) {
+            let needsSlotFetch = forceRefreshSlot || slotIcons[slotID]?.scopeKey != scopeKey
+            if needsSlotFetch {
+                startSlotColdFetchIfNeeded(
+                    slotID: slotID,
+                    homeURL: targetHomeURL,
+                    scopeKey: scopeKey,
+                    originKey: targetOriginKey,
+                    iconURLHints: fallbackCandidates,
+                    cachePolicy: forceRefreshSlot ? .reloadIgnoringLocalCacheData : .returnCacheDataElseLoad,
+                    forceReload: forceRefreshSlot
+                )
+            }
+        }
+    }
+
+    /// Re-fetches fresh icon bytes for a Slot during an explicit Reload without
+    /// discarding the currently displayed icon upfront so a failed reload never
+    /// blanks back to the generic globe icon.
+    func reloadSlotIcon(slotID: UUID, homeURL: URL) {
+        slotInFlight.removeValue(forKey: slotID)?.task.cancel()
+        guard let scopeKey = Self.slotScopeKey(for: homeURL),
+              let originKey = Self.originKey(for: homeURL) else {
+            return
+        }
+        cooldownUntil.removeValue(forKey: originKey)
+        failureCycles.removeValue(forKey: originKey)
+        if let siblingOriginKey = Self.siblingWWWOriginKey(for: originKey) {
+            cooldownUntil.removeValue(forKey: siblingOriginKey)
+            failureCycles.removeValue(forKey: siblingOriginKey)
+        }
+        startSlotColdFetchIfNeeded(
+            slotID: slotID,
+            homeURL: homeURL,
+            scopeKey: scopeKey,
+            originKey: originKey,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            forceReload: true
+        )
+    }
+
+    func invalidateSlotIcon(slotID: UUID) {
+        slotIcons.removeValue(forKey: slotID)
+        slotInFlight.removeValue(forKey: slotID)?.task.cancel()
+        assetStore.removeSlotIcon(slotID: slotID)
+    }
+
+    func removeSlotIcon(slotID: UUID) {
+        slotDemands.removeValue(forKey: slotID)
+        invalidateSlotIcon(slotID: slotID)
+    }
+
+    private func cachedSlotFavicon(slotID: UUID, scopeKey: String) -> CachedFavicon? {
+        if let cached = slotIcons[slotID], cached.scopeKey == scopeKey {
+            return cached.entry
+        }
+        guard let record = assetStore.loadSlotIcon(slotID: slotID, scopeKey: scopeKey),
+              let image = NSImage(data: record.imageData) else {
+            return nil
+        }
+        image.size = NSSize(width: 16, height: 16)
+        image.isTemplate = record.kind == Candidate.Kind.mask.rawValue
+        guard Self.hasVisiblePixels(image),
+              let pixelSHA256 = Self.normalizedPixelSHA256(of: image),
+              pixelSHA256 == record.pixelSHA256,
+              let kind = Candidate.Kind(rawValue: record.kind) else {
+            assetStore.removeSlotIcon(slotID: slotID)
+            return nil
+        }
+        let cached = CachedFavicon(
+            image: image,
+            pixelSHA256: pixelSHA256,
+            priority: kind.preference * 1000,
+            resourceIdentity: nil,
+            kind: kind,
+            isLocked: false
+        )
+        slotIcons[slotID] = (scopeKey, cached)
+        return cached
+    }
+
+    private func saveSlotEntry(_ entry: CachedFavicon, slotID: UUID, scopeKey: String) {
+        slotIcons[slotID] = (scopeKey, entry)
+        guard let imageData = Self.serializedImageData(entry.image) else { return }
+        let record = WebsiteFaviconAssetStore.SlotRecord(
+            slotID: slotID,
+            scopeKey: scopeKey,
+            imageData: imageData,
+            pixelSHA256: entry.pixelSHA256,
+            kind: entry.kind.rawValue
+        )
+        assetStore.saveSlotIcon(record)
+    }
+
+    private func startSlotColdFetchIfNeeded(
+        slotID: UUID,
+        homeURL: URL,
+        scopeKey: String,
+        originKey: String,
+        iconURLHints: [Candidate]? = nil,
+        cachePolicy: URLRequest.CachePolicy,
+        forceReload: Bool
+    ) {
+        if let current = slotInFlight[slotID] {
+            if !forceReload && current.scopeKey == scopeKey {
+                return
+            }
+            current.task.cancel()
+            slotInFlight.removeValue(forKey: slotID)
+        }
+        let hints = iconURLHints ?? (
+            scopeKey == originKey
+                ? (domCandidates[originKey]
+                    ?? Self.siblingWWWOriginKey(for: originKey).flatMap { domCandidates[$0] }
+                    ?? [])
+                : []
+        )
+        let prioritizePath = scopeKey != originKey
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let report = await self.fetchFavicon(
+                for: homeURL,
+                iconURLHints: hints,
+                cachePolicy: cachePolicy,
+                prioritizeRequestedPath: prioritizePath
+            )
+            self.recordFetchReport(report, phase: "slot_cold_fetch")
+            guard !Task.isCancelled else { return }
+            if self.slotInFlight[slotID]?.scopeKey == scopeKey {
+                self.slotInFlight.removeValue(forKey: slotID)
+            }
+            guard let demand = self.slotDemands[slotID], demand.scopeKey == scopeKey else {
+                return
+            }
+            if let fetched = report.favicon {
+                let entry = CachedFavicon(
+                    image: fetched.image,
+                    pixelSHA256: fetched.pixelSHA256,
+                    priority: fetched.priority,
+                    resourceIdentity: fetched.resourceIdentity,
+                    kind: fetched.kind,
+                    isLocked: false
+                )
+                self.saveSlotEntry(entry, slotID: slotID, scopeKey: scopeKey)
+                if scopeKey == originKey,
+                   forceReload || self.cachedFavicon(for: originKey) == nil {
+                    let acceptance = self.accept(
+                        fetched,
+                        for: originKey,
+                        mode: forceReload ? .explicitChoice : .automatic
+                    )
+                    if acceptance.cacheOutcome == .updated
+                        || acceptance.cacheOutcome == .memoryOnlyUpdated {
+                        self.notifyDemands(for: originKey, with: fetched.image)
+                    }
+                }
+                demand.completion(fetched.image)
+            } else if self.slotIcons[slotID] == nil {
+                demand.completion(nil)
+            }
+        }
+        slotInFlight[slotID] = (scopeKey, task)
+    }
+
     func subscribe(
         for url: URL,
         consumerID: UUID,
@@ -2975,6 +4163,13 @@ final class WebsiteFaviconProvider {
     }
 
     func setAutomaticRetryDemand(consumerID: UUID, enabled: Bool) {
+        if let slotMatch = slotDemands.first(where: { $0.value.consumerID == consumerID }) {
+            var demand = slotMatch.value
+            if demand.automaticallyRetries != enabled {
+                demand.automaticallyRetries = enabled
+                slotDemands[slotMatch.key] = demand
+            }
+        }
         guard var demand = demands[consumerID] else { return }
         guard demand.automaticallyRetries != enabled else { return }
         demand.automaticallyRetries = enabled
@@ -3006,6 +4201,10 @@ final class WebsiteFaviconProvider {
     }
 
     func cancel(consumerID: UUID) {
+        if let slotMatch = slotDemands.first(where: { $0.value.consumerID == consumerID }) {
+            slotDemands.removeValue(forKey: slotMatch.key)
+            slotInFlight.removeValue(forKey: slotMatch.key)?.task.cancel()
+        }
         guard let demand = demands.removeValue(forKey: consumerID) else { return }
         guard !hasDemand(for: demand.originKey),
               oneShotCompletions[demand.originKey]?.isEmpty != false else {
@@ -3408,16 +4607,15 @@ final class WebsiteFaviconProvider {
         CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
     )
 
-    private static func normalizedPixelData(of image: NSImage) -> Data? {
-        var proposedRect = NSRect(origin: .zero, size: image.size)
-        guard let source = image.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil),
-              image.size.width > 0,
-              image.size.height > 0,
-              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
-            return nil
-        }
+    static func rgba8PixelBytes(
+        of image: NSImage,
+        aspectFit: Bool
+    ) -> [UInt8]? {
         let side = normalizedPixelSide
         let bytesPerRow = side * 4
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+            return nil
+        }
         var pixels = [UInt8](repeating: 0, count: side * bytesPerRow)
         let drawn = pixels.withUnsafeMutableBytes { storage -> Bool in
             guard let context = CGContext(
@@ -3432,26 +4630,52 @@ final class WebsiteFaviconProvider {
                 return false
             }
             context.clear(CGRect(x: 0, y: 0, width: side, height: side))
-            context.interpolationQuality = .high
-            let scale = min(
-                CGFloat(side) / image.size.width,
-                CGFloat(side) / image.size.height
-            )
-            let width = image.size.width * scale
-            let height = image.size.height * scale
-            context.draw(
-                source,
-                in: CGRect(
-                    x: (CGFloat(side) - width) / 2,
-                    y: (CGFloat(side) - height) / 2,
-                    width: width,
-                    height: height
+            if aspectFit {
+                var proposedRect = NSRect(origin: .zero, size: image.size)
+                guard let source = image.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil),
+                      image.size.width > 0,
+                      image.size.height > 0 else {
+                    return false
+                }
+                context.interpolationQuality = .high
+                let scale = min(
+                    CGFloat(side) / image.size.width,
+                    CGFloat(side) / image.size.height
                 )
+                let width = image.size.width * scale
+                let height = image.size.height * scale
+                context.draw(
+                    source,
+                    in: CGRect(
+                        x: (CGFloat(side) - width) / 2,
+                        y: (CGFloat(side) - height) / 2,
+                        width: width,
+                        height: height
+                    )
+                )
+                return true
+            }
+
+            let graphicsContext = NSGraphicsContext(cgContext: context, flipped: false)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = graphicsContext
+            image.draw(
+                in: NSRect(x: 0, y: 0, width: side, height: side),
+                from: .zero,
+                operation: .sourceOver,
+                fraction: 1,
+                respectFlipped: false,
+                hints: nil
             )
+            graphicsContext.flushGraphics()
+            NSGraphicsContext.restoreGraphicsState()
             return true
         }
-        guard drawn else { return nil }
-        return Data(pixels)
+        return drawn ? pixels : nil
+    }
+
+    private static func normalizedPixelData(of image: NSImage) -> Data? {
+        rgba8PixelBytes(of: image, aspectFit: true).map { Data($0) }
     }
 
     private static func serializedImageData(_ image: NSImage) -> Data? {
@@ -3565,7 +4789,8 @@ final class WebsiteFaviconProvider {
     private func fetchFavicon(
         for url: URL,
         iconURLHints: [Candidate],
-        cachePolicy: URLRequest.CachePolicy
+        cachePolicy: URLRequest.CachePolicy,
+        prioritizeRequestedPath: Bool = false
     ) async -> FetchReport {
         let deadline = monotonicClock() + Self.requestBudget
         var seen = Set<String>()
@@ -3595,7 +4820,8 @@ final class WebsiteFaviconProvider {
             }
         }
 
-        for pageURL in Self.pageDiscoveryURLs(for: url).prefix(Self.maximumDiscoveryPages) {
+        let discoveryURLs = Self.pageDiscoveryURLs(for: url, prioritizeRequestedPath: prioritizeRequestedPath)
+        for pageURL in discoveryURLs.prefix(Self.maximumDiscoveryPages) {
             guard monotonicClock() < deadline,
                   declaredCount < Self.maximumDeclaredCandidates else { break }
             let htmlResult = await fetchPageHTML(
@@ -3684,7 +4910,10 @@ final class WebsiteFaviconProvider {
         )
     }
 
-    static func pageDiscoveryURLs(for url: URL) -> [URL] {
+    static func pageDiscoveryURLs(
+        for url: URL,
+        prioritizeRequestedPath: Bool = false
+    ) -> [URL] {
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               components.scheme != nil,
               components.host != nil else { return [] }
@@ -3692,15 +4921,23 @@ final class WebsiteFaviconProvider {
         components.path = "/"
         components.query = nil
         components.fragment = nil
-        var pages = [components.url].compactMap { $0 }
+        let rootURL = components.url
 
-        guard !origin.path.isEmpty, origin.path != "/" else { return pages }
+        guard !origin.path.isEmpty, origin.path != "/" else {
+            return [rootURL].compactMap { $0 }
+        }
         var pathComponents = origin
         pathComponents.query = nil
         pathComponents.fragment = nil
-        if let pathURL = pathComponents.url,
-           !pages.contains(pathURL) {
-            pages.append(pathURL)
+        let pathURL = pathComponents.url
+
+        var pages: [URL] = []
+        if prioritizeRequestedPath {
+            if let pathURL { pages.append(pathURL) }
+            if let rootURL, !pages.contains(rootURL) { pages.append(rootURL) }
+        } else {
+            if let rootURL { pages.append(rootURL) }
+            if let pathURL, !pages.contains(pathURL) { pages.append(pathURL) }
         }
         return pages
     }
@@ -3791,19 +5028,30 @@ final class WebsiteFaviconProvider {
         )
         do {
             let (data, response) = try await loadDataWithTimeout(request)
+            if !Self.isAuthenticationInterstitialURL(url),
+               let finalURL = response.url,
+               Self.isAuthenticationInterstitialURL(finalURL) {
+                return .failed(.authenticationRedirect)
+            }
             if let http = response as? HTTPURLResponse,
                !(200..<300).contains(http.statusCode) {
                 return .failed(.httpStatus)
             }
-            guard let image = NSImage(data: data) else { return .failed(.imageDecodeFailed) }
-            guard Self.hasVisiblePixels(image) else { return .failed(.noVisiblePixels) }
-            image.size = NSSize(width: 16, height: 16)
-            image.isTemplate = candidate.kind == .mask
-            guard let pixelSHA256 = Self.normalizedPixelSHA256(of: image) else {
+            guard let decodedImage = await Self.decodeOrRasterizeImage(
+                from: data,
+                url: url,
+                mimeType: response.mimeType
+            ) else {
+                return .failed(.imageDecodeFailed)
+            }
+            guard Self.hasVisiblePixels(decodedImage) else { return .failed(.noVisiblePixels) }
+            decodedImage.size = NSSize(width: 16, height: 16)
+            decodedImage.isTemplate = candidate.kind == .mask
+            guard let pixelSHA256 = Self.normalizedPixelSHA256(of: decodedImage) else {
                 return .failed(.pixelNormalizationFailed)
             }
             return .fetched(FetchedFavicon(
-                image: image,
+                image: decodedImage,
                 pixelSHA256: pixelSHA256,
                 priority: candidate.priority,
                 resourceIdentity: candidate.resourceIdentity,
@@ -3816,42 +5064,175 @@ final class WebsiteFaviconProvider {
         }
     }
 
-    private static func hasVisiblePixels(_ image: NSImage) -> Bool {
-        guard let bitmap = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: 32,
-            pixelsHigh: 32,
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ),
-        let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+    private static func looksLikeSVG(_ data: Data) -> Bool {
+        guard !data.isEmpty, data.count <= 524_288 else { return false }
+        let prefix = data.prefix(512)
+        guard let text = String(data: prefix, encoding: .utf8)?.lowercased() else {
             return false
         }
+        return text.contains("<svg")
+    }
 
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = context
-        image.draw(
-            in: NSRect(x: 0, y: 0, width: 32, height: 32),
-            from: .zero,
-            operation: .sourceOver,
-            fraction: 1,
-            respectFlipped: false,
-            hints: nil
-        )
-        context.flushGraphics()
-        NSGraphicsContext.restoreGraphicsState()
+    private static func normalizedSVGDataForNativeDecode(_ data: Data) -> Data? {
+        guard looksLikeSVG(data),
+              var svgText = String(data: data, encoding: .utf8),
+              let openTagRegex = try? NSRegularExpression(
+                  pattern: "<svg(\\b[^>]*?)>",
+                  options: [.caseInsensitive, .dotMatchesLineSeparators]
+              ) else {
+            return nil
+        }
 
-        for y in 0..<bitmap.pixelsHigh {
-            for x in 0..<bitmap.pixelsWide {
-                if (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.01 {
-                    return true
+        let nsText = svgText as NSString
+        guard let match = openTagRegex.firstMatch(
+            in: svgText,
+            range: NSRange(location: 0, length: nsText.length)
+        ) else {
+            return nil
+        }
+
+        let originalOpenTag = nsText.substring(with: match.range)
+        let originalAttributes = nsText.substring(with: match.range(at: 1))
+        let lowerAttributes = originalAttributes.lowercased()
+        var injectedAttributes = ""
+
+        if !lowerAttributes.contains("xmlns=") {
+            injectedAttributes += #" xmlns="http://www.w3.org/2000/svg""#
+        }
+
+        let hasWidth = originalAttributes.range(
+            of: #"(?:^|\s)width\s*="#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+        let hasHeight = originalAttributes.range(
+            of: #"(?:^|\s)height\s*="#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+
+        if !hasWidth || !hasHeight {
+            let (resolvedWidth, resolvedHeight) = parsedSVGViewBoxSize(from: originalAttributes)
+                ?? ("32", "32")
+            if !hasWidth {
+                injectedAttributes += #" width="\#(resolvedWidth)""#
+            }
+            if !hasHeight {
+                injectedAttributes += #" height="\#(resolvedHeight)""#
+            }
+        }
+
+        if !injectedAttributes.isEmpty {
+            let updatedOpenTag: String
+            if originalOpenTag.hasSuffix("/>") {
+                let prefix = String(originalOpenTag.dropLast(2))
+                updatedOpenTag = prefix + injectedAttributes + "/>"
+            } else {
+                let prefix = String(originalOpenTag.dropLast(1))
+                updatedOpenTag = prefix + injectedAttributes + ">"
+            }
+            svgText = nsText.replacingCharacters(in: match.range, with: updatedOpenTag)
+        }
+
+        let hasExplicitCSSColor = svgText.range(
+            of: #"(?:^|[\s;])color\s*[:=]"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+        if !hasExplicitCSSColor,
+           let currentColorRegex = try? NSRegularExpression(
+               pattern: "currentColor",
+               options: [.caseInsensitive]
+           ) {
+            svgText = currentColorRegex.stringByReplacingMatches(
+                in: svgText,
+                range: NSRange(location: 0, length: (svgText as NSString).length),
+                withTemplate: "#1F2328"
+            )
+        }
+
+        return svgText.data(using: .utf8)
+    }
+
+    private static func parsedSVGViewBoxSize(from attributes: String) -> (String, String)? {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"viewBox\s*=\s*["']([^"']+)["']"#,
+            options: [.caseInsensitive]
+        ) else {
+            return nil
+        }
+        let nsAttributes = attributes as NSString
+        guard let match = regex.firstMatch(
+            in: attributes,
+            range: NSRange(location: 0, length: nsAttributes.length)
+        ) else {
+            return nil
+        }
+        let rawViewBox = nsAttributes.substring(with: match.range(at: 1))
+        let parts = rawViewBox
+            .replacingOccurrences(of: ",", with: " ")
+            .split { $0.isWhitespace }
+        guard parts.count == 4,
+              let width = Double(parts[2]),
+              let height = Double(parts[3]),
+              width.isFinite,
+              height.isFinite,
+              width > 0,
+              height > 0 else {
+            return nil
+        }
+        let formattedWidth = width.rounded() == width ? String(Int(width)) : String(width)
+        let formattedHeight = height.rounded() == height ? String(Int(height)) : String(height)
+        return (formattedWidth, formattedHeight)
+    }
+
+    @MainActor
+    static func decodeOrRasterizeImage(
+        from data: Data,
+        url _: URL,
+        mimeType: String?
+    ) async -> NSImage? {
+        let isSVG = looksLikeSVG(data)
+            || (mimeType?.lowercased().contains("svg") ?? false)
+
+        let native = NSImage(data: data)
+        if let native {
+            if native.size.width <= 0 || native.size.height <= 0 {
+                native.size = NSSize(width: 32, height: 32)
+            }
+            if hasVisiblePixels(native) {
+                return native
+            }
+        }
+
+        if isSVG {
+            let normalizedSVG = normalizedSVGDataForNativeDecode(data)
+            if let normalizedSVG,
+               normalizedSVG != data,
+               let normalizedNative = NSImage(data: normalizedSVG) {
+                if normalizedNative.size.width <= 0 || normalizedNative.size.height <= 0 {
+                    normalizedNative.size = NSSize(width: 32, height: 32)
+                }
+                if hasVisiblePixels(normalizedNative) {
+                    return normalizedNative
                 }
             }
+            if let rasterized = await FaviconSVGRasterizer.rasterizeSVG(
+                data: normalizedSVG ?? data
+            ) {
+                return rasterized
+            }
+        }
+        return native
+    }
+
+    private static func hasVisiblePixels(_ image: NSImage) -> Bool {
+        guard let pixels = rgba8PixelBytes(of: image, aspectFit: false) else {
+            return false
+        }
+        var offset = 3
+        while offset < pixels.count {
+            if pixels[offset] > 2 {
+                return true
+            }
+            offset += 4
         }
         return false
     }
@@ -3887,6 +5268,11 @@ final class WebsiteFaviconProvider {
         )
         do {
             let (data, response) = try await loadDataWithTimeout(request)
+            if !Self.isAuthenticationInterstitialURL(url),
+               let finalURL = response.url,
+               Self.isAuthenticationInterstitialURL(finalURL) {
+                return .failed(.authenticationRedirect)
+            }
             if let http = response as? HTTPURLResponse,
                !(200..<300).contains(http.statusCode) {
                 return .failed(.httpStatus)
@@ -3951,6 +5337,8 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     var onSetBrowserProfile: ((UUID, UUID?) -> Void)?
     var onOpenInNewTabWithBrowserProfile: ((UUID, UUID?) -> Void)?
     var onManageBrowserProfiles: (() -> Void)?
+    var onSaveToBookmarks: ((UUID) -> Void)?
+    var onMoveToGroup: ((UUID, UUID?) -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
     var onDragChanged: ((UUID, NSEvent) -> Void)?
     var onDragEnded: ((UUID) -> Void)?
@@ -3961,6 +5349,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     )
     private let requestFavicon: FaviconLoadHandler
     private let cancelFavicon: FaviconCancelHandler
+    private let usesDefaultFaviconLoader: Bool
     private let faviconConsumerID: UUID
     private let iconView = NSImageView()
     private let unreadDotView = ClassicUnreadDotView()
@@ -3980,13 +5369,15 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     private var backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive
     private var webAppName = ""
     private var faviconHomeURL: URL?
+    private var groupID: UUID?
+    private var groupMenuOptions: [WebAppGroupMenuOption] = []
     private var browserProfileID: UUID?
     private var browserProfileMenuOptions: [BrowserProfileMenuOption] = [.defaultProfile()]
     private var browserProfileAssignmentEnabled = true
     private var browserProfileDuplicationEnabled = true
-    private var faviconOriginKey: String?
-    private var loadedFaviconOriginKey: String?
-    private var subscribedFaviconOriginKey: String?
+    private var faviconScopeKey: String?
+    private var loadedFaviconScopeKey: String?
+    private var subscribedFaviconScopeKey: String?
     private var faviconRequestGeneration: UInt64 = 0
     private var sourceIcon: NSImage?
     private var grayscaleIcon: NSImage?
@@ -4054,9 +5445,11 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         self.slotID = slotID
         let faviconConsumerID = UUID()
         self.faviconConsumerID = faviconConsumerID
+        self.usesDefaultFaviconLoader = faviconLoader == nil
         self.requestFavicon = faviconLoader ?? { url, completion in
-            WebsiteFaviconProvider.shared.subscribe(
-                for: url,
+            WebsiteFaviconProvider.shared.subscribeSlot(
+                slotID: slotID,
+                homeURL: url,
                 consumerID: faviconConsumerID,
                 automaticallyRetries: false,
                 completion: completion
@@ -4231,11 +5624,16 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         browserProfileDuplicationEnabled = enabled
     }
 
+    func setGroupMenuSnapshot(options: [WebAppGroupMenuOption]) {
+        groupMenuOptions = options
+    }
+
     func update(profile: WebAppProfile, isActive: Bool, isResident: Bool) {
         self.isActive = isActive
         self.isResident = isResident
         webAppName = profile.name
         faviconHomeURL = profile.homeURL
+        groupID = profile.groupID
         browserProfileID = profile.browserProfileID
         renderingProfile = profile.renderingProfile.normalized()
         runtimeRetentionPreference = profile.runtimeRetentionPreference
@@ -4318,10 +5716,10 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     }
 
     func makeContextMenu() -> NSMenu {
-        let menu = NSMenu(title: "Web App")
+        let menu = NSMenu(title: L10n.tr("Web App", "网页应用"))
 
         let home = NSMenuItem(
-            title: "Return to Home",
+            title: L10n.tr("Return to Home", "返回主页"),
             action: #selector(returnHomeFromMenu(_:)),
             keyEquivalent: ""
         )
@@ -4330,7 +5728,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         menu.addItem(home)
 
         let reload = NSMenuItem(
-            title: "Reload",
+            title: L10n.tr("Reload", "重新加载"),
             action: #selector(reloadFromMenu(_:)),
             keyEquivalent: ""
         )
@@ -4338,46 +5736,19 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         reload.target = self
         reload.isEnabled = isResident
         menu.addItem(reload)
-        let iconState = faviconHomeURL.map {
-            WebsiteFaviconProvider.shared.iconControlState(for: $0)
-        } ?? WebsiteFaviconProvider.IconControlState(hasAcceptedIcon: false, isLocked: false)
-        let lockIcon = NSMenuItem(
-            title: "Lock Current Icon",
-            action: #selector(lockCurrentIconFromMenu(_:)),
+
+        let saveBookmark = NSMenuItem(
+            title: L10n.tr("Save to Bookmarks…", "保存到书签…"),
+            action: #selector(saveToBookmarksFromMenu(_:)),
             keyEquivalent: ""
         )
-        lockIcon.target = self
-        lockIcon.state = iconState.isLocked ? .on : .off
-        lockIcon.isEnabled = iconState.hasAcceptedIcon && !iconState.isLocked
-        menu.addItem(lockIcon)
-        let unlockIcon = NSMenuItem(
-            title: "Unlock Icon",
-            action: #selector(unlockIconFromMenu(_:)),
-            keyEquivalent: ""
-        )
-        unlockIcon.target = self
-        unlockIcon.isEnabled = iconState.hasAcceptedIcon && iconState.isLocked
-        menu.addItem(unlockIcon)
-        let refreshIcon = NSMenuItem(
-            title: "Refresh & Choose Icon",
-            action: #selector(refreshAndChooseIconFromMenu(_:)),
-            keyEquivalent: ""
-        )
-        refreshIcon.target = self
-        refreshIcon.isEnabled = faviconHomeURL != nil
-        menu.addItem(refreshIcon)
-        let iconScope = NSMenuItem(
-            title: "Shared by tabs on this website",
-            action: nil,
-            keyEquivalent: ""
-        )
-        iconScope.isEnabled = false
-        iconScope.toolTip = "Tabs with the same website origin share one favicon and lock state."
-        menu.addItem(iconScope)
+        saveBookmark.target = self
+        saveBookmark.isEnabled = faviconHomeURL != nil
+        menu.addItem(saveBookmark)
         menu.addItem(.separator())
 
-        let websiteMode = NSMenuItem(title: "Website Mode", action: nil, keyEquivalent: "")
-        let websiteModeMenu = NSMenu(title: "Website Mode")
+        let websiteMode = NSMenuItem(title: L10n.tr("Website Mode", "网站模式"), action: nil, keyEquivalent: "")
+        let websiteModeMenu = NSMenu(title: L10n.tr("Website Mode", "网站模式"))
         for mode in WebsiteMode.allCases {
             let item = NSMenuItem(title: mode.displayName, action: #selector(setWebsiteModeFromMenu(_:)), keyEquivalent: "")
             item.target = self
@@ -4388,8 +5759,8 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         websiteMode.submenu = websiteModeMenu
         menu.addItem(websiteMode)
 
-        let windowSize = NSMenuItem(title: "Window Size", action: nil, keyEquivalent: "")
-        let windowSizeMenu = NSMenu(title: "Window Size")
+        let windowSize = NSMenuItem(title: L10n.tr("Window Size", "窗口尺寸"), action: nil, keyEquivalent: "")
+        let windowSizeMenu = NSMenu(title: L10n.tr("Window Size", "窗口尺寸"))
         for preset in SimpleViewportPreset.allCases where preset != .custom {
             let item = NSMenuItem(title: preset.menuTitle, action: #selector(setWindowSizeFromMenu(_:)), keyEquivalent: "")
             item.target = self
@@ -4400,7 +5771,10 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         if renderingProfile.sizePreset == .custom {
             windowSizeMenu.addItem(.separator())
             let custom = NSMenuItem(
-                title: "Custom  \(Int(renderingProfile.viewportWidth)) × \(Int(renderingProfile.viewportHeight))",
+                title: L10n.tr(
+                    "Custom  \(Int(renderingProfile.viewportWidth)) × \(Int(renderingProfile.viewportHeight))",
+                    "自定义  \(Int(renderingProfile.viewportWidth)) × \(Int(renderingProfile.viewportHeight))"
+                ),
                 action: nil,
                 keyEquivalent: ""
             )
@@ -4412,14 +5786,17 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         windowSize.isEnabled = windowSizeEditingEnabled
         windowSize.toolTip = windowSizeEditingEnabled
             ? nil
-            : "Window size is fixed globally in Settings → General."
+            : L10n.tr(
+                "Window size is fixed globally in Settings → General.",
+                "已在“设置 → 通用”中开启全局固定窗口尺寸。"
+            )
         menu.addItem(windowSize)
 
-        let zoom = NSMenuItem(title: "Zoom", action: nil, keyEquivalent: "")
-        let zoomMenu = NSMenu(title: "Zoom")
+        let zoom = NSMenuItem(title: L10n.tr("Zoom", "页面缩放"), action: nil, keyEquivalent: "")
+        let zoomMenu = NSMenu(title: L10n.tr("Zoom", "页面缩放"))
 
         let zoomIn = NSMenuItem(
-            title: "Zoom In",
+            title: L10n.tr("Zoom In", "放大"),
             action: #selector(zoomInFromMenu(_:)),
             keyEquivalent: ""
         )
@@ -4428,7 +5805,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         zoomMenu.addItem(zoomIn)
 
         let zoomOut = NSMenuItem(
-            title: "Zoom Out",
+            title: L10n.tr("Zoom Out", "缩小"),
             action: #selector(zoomOutFromMenu(_:)),
             keyEquivalent: ""
         )
@@ -4437,7 +5814,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         zoomMenu.addItem(zoomOut)
 
         let resetZoom = NSMenuItem(
-            title: "Reset Zoom",
+            title: L10n.tr("Reset Zoom", "实际大小"),
             action: #selector(resetZoomFromMenu(_:)),
             keyEquivalent: ""
         )
@@ -4457,8 +5834,8 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         menu.addItem(zoom)
         menu.addItem(.separator())
 
-        let profile = NSMenuItem(title: "Profile", action: nil, keyEquivalent: "")
-        let profileMenu = NSMenu(title: "Profile")
+        let profile = NSMenuItem(title: L10n.tr("Profile", "配置文件"), action: nil, keyEquivalent: "")
+        let profileMenu = NSMenu(title: L10n.tr("Profile", "配置文件"))
         let profileOptions = browserProfileMenuOptions.isEmpty
             ? [.defaultProfile()]
             : browserProfileMenuOptions
@@ -4475,22 +5852,14 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
             profileMenu.addItem(item)
         }
         profileMenu.addItem(.separator())
-        let manageProfiles = NSMenuItem(
-            title: "Manage Profiles…",
-            action: #selector(manageBrowserProfilesFromMenu(_:)),
-            keyEquivalent: ""
-        )
-        manageProfiles.target = self
-        profileMenu.addItem(manageProfiles)
-        profile.submenu = profileMenu
-        menu.addItem(profile)
-
         let duplicateProfile = NSMenuItem(
-            title: "Open in New Tab with Profile",
+            title: L10n.tr("Open in New Tab with Profile", "使用配置文件在新标签打开"),
             action: nil,
             keyEquivalent: ""
         )
-        let duplicateProfileMenu = NSMenu(title: "Open in New Tab with Profile")
+        let duplicateProfileMenu = NSMenu(
+            title: L10n.tr("Open in New Tab with Profile", "使用配置文件在新标签打开")
+        )
         for option in profileOptions {
             let item = NSMenuItem(
                 title: option.name,
@@ -4503,14 +5872,42 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
             duplicateProfileMenu.addItem(item)
         }
         duplicateProfile.submenu = duplicateProfileMenu
-        menu.addItem(duplicateProfile)
+        profileMenu.addItem(duplicateProfile)
+
+        let manageProfiles = NSMenuItem(
+            title: L10n.tr("Manage Profiles…", "管理配置文件…"),
+            action: #selector(manageBrowserProfilesFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        manageProfiles.target = self
+        profileMenu.addItem(manageProfiles)
+        profile.submenu = profileMenu
+        menu.addItem(profile)
+
+        if groupMenuOptions.count > 1 {
+            let moveGroup = NSMenuItem(title: L10n.tr("Move to Group", "移动到分组"), action: nil, keyEquivalent: "")
+            let moveGroupMenu = NSMenu(title: L10n.tr("Move to Group", "移动到分组"))
+            for option in groupMenuOptions {
+                let item = NSMenuItem(
+                    title: L10n.defaultDisplayName(option.name),
+                    action: #selector(moveToGroupFromMenu(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = option.id?.uuidString ?? NSNull()
+                item.state = option.id == groupID ? .on : .off
+                moveGroupMenu.addItem(item)
+            }
+            moveGroup.submenu = moveGroupMenu
+            menu.addItem(moveGroup)
+        }
 
         let runtimeRetention = NSMenuItem(
-            title: "Runtime Retention",
+            title: L10n.tr("Runtime Retention", "运行时驻留"),
             action: nil,
             keyEquivalent: ""
         )
-        let runtimeRetentionMenu = NSMenu(title: "Runtime Retention")
+        let runtimeRetentionMenu = NSMenu(title: L10n.tr("Runtime Retention", "运行时驻留"))
         for preference in SlotRuntimeRetentionPreference.allCases {
             let item = NSMenuItem(
                 title: preference.displayName,
@@ -4525,8 +5922,8 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         runtimeRetention.submenu = runtimeRetentionMenu
         menu.addItem(runtimeRetention)
 
-        let media = NSMenuItem(title: "Background Media", action: nil, keyEquivalent: "")
-        let mediaMenu = NSMenu(title: "Background Media")
+        let media = NSMenuItem(title: L10n.tr("Background Media", "后台媒体"), action: nil, keyEquivalent: "")
+        let mediaMenu = NSMenu(title: L10n.tr("Background Media", "后台媒体"))
         for policy in BackgroundMediaPolicy.allCases {
             let item = NSMenuItem(title: policy.displayName, action: #selector(setBackgroundMediaFromMenu(_:)), keyEquivalent: "")
             item.target = self
@@ -4538,12 +5935,12 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         menu.addItem(media)
         menu.addItem(.separator())
 
-        let edit = NSMenuItem(title: "Edit Web App…", action: #selector(editFromMenu(_:)), keyEquivalent: "")
+        let edit = NSMenuItem(title: L10n.tr("Edit Web App…", "编辑网页应用…"), action: #selector(editFromMenu(_:)), keyEquivalent: "")
         edit.target = self
         menu.addItem(edit)
         menu.addItem(.separator())
 
-        let remove = NSMenuItem(title: "Remove Web App…", action: #selector(removeFromMenu(_:)), keyEquivalent: "")
+        let remove = NSMenuItem(title: L10n.tr("Remove Web App…", "移除网页应用…"), action: #selector(removeFromMenu(_:)), keyEquivalent: "")
         remove.target = self
         menu.addItem(remove)
         return menu
@@ -4551,58 +5948,10 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
 
     @objc private func returnHomeFromMenu(_ sender: NSMenuItem) { onReturnHome?(slotID) }
     @objc private func reloadFromMenu(_ sender: NSMenuItem) { onReload?(slotID) }
-
-    @objc private func lockCurrentIconFromMenu(_ sender: NSMenuItem) {
-        guard let faviconHomeURL else { return }
-        presentFaviconControlFailure(
-            WebsiteFaviconProvider.shared.lockCurrentIcon(for: faviconHomeURL)
-        )
-    }
-
-    @objc private func unlockIconFromMenu(_ sender: NSMenuItem) {
-        guard let faviconHomeURL else { return }
-        presentFaviconControlFailure(
-            WebsiteFaviconProvider.shared.unlockIcon(for: faviconHomeURL)
-        )
-    }
-
-    @objc private func refreshAndChooseIconFromMenu(_ sender: NSMenuItem) {
-        guard let faviconHomeURL else { return }
-        WebsiteFaviconProvider.shared.refreshAndChooseIcon(for: faviconHomeURL) { [weak self] result in
-            self?.presentFaviconControlFailure(result)
-        }
-    }
-
-    private func presentFaviconControlFailure(
-        _ result: WebsiteFaviconProvider.IconControlResult
-    ) {
-        guard !result.succeeded else { return }
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        switch result {
-        case .capacityExceeded:
-            alert.messageText = "The icon could not be saved"
-            alert.informativeText = "The favicon asset store is full. Existing locked icons were kept."
-        case .corruptStorage:
-            alert.messageText = "The saved icon could not be read"
-            alert.informativeText = "The existing favicon file was left unchanged."
-        case .fetchFailed:
-            alert.messageText = "No new icon was selected"
-            alert.informativeText = "The current icon and lock state were kept."
-        case .noAcceptedIcon:
-            alert.messageText = "There is no accepted icon to lock"
-            alert.informativeText = "Choose a valid website icon first."
-        case .unavailable:
-            alert.messageText = "The icon could not be saved"
-            alert.informativeText = "The current icon and lock state were kept."
-        case .changed, .unchanged:
-            return
-        }
-        guard let window else {
-            NSSound.beep()
-            return
-        }
-        alert.beginSheetModal(for: window)
+    @objc private func saveToBookmarksFromMenu(_ sender: NSMenuItem) { onSaveToBookmarks?(slotID) }
+    @objc private func moveToGroupFromMenu(_ sender: NSMenuItem) {
+        let groupID = (sender.representedObject as? String).flatMap(UUID.init(uuidString:))
+        onMoveToGroup?(slotID, groupID)
     }
 
     @objc private func setWebsiteModeFromMenu(_ sender: NSMenuItem) {
@@ -4682,31 +6031,33 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     }
 
     private func loadFaviconIfNeeded(from url: URL) {
-        let key = WebsiteFaviconProvider.originKey(for: url)
+        let key = usesDefaultFaviconLoader
+            ? (WebsiteFaviconProvider.slotScopeKey(for: url) ?? WebsiteFaviconProvider.originKey(for: url))
+            : WebsiteFaviconProvider.originKey(for: url)
         WebsiteFaviconProvider.shared.setAutomaticRetryDemand(
             consumerID: faviconConsumerID,
             enabled: isActive
         )
-        if key != faviconOriginKey {
+        if key != faviconScopeKey {
             cancelFavicon(faviconConsumerID)
-            faviconOriginKey = key
-            loadedFaviconOriginKey = nil
-            subscribedFaviconOriginKey = nil
+            faviconScopeKey = key
+            loadedFaviconScopeKey = nil
+            subscribedFaviconScopeKey = nil
             faviconRequestGeneration &+= 1
             setSourceIcon(Self.fallbackIcon())
         }
         guard let key,
-              loadedFaviconOriginKey != key,
-              subscribedFaviconOriginKey != key else { return }
+              loadedFaviconScopeKey != key,
+              subscribedFaviconScopeKey != key else { return }
 
-        subscribedFaviconOriginKey = key
+        subscribedFaviconScopeKey = key
         let requestGeneration = faviconRequestGeneration
         requestFavicon(url) { [weak self] image in
             guard let self,
-                  self.faviconOriginKey == key,
+                  self.faviconScopeKey == key,
                   self.faviconRequestGeneration == requestGeneration else { return }
             if image != nil {
-                self.loadedFaviconOriginKey = key
+                self.loadedFaviconScopeKey = key
             }
             let projection = self.setSourceIcon(image ?? Self.fallbackIcon())
             let outcome = image == nil && projection != .noImageDisplayed
@@ -4723,7 +6074,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     override func viewWillMove(toSuperview newSuperview: NSView?) {
         if newSuperview == nil {
             cancelFavicon(faviconConsumerID)
-            subscribedFaviconOriginKey = nil
+            subscribedFaviconScopeKey = nil
             faviconRequestGeneration &+= 1
         }
         super.viewWillMove(toSuperview: newSuperview)
@@ -4782,6 +6133,10 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
 
     @discardableResult
     func setSourceIcon(_ image: NSImage?) -> WebsiteFaviconProvider.ProjectionOutcome {
+        if sourceIcon === image, iconView.image != nil {
+            applyIconAppearance()
+            return image == nil ? .fallbackDisplayed : .iconDisplayed
+        }
         sourceIcon = image
         if let image, !image.isTemplate {
             grayscaleIcon = Self.grayscaleImage(from: image)
@@ -4833,8 +6188,12 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         return nil
     }
 
+    func refreshLocalization() {
+        updateRuntimeToolTip()
+    }
+
     private func updateRuntimeToolTip() {
-        let state = isResident ? "Open" : "Released"
+        let state = isResident ? L10n.tr("Open", "运行中") : L10n.tr("Released", "已释放")
         toolTip = "\(displayedPresentationTitle) · \(state)"
     }
 
@@ -4883,34 +6242,30 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     }
 
     private static func averageVisibleLuminance(of image: NSImage) -> CGFloat? {
-        guard let data = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: data),
-              bitmap.pixelsWide > 0,
-              bitmap.pixelsHigh > 0 else {
+        guard let pixels = WebsiteFaviconProvider.rgba8PixelBytes(of: image, aspectFit: false) else {
             return nil
         }
-        var luminanceTotal: CGFloat = 0
-        var alphaTotal: CGFloat = 0
-        for y in 0..<bitmap.pixelsHigh {
-            for x in 0..<bitmap.pixelsWide {
-                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else {
-                    continue
-                }
-                let alpha = color.alphaComponent
-                guard alpha > 0.02 else { continue }
-                let luminance = 0.2126 * color.redComponent
-                    + 0.7152 * color.greenComponent
-                    + 0.0722 * color.blueComponent
-                luminanceTotal += luminance * alpha
-                alphaTotal += alpha
+        var luminanceWeightedSum = 0.0
+        var alphaSum = 0.0
+        var offset = 0
+        while offset + 3 < pixels.count {
+            let alpha = pixels[offset + 3]
+            if alpha > 5 {
+                luminanceWeightedSum += 0.2126 * Double(pixels[offset])
+                    + 0.7152 * Double(pixels[offset + 1])
+                    + 0.0722 * Double(pixels[offset + 2])
+                alphaSum += Double(alpha)
             }
+            offset += 4
         }
-        guard alphaTotal > 0 else { return nil }
-        return luminanceTotal / alphaTotal
+        guard alphaSum > 0 else { return nil }
+        return CGFloat(luminanceWeightedSum / alphaSum)
     }
 
     private static func fallbackIcon() -> NSImage? {
-        NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
+        let icon = NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
+        icon?.isTemplate = true
+        return icon
     }
 }
 
@@ -4944,7 +6299,10 @@ final class AddWebAppControl: NSView, RailHoverInteractionOwner {
         layer?.cornerRadius = ExternalTabMetrics.tabRadius
         layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
 
-        imageView.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Web App")
+        imageView.image = NSImage(
+            systemSymbolName: "plus",
+            accessibilityDescription: L10n.tr("Add Web App", "添加网页应用")
+        )
         imageView.contentTintColor = .labelColor
         imageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(imageView)
@@ -4956,7 +6314,15 @@ final class AddWebAppControl: NSView, RailHoverInteractionOwner {
             imageView.heightAnchor.constraint(equalToConstant: 12),
         ])
 
+        refreshLocalization()
         updateAppearance()
+    }
+
+    func refreshLocalization() {
+        let label = L10n.tr("Add Web App", "添加网页应用")
+        toolTip = "\(label) · ⌘T"
+        setAccessibilityLabel(label)
+        imageView.image = NSImage(systemSymbolName: "plus", accessibilityDescription: label)
     }
 
     convenience init() {
@@ -5208,13 +6574,25 @@ final class PinPanelControl: NSView, RailHoverInteractionOwner {
         }
     }
 
-    private func applyResolvedAppearance() {
+    func refreshLocalization() {
         let symbol = isPinned ? "pin.fill" : "pin"
-        let description = isPinned ? "Pinned: keep FloatTabs visible" : "Pin FloatTabs"
+        let description = isPinned
+            ? L10n.tr("Pinned: keep FloatTabs visible", "已置顶：保持 FloatTabs 常驻显示")
+            : L10n.tr("Pin FloatTabs", "置顶 FloatTabs")
         imageView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
         toolTip = isPinned
-            ? "Pinned · Click or press ⌘⇧P to auto-hide when inactive"
-            : "Keep FloatTabs Visible · ⌘⇧P"
+            ? L10n.tr(
+                "Pinned · Click or press ⌘⇧P to auto-hide when inactive",
+                "已固定窗口 · 点击或按 ⌘⇧P 恢复失去焦点时自动隐藏"
+            )
+            : L10n.tr(
+                "Keep FloatTabs Visible · ⌘⇧P",
+                "保持窗口始终显示 · ⌘⇧P"
+            )
+    }
+
+    private func applyResolvedAppearance() {
+        refreshLocalization()
 
         let fraction: CGFloat
         if isPinned {
@@ -5252,9 +6630,7 @@ final class GlobalSettingsControl: NSView, RailHoverInteractionOwner {
         wantsLayer = true
         layer?.cornerRadius = ExternalTabMetrics.tabRadius
         layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
-        toolTip = "FloatTabs Settings · ⌘,"
-
-        imageView.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Global Settings")
+        refreshLocalization()
         imageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(imageView)
         NSLayoutConstraint.activate([
@@ -5264,6 +6640,13 @@ final class GlobalSettingsControl: NSView, RailHoverInteractionOwner {
             imageView.heightAnchor.constraint(equalToConstant: 13),
         ])
         updateAppearance()
+    }
+
+    func refreshLocalization() {
+        let title = L10n.tr("Global Settings", "全局设置")
+        toolTip = L10n.tr("FloatTabs Settings · ⌘,", "FloatTabs 设置 · ⌘,")
+        setAccessibilityLabel(title)
+        imageView.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: title)
     }
 
     convenience init() {
@@ -5374,5 +6757,644 @@ final class GlobalSettingsControl: NSView, RailHoverInteractionOwner {
         layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.30).cgColor
         layer?.borderWidth = 1
         imageView.contentTintColor = .labelColor
+    }
+}
+
+@MainActor
+final class WebAppGroupControl: NSView, RailHoverInteractionOwner {
+    let option: WebAppGroupMenuOption
+    private let allOptions: [WebAppGroupMenuOption]
+    private var globalBorderTheme: PanelBorderTheme
+    private var globalCustomBorderColor: NSColor
+
+    var onSelectGroup: ((UUID?) -> Void)?
+    var onCreateGroup: (() -> Void)?
+    var onEditGroup: ((UUID?) -> Void)?
+    var onDeleteGroup: ((UUID) -> Void)?
+    var onPointerMoved: ((NSEvent) -> Void)?
+
+    var stableIdentifier: String { option.stableIdentifier }
+    var hasVisibleUnreadIndicator: Bool { !unreadDotView.isHidden }
+    var isShowingHiddenGroupUnreadForTesting: Bool { hasHiddenGroupUnread }
+    var effectiveAccentThemeForTesting: PanelBorderTheme { effectiveBorderTheme }
+
+    private let stripeView = NSView()
+    private let stripeGradientLayer = CAGradientLayer()
+    private let iconView = NSImageView()
+    private let label = NSTextField(labelWithString: "")
+    private let unreadDotView = NSView()
+    private var trackingAreaReference: NSTrackingArea?
+    private var isHovered = false
+    private var isHoverInteractionSuspended = false
+    private var alwaysOpensMenu = false
+    private var hasHiddenGroupUnread = false
+    private var dockInfluence: CGFloat = 0
+
+    var preferredWidth: CGFloat {
+        let resting = option.isActive
+            ? ExternalTabMetrics.groupActiveWidth
+            : ExternalTabMetrics.groupInactiveWidth
+        let influence: CGFloat = isHovered ? 1 : min(dockInfluence, 0.35)
+        return resting + (ExternalTabMetrics.systemControlHoverWidth - resting) * influence
+    }
+
+    init(
+        option: WebAppGroupMenuOption,
+        allOptions: [WebAppGroupMenuOption],
+        globalBorderTheme: PanelBorderTheme = .rainbow,
+        globalCustomBorderColor: NSColor = .systemBlue
+    ) {
+        self.option = option
+        self.allOptions = allOptions
+        self.globalBorderTheme = globalBorderTheme
+        self.globalCustomBorderColor = globalCustomBorderColor
+        super.init(frame: .zero)
+
+        wantsLayer = true
+        layer?.cornerRadius = ExternalTabMetrics.tabRadius
+        layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+
+        stripeView.wantsLayer = true
+        stripeView.layer?.cornerRadius = 1.75
+        stripeView.layer?.masksToBounds = true
+        stripeView.translatesAutoresizingMaskIntoConstraints = false
+        stripeGradientLayer.startPoint = CGPoint(x: 0.5, y: 0)
+        stripeGradientLayer.endPoint = CGPoint(x: 0.5, y: 1)
+        stripeView.layer?.addSublayer(stripeGradientLayer)
+        addSubview(stripeView)
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.imageScaling = .scaleProportionallyDown
+        iconView.setContentCompressionResistancePriority(.required, for: .horizontal)
+        addSubview(iconView)
+
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.maximumNumberOfLines = 1
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        addSubview(label)
+
+        unreadDotView.wantsLayer = true
+        unreadDotView.layer?.cornerRadius = 3
+        unreadDotView.translatesAutoresizingMaskIntoConstraints = false
+        unreadDotView.isHidden = option.isActive || option.unreadCount == 0
+        addSubview(unreadDotView)
+
+        NSLayoutConstraint.activate([
+            stripeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            stripeView.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            stripeView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+            stripeView.widthAnchor.constraint(equalToConstant: 3.5),
+
+            iconView.leadingAnchor.constraint(equalTo: stripeView.trailingAnchor, constant: 4),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 11),
+            iconView.heightAnchor.constraint(equalToConstant: 11),
+
+            label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 3.5),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            unreadDotView.topAnchor.constraint(equalTo: topAnchor, constant: 3.5),
+            unreadDotView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            unreadDotView.widthAnchor.constraint(equalToConstant: 6),
+            unreadDotView.heightAnchor.constraint(equalToConstant: 6),
+        ])
+
+        setAccessibilityRole(.button)
+        updateLabelsAndAppearance()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        stripeGradientLayer.frame = stripeView.bounds
+        CATransaction.commit()
+        window?.invalidateCursorRects(for: self)
+        updateShortOrExpandedTitle()
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .arrow)
+    }
+
+    func setDockInfluence(_ influence: CGFloat) {
+        dockInfluence = min(max(influence, 0), 1)
+    }
+
+    func setHovered(_ hovered: Bool) {
+        guard !isHoverInteractionSuspended || !hovered else { return }
+        guard isHovered != hovered else { return }
+        isHovered = hovered
+        updateShortOrExpandedTitle()
+        updateAppearance()
+    }
+
+    func setHoverInteractionSuspended(_ suspended: Bool) {
+        isHoverInteractionSuspended = suspended
+        if suspended {
+            setHovered(false)
+        }
+    }
+
+    func setAlwaysOpensMenu(_ always: Bool) {
+        alwaysOpensMenu = always
+    }
+
+    func setHasHiddenGroupUnread(_ hasHiddenUnread: Bool) {
+        guard hasHiddenGroupUnread != hasHiddenUnread else { return }
+        hasHiddenGroupUnread = hasHiddenUnread
+        updateLabelsAndAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(tracking)
+        trackingAreaReference = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setHovered(true)
+        onPointerMoved?(event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        onPointerMoved?(event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovered(false)
+        onPointerMoved?(event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let localPoint = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(localPoint) else { return }
+        if !option.isActive, !alwaysOpensMenu {
+            onSelectGroup?(option.id)
+            return
+        }
+        let menu = makeSwitcherMenu()
+        menu.popUp(positioning: nil, at: NSPoint(x: bounds.maxX + 4, y: bounds.midY), in: self)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        let menu = makeContextMenu()
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        makeContextMenu()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func refreshAppearance() {
+        updateAppearance()
+    }
+
+    private var effectiveBorderTheme: PanelBorderTheme {
+        option.borderTheme ?? globalBorderTheme
+    }
+
+    private var effectiveAccentColor: NSColor {
+        switch effectiveBorderTheme {
+        case .rainbow:
+            return .systemPurple
+        case .custom:
+            return option.resolvedCustomColor ?? globalCustomBorderColor
+        default:
+            return effectiveBorderTheme.solidColor ?? .systemBlue
+        }
+    }
+
+    func refreshLocalization() {
+        updateLabelsAndAppearance()
+    }
+
+    private func updateLabelsAndAppearance() {
+        let displayGroupName = L10n.defaultDisplayName(option.name)
+        let countText = option.slotCount == 1
+            ? L10n.tr("1 tab", "1 个标签")
+            : L10n.tr("\(option.slotCount) tabs", "\(option.slotCount) 个标签")
+        let borderDesc = option.borderTheme?.displayName
+            ?? L10n.tr("Global (\(globalBorderTheme.displayName))", "全局（\(globalBorderTheme.displayName)）")
+        let unreadDesc: String
+        if !option.isActive && option.unreadCount > 0 {
+            unreadDesc = L10n.tr(" · \(option.unreadCount) unread", " · \(option.unreadCount) 条未读")
+        } else if hasHiddenGroupUnread {
+            unreadDesc = L10n.tr(" · Other groups have unread updates", " · 其他分组有未读动态")
+        } else {
+            unreadDesc = ""
+        }
+        toolTip = L10n.tr(
+            "Group: \(displayGroupName) · \(countText)\(unreadDesc) · \(borderDesc)\nClick to switch · Right-click for options",
+            "分组：\(displayGroupName) · \(countText)\(unreadDesc) · \(borderDesc)\n单击切换分组 · 右键管理选项"
+        )
+        setAccessibilityLabel(L10n.tr("Group \(displayGroupName)", "分组 \(displayGroupName)"))
+        updateShortOrExpandedTitle()
+        updateAppearance()
+    }
+
+    private func updateShortOrExpandedTitle() {
+        let displayGroupName = L10n.defaultDisplayName(option.name)
+        let wide = isHovered || option.isActive || bounds.width >= 54
+        if wide {
+            label.stringValue = displayGroupName
+            label.font = .systemFont(ofSize: 10.5, weight: option.isActive ? .semibold : .medium)
+        } else {
+            let trimmed = displayGroupName.trimmingCharacters(in: .whitespacesAndNewlines)
+            label.stringValue = String(trimmed.prefix(2))
+            label.font = .systemFont(ofSize: 9.5, weight: .semibold)
+        }
+    }
+
+    private func updateAppearance() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            applyResolvedAppearance()
+        }
+    }
+
+    private func applyResolvedAppearance() {
+        let accent = effectiveAccentColor
+        let baseFraction: CGFloat
+        if option.isActive {
+            baseFraction = isHovered ? 0.22 : 0.14
+        } else {
+            baseFraction = isHovered ? 0.13 : 0.06
+        }
+        layer?.backgroundColor = NSColor.controlBackgroundColor
+            .blended(withFraction: baseFraction, of: accent)?
+            .withAlphaComponent(0.96)
+            .cgColor
+
+        if option.isActive {
+            layer?.borderColor = accent.withAlphaComponent(0.82).cgColor
+            layer?.borderWidth = 1.5
+        } else {
+            layer?.borderColor = accent.withAlphaComponent(isHovered ? 0.58 : 0.32).cgColor
+            layer?.borderWidth = 1
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if effectiveBorderTheme == .rainbow {
+            stripeGradientLayer.colors = [
+                NSColor.systemBlue.cgColor,
+                NSColor.systemPurple.cgColor,
+                NSColor.systemPink.cgColor,
+                NSColor.systemOrange.cgColor,
+                NSColor.systemYellow.cgColor,
+                NSColor.systemGreen.cgColor,
+            ]
+            stripeGradientLayer.locations = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
+        } else {
+            let cgAccent = accent.cgColor
+            stripeGradientLayer.colors = [cgAccent, cgAccent]
+            stripeGradientLayer.locations = [0, 1]
+        }
+        CATransaction.commit()
+
+        let symbolName = option.isActive ? "square.grid.2x2.fill" : "square.grid.2x2"
+        if let symbol = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(
+                pointSize: 9.5,
+                weight: option.isActive ? .semibold : .medium
+            )
+        ) {
+            iconView.image = symbol
+        }
+        iconView.contentTintColor = option.isActive
+            ? (accent.blended(withFraction: 0.25, of: .labelColor) ?? accent)
+            : accent.withAlphaComponent(0.88)
+
+        let showsUnread = (!option.isActive && option.unreadCount > 0) || hasHiddenGroupUnread
+        unreadDotView.isHidden = !showsUnread
+        unreadDotView.layer?.backgroundColor = NSColor.systemRed.cgColor
+        label.textColor = option.isActive ? .labelColor : .secondaryLabelColor
+    }
+
+    private func makeSwitcherMenu() -> NSMenu {
+        let displayGroupName = L10n.defaultDisplayName(option.name)
+        let menu = NSMenu(title: L10n.tr("Tab Groups", "标签分组"))
+        for groupOption in allOptions {
+            let unreadPrefix = (!groupOption.isActive && groupOption.unreadCount > 0) ? "● " : ""
+            let suffix = groupOption.slotCount > 0 ? " (\(groupOption.slotCount))" : ""
+            let item = NSMenuItem(
+                title: "\(unreadPrefix)\(L10n.defaultDisplayName(groupOption.name))\(suffix)",
+                action: #selector(selectGroupFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = groupOption.id?.uuidString ?? NSNull()
+            item.state = groupOption.isActive ? .on : .off
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+
+        let newGroup = NSMenuItem(
+            title: L10n.tr("New Group…", "新建分组…"),
+            action: #selector(createGroupFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        newGroup.target = self
+        menu.addItem(newGroup)
+
+        let editGroup = NSMenuItem(
+            title: L10n.tr("Edit \"\(displayGroupName)\" & Border…", "编辑“\(displayGroupName)”与边框…"),
+            action: #selector(editGroupFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        editGroup.target = self
+        editGroup.representedObject = option.id?.uuidString ?? NSNull()
+        menu.addItem(editGroup)
+
+        if let customID = option.id {
+            let deleteGroup = NSMenuItem(
+                title: L10n.tr("Delete \"\(displayGroupName)\"…", "删除“\(displayGroupName)”…"),
+                action: #selector(deleteGroupFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            deleteGroup.target = self
+            deleteGroup.representedObject = customID.uuidString
+            menu.addItem(deleteGroup)
+        }
+        return menu
+    }
+
+    private func makeContextMenu() -> NSMenu {
+        let displayGroupName = L10n.defaultDisplayName(option.name)
+        let menu = NSMenu(title: displayGroupName)
+        if !option.isActive {
+            let switchItem = NSMenuItem(
+                title: L10n.tr("Switch to \"\(displayGroupName)\"", "切换到“\(displayGroupName)”"),
+                action: #selector(selectGroupFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            switchItem.target = self
+            switchItem.representedObject = option.id?.uuidString ?? NSNull()
+            menu.addItem(switchItem)
+            menu.addItem(.separator())
+        }
+
+        let editItem = NSMenuItem(
+            title: L10n.tr("Edit \"\(displayGroupName)\" & Border…", "编辑“\(displayGroupName)”与边框…"),
+            action: #selector(editGroupFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        editItem.target = self
+        editItem.representedObject = option.id?.uuidString ?? NSNull()
+        menu.addItem(editItem)
+
+        if let customID = option.id {
+            let deleteItem = NSMenuItem(
+                title: L10n.tr("Delete \"\(displayGroupName)\"…", "删除“\(displayGroupName)”…"),
+                action: #selector(deleteGroupFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            deleteItem.target = self
+            deleteItem.representedObject = customID.uuidString
+            menu.addItem(deleteItem)
+        }
+
+        menu.addItem(.separator())
+        let newGroup = NSMenuItem(
+            title: L10n.tr("New Group…", "新建分组…"),
+            action: #selector(createGroupFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        newGroup.target = self
+        menu.addItem(newGroup)
+        return menu
+    }
+
+    @objc private func selectGroupFromMenu(_ sender: NSMenuItem) {
+        let targetID = (sender.representedObject as? String).flatMap(UUID.init(uuidString:))
+        onSelectGroup?(targetID)
+    }
+
+    @objc private func createGroupFromMenu(_ sender: NSMenuItem) {
+        onCreateGroup?()
+    }
+
+    @objc private func editGroupFromMenu(_ sender: NSMenuItem) {
+        let targetID = (sender.representedObject as? String).flatMap(UUID.init(uuidString:))
+        onEditGroup?(targetID)
+    }
+
+    @objc private func deleteGroupFromMenu(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let targetID = UUID(uuidString: raw) else {
+            return
+        }
+        onDeleteGroup?(targetID)
+    }
+}
+
+@MainActor
+private final class FaviconSVGRasterizer: NSObject, WKNavigationDelegate {
+    private static let shared = FaviconSVGRasterizer()
+    private static let idleReleaseDelayNanoseconds: UInt64 = 15_000_000_000
+    private static let renderTimeoutNanoseconds: UInt64 = 2_000_000_000
+
+    private struct Request {
+        let id: UUID
+        let data: Data
+        let continuation: CheckedContinuation<NSImage?, Never>
+    }
+
+    private var webView: WKWebView?
+    private var pendingRequests: [Request] = []
+    private var activeRequest: Request?
+    private var timeoutTask: Task<Void, Never>?
+    private var idleReleaseTask: Task<Void, Never>?
+
+    static func rasterizeSVG(data: Data) async -> NSImage? {
+        guard !data.isEmpty, data.count <= 524_288 else { return nil }
+        return await shared.enqueue(svgData: data)
+    }
+
+    private func enqueue(svgData: Data) async -> NSImage? {
+        idleReleaseTask?.cancel()
+        idleReleaseTask = nil
+
+        return await withCheckedContinuation { continuation in
+            let request = Request(
+                id: UUID(),
+                data: svgData,
+                continuation: continuation
+            )
+            pendingRequests.append(request)
+            pumpQueueIfNeeded()
+        }
+    }
+
+    private func ensureWebView() -> WKWebView {
+        if let webView {
+            if webView.navigationDelegate !== self {
+                webView.navigationDelegate = self
+            }
+            return webView
+        }
+
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+
+        let created = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 64, height: 64),
+            configuration: configuration
+        )
+        created.setValue(false, forKey: "drawsBackground")
+        created.navigationDelegate = self
+        self.webView = created
+        return created
+    }
+
+    private func pumpQueueIfNeeded() {
+        guard activeRequest == nil, !pendingRequests.isEmpty else { return }
+        idleReleaseTask?.cancel()
+        idleReleaseTask = nil
+
+        let next = pendingRequests.removeFirst()
+        activeRequest = next
+        start(request: next)
+    }
+
+    private func start(request: Request) {
+        let webView = ensureWebView()
+        let base64 = request.data.base64EncodedString()
+        let html = """
+        <!doctype html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline';">
+        <style>
+        html, body { margin: 0; padding: 0; width: 64px; height: 64px; background: transparent; overflow: hidden; }
+        img { width: 64px; height: 64px; object-fit: contain; display: block; }
+        </style>
+        </head>
+        <body><img src="data:image/svg+xml;base64,\(base64)"></body>
+        </html>
+        """
+
+        let requestID = request.id
+        timeoutTask?.cancel()
+        timeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.renderTimeoutNanoseconds)
+            self?.finishActiveRequest(id: requestID, image: nil)
+        }
+        webView.loadHTMLString(html, baseURL: nil)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard let requestID = activeRequest?.id else { return }
+        Task { @MainActor [weak self, weak webView] in
+            guard let self, let webView, self.activeRequest?.id == requestID else { return }
+            do {
+                _ = try await webView.callAsyncJavaScript(
+                    """
+                    const img = document.querySelector('img');
+                    if (img && typeof img.decode === 'function') {
+                        await img.decode().catch(() => {});
+                    }
+                    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                    return true;
+                    """,
+                    arguments: [:],
+                    in: nil,
+                    contentWorld: .defaultClient
+                )
+            } catch {
+                try? await Task.sleep(nanoseconds: 16_000_000)
+            }
+            guard self.activeRequest?.id == requestID else { return }
+            let snapshotConfiguration = WKSnapshotConfiguration()
+            snapshotConfiguration.rect = NSRect(x: 0, y: 0, width: 64, height: 64)
+            snapshotConfiguration.snapshotWidth = 64
+            webView.takeSnapshot(with: snapshotConfiguration) { [weak self] image, _ in
+                Task { @MainActor in
+                    self?.finishActiveRequest(id: requestID, image: image)
+                }
+            }
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard let requestID = activeRequest?.id else { return }
+        finishActiveRequest(id: requestID, image: nil)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        guard let requestID = activeRequest?.id else { return }
+        finishActiveRequest(id: requestID, image: nil)
+    }
+
+    private func finishActiveRequest(id: UUID, image: NSImage?) {
+        guard let current = activeRequest, current.id == id else { return }
+        activeRequest = nil
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        webView?.stopLoading()
+        current.continuation.resume(returning: image)
+
+        if !pendingRequests.isEmpty {
+            pumpQueueIfNeeded()
+        } else {
+            scheduleIdleRelease()
+        }
+    }
+
+    private func scheduleIdleRelease() {
+        idleReleaseTask?.cancel()
+        idleReleaseTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.idleReleaseDelayNanoseconds)
+            guard let self,
+                  !Task.isCancelled,
+                  self.activeRequest == nil,
+                  self.pendingRequests.isEmpty else {
+                return
+            }
+            self.webView?.navigationDelegate = nil
+            self.webView?.stopLoading()
+            self.webView = nil
+            self.idleReleaseTask = nil
+        }
     }
 }

@@ -10,6 +10,9 @@ final class PanelRootView: NSView {
     let webPanelContainerView: WebPanelContainerView
     let perimeterDragView: PanelPerimeterDragView
     let interactionBorderView: PanelInteractionBorderView
+    let topLeftResizeHandleView: PanelResizeHandleView
+    let topRightResizeHandleView: PanelResizeHandleView
+    let bottomLeftResizeHandleView: PanelResizeHandleView
     let resizeHandleView: PanelResizeHandleView
     let resizeReadoutView: ResizeReadoutView
     let companionRailFoldControlView: RailFoldControl
@@ -27,7 +30,10 @@ final class PanelRootView: NSView {
         webPanelContainerView = WebPanelContainerView()
         perimeterDragView = PanelPerimeterDragView()
         interactionBorderView = PanelInteractionBorderView()
-        resizeHandleView = PanelResizeHandleView()
+        topLeftResizeHandleView = PanelResizeHandleView(corner: .topLeft)
+        topRightResizeHandleView = PanelResizeHandleView(corner: .topRight)
+        bottomLeftResizeHandleView = PanelResizeHandleView(corner: .bottomLeft)
+        resizeHandleView = PanelResizeHandleView(corner: .bottomRight)
         resizeReadoutView = ResizeReadoutView()
         companionRailFoldControlView = RailFoldControl()
         fullscreenExitPlaceholderView = FullscreenExitPlaceholderView()
@@ -44,6 +50,9 @@ final class PanelRootView: NSView {
         webViewportLayoutView.translatesAutoresizingMaskIntoConstraints = false
         perimeterDragView.translatesAutoresizingMaskIntoConstraints = false
         interactionBorderView.translatesAutoresizingMaskIntoConstraints = false
+        topLeftResizeHandleView.translatesAutoresizingMaskIntoConstraints = false
+        topRightResizeHandleView.translatesAutoresizingMaskIntoConstraints = false
+        bottomLeftResizeHandleView.translatesAutoresizingMaskIntoConstraints = false
         resizeHandleView.translatesAutoresizingMaskIntoConstraints = false
         resizeReadoutView.translatesAutoresizingMaskIntoConstraints = false
         companionRailFoldControlView.translatesAutoresizingMaskIntoConstraints = false
@@ -62,6 +71,9 @@ final class PanelRootView: NSView {
         // the same outline below instead of drawing a second independent ring.
         addSubview(interactionBorderView)
         addSubview(resizeReadoutView)
+        addSubview(topLeftResizeHandleView)
+        addSubview(topRightResizeHandleView)
+        addSubview(bottomLeftResizeHandleView)
         addSubview(resizeHandleView)
         addSubview(companionRailFoldControlView)
         companionRailFoldControlView.isHidden = true
@@ -104,9 +116,47 @@ final class PanelRootView: NSView {
             interactionBorderView.topAnchor.constraint(equalTo: topAnchor),
             interactionBorderView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            // Keep the complete resize target inside the visible Web corner.
-            // Real-Mac acceptance showed the transparent outer gutter was an
-            // unreliable acquisition surface, while the in-page area was stable.
+            // Corner resize handles stay inside the Web viewport bounds so hits
+            // never rely on outer transparent window pixels.
+            topLeftResizeHandleView.leadingAnchor.constraint(
+                equalTo: webViewportLayoutView.leadingAnchor
+            ),
+            topLeftResizeHandleView.topAnchor.constraint(
+                equalTo: webViewportLayoutView.topAnchor
+            ),
+            topLeftResizeHandleView.widthAnchor.constraint(
+                equalToConstant: PanelMetrics.topCornerResizeHandleSize
+            ),
+            topLeftResizeHandleView.heightAnchor.constraint(
+                equalToConstant: PanelMetrics.topCornerResizeHandleSize
+            ),
+
+            topRightResizeHandleView.trailingAnchor.constraint(
+                equalTo: webViewportLayoutView.trailingAnchor
+            ),
+            topRightResizeHandleView.topAnchor.constraint(
+                equalTo: webViewportLayoutView.topAnchor
+            ),
+            topRightResizeHandleView.widthAnchor.constraint(
+                equalToConstant: PanelMetrics.topCornerResizeHandleSize
+            ),
+            topRightResizeHandleView.heightAnchor.constraint(
+                equalToConstant: PanelMetrics.topCornerResizeHandleSize
+            ),
+
+            bottomLeftResizeHandleView.leadingAnchor.constraint(
+                equalTo: webViewportLayoutView.leadingAnchor
+            ),
+            bottomLeftResizeHandleView.bottomAnchor.constraint(
+                equalTo: webViewportLayoutView.bottomAnchor
+            ),
+            bottomLeftResizeHandleView.widthAnchor.constraint(
+                equalToConstant: PanelMetrics.resizeHandleSize
+            ),
+            bottomLeftResizeHandleView.heightAnchor.constraint(
+                equalToConstant: PanelMetrics.resizeHandleSize
+            ),
+
             resizeHandleView.trailingAnchor.constraint(
                 equalTo: webViewportLayoutView.trailingAnchor
             ),
@@ -126,7 +176,8 @@ final class PanelRootView: NSView {
             ),
 
             // Fullscreen's companion shell does not use the ordinary source
-            // window, so it owns a second synchronized page-fold control.
+            // window, so it owns a second synchronized page-fold + bottom-left
+            // resize control.
             companionRailFoldControlView.leadingAnchor.constraint(
                 equalTo: webViewportLayoutView.leadingAnchor
             ),
@@ -145,14 +196,25 @@ final class PanelRootView: NSView {
             self?.synchronizeInteractionBorderGeometry()
         }
 
-        resizeHandleView.onViewportSizeChange = { [weak self] viewportSize in
+        let handleViewportChange: (NSSize) -> Void = { [weak self] viewportSize in
             self?.resizeReadoutView.update(viewportSize: viewportSize)
             self?.resizeReadoutView.isHidden = false
         }
-        resizeHandleView.onResizeEnded = { [weak self] in
+        let handleResizeEnded: () -> Void = { [weak self] in
             self?.resizeReadoutView.isHidden = true
             self?.onResizeEnded?()
         }
+        for handle in [
+            topLeftResizeHandleView,
+            topRightResizeHandleView,
+            bottomLeftResizeHandleView,
+            resizeHandleView
+        ] {
+            handle.onViewportSizeChange = handleViewportChange
+            handle.onResizeEnded = handleResizeEnded
+        }
+        companionRailFoldControlView.onViewportSizeChange = handleViewportChange
+        companionRailFoldControlView.onResizeEnded = handleResizeEnded
     }
 
     convenience init(webView: WKWebView) {
@@ -292,7 +354,7 @@ final class PanelRootView: NSView {
 final class FullscreenExitPlaceholderView: NSVisualEffectView {
     var onExitFullscreen: (() -> Void)?
 
-    private let label = NSTextField(labelWithString: "Double-click to Exit Full Screen")
+    private let label = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -309,6 +371,7 @@ final class FullscreenExitPlaceholderView: NSVisualEffectView {
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
+        refreshLocalization()
 
         NSLayoutConstraint.activate([
             label.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -323,6 +386,13 @@ final class FullscreenExitPlaceholderView: NSVisualEffectView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func refreshLocalization() {
+        label.stringValue = L10n.tr(
+            "Double-click to Exit Full Screen",
+            "双击退出全屏"
+        )
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -341,6 +411,7 @@ final class PanelInteractionBorderView: NSView {
     private let borderMask = CAShapeLayer()
     private var borderTheme: PanelBorderTheme = .rainbow
     private var customBorderColor: NSColor = .systemBlue
+    private var isPresentationVisible = true
 
     var targetWebFrame: NSRect = .zero {
         didSet {
@@ -392,6 +463,12 @@ final class PanelInteractionBorderView: NSView {
         applyBorderAppearance()
     }
 
+    func setPresentationVisible(_ visible: Bool) {
+        guard isPresentationVisible != visible else { return }
+        isPresentationVisible = visible
+        applyBorderAppearance()
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         applyBorderAppearance()
@@ -408,13 +485,15 @@ final class PanelInteractionBorderView: NSView {
             gradientLayer.colors = palettes.first
             gradientLayer.locations = [0, 0.22, 0.48, 0.74, 1]
 
-            let flow = CAKeyframeAnimation(keyPath: "colors")
-            flow.values = palettes
-            flow.keyTimes = [0, 0.25, 0.5, 0.75, 1]
-            flow.duration = 3.2
-            flow.repeatCount = .infinity
-            flow.calculationMode = .linear
-            gradientLayer.add(flow, forKey: "FloatTabs.interactionBorderFlow")
+            if isPresentationVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                let flow = CAKeyframeAnimation(keyPath: "colors")
+                flow.values = palettes
+                flow.keyTimes = [0, 0.25, 0.5, 0.75, 1]
+                flow.duration = 3.2
+                flow.repeatCount = .infinity
+                flow.calculationMode = .linear
+                gradientLayer.add(flow, forKey: "FloatTabs.interactionBorderFlow")
+            }
         } else {
             let color = borderTheme.solidColor ?? customBorderColor
             gradientLayer.type = .axial
@@ -627,10 +706,35 @@ final class PanelPerimeterDragView: NSView {
     }
 }
 
-/// The only resize affordance. Both its visible grip and complete hit target
-/// live inside the bottom-right Web corner. This deliberately avoids relying on
-/// transparent outside-window-looking pixels for a precision interaction.
+enum PanelResizeCorner: CaseIterable, Equatable {
+    case topLeft
+    case topRight
+    case bottomLeft
+    case bottomRight
+
+    @MainActor
+    var cursor: NSCursor {
+        if #available(macOS 15.0, *) {
+            switch self {
+            case .topLeft:
+                return NSCursor.frameResize(position: .topLeft, directions: .all)
+            case .topRight:
+                return NSCursor.frameResize(position: .topRight, directions: .all)
+            case .bottomLeft:
+                return NSCursor.frameResize(position: .bottomLeft, directions: .all)
+            case .bottomRight:
+                return NSCursor.frameResize(position: .bottomRight, directions: .all)
+            }
+        }
+        return .resizeLeftRight
+    }
+}
+
+/// Corner resize affordance living inside each corner of the visible Web surface.
+/// This deliberately avoids relying on transparent outside-window pixels for a
+/// precision interaction.
 final class PanelResizeHandleView: NSView {
+    let corner: PanelResizeCorner
     var onViewportSizeChange: ((NSSize) -> Void)?
     var onResizeEnded: (() -> Void)?
     weak var resizeTargetWindow: NSWindow?
@@ -639,15 +743,21 @@ final class PanelResizeHandleView: NSView {
     private var startingFrame: NSRect?
     private var trackingAreaReference: NSTrackingArea?
     private var resizeCursorIsPushed = false
+    private var isHovered = false
 
-    override init(frame frameRect: NSRect) {
+    init(frame frameRect: NSRect, corner: PanelResizeCorner = .bottomRight) {
+        self.corner = corner
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
     }
 
-    convenience init() {
-        self.init(frame: .zero)
+    override convenience init(frame frameRect: NSRect) {
+        self.init(frame: frameRect, corner: .bottomRight)
+    }
+
+    convenience init(corner: PanelResizeCorner = .bottomRight) {
+        self.init(frame: .zero, corner: corner)
     }
 
     @available(*, unavailable)
@@ -663,7 +773,8 @@ final class PanelResizeHandleView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        guard !isHidden, alphaValue > 0, frame.contains(point) else { return nil }
+        return self
     }
 
     override func updateTrackingAreas() {
@@ -682,6 +793,8 @@ final class PanelResizeHandleView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        needsDisplay = true
         pushResizeCursorIfNeeded()
     }
 
@@ -690,13 +803,18 @@ final class PanelResizeHandleView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
-        restoreResizeCursorIfNeeded()
+        isHovered = false
+        needsDisplay = true
+        if startingFrame == nil {
+            restoreResizeCursorIfNeeded()
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
         guard let window = resizeTargetWindow ?? window else { return }
         startingMouseLocation = NSEvent.mouseLocation
         startingFrame = window.frame
+        pushResizeCursorIfNeeded()
         onViewportSizeChange?(PanelMetrics.viewportSize(forPanelSize: window.frame.size))
     }
 
@@ -711,51 +829,77 @@ final class PanelResizeHandleView: NSView {
         let deltaX = currentMouseLocation.x - startingMouseLocation.x
         let deltaY = currentMouseLocation.y - startingMouseLocation.y
 
-        var size = PanelMetrics.clampedPanelSize(
-            NSSize(
-                width: startingFrame.width + deltaX,
-                height: startingFrame.height - deltaY
-            )
-        )
-
-        if let visibleFrame = window.screen?.visibleFrame {
-            let maximumWidth = max(
-                PanelMetrics.minimumPanelSize.width,
-                visibleFrame.maxX - startingFrame.minX
-            )
-            let maximumHeight = max(
-                PanelMetrics.minimumPanelSize.height,
-                startingFrame.maxY - visibleFrame.minY
-            )
-            size.width = min(size.width, maximumWidth)
-            size.height = min(size.height, maximumHeight)
-        }
-
-        let resizedFrame = NSRect(
-            x: startingFrame.minX,
-            y: startingFrame.maxY - size.height,
-            width: size.width,
-            height: size.height
+        let resizedFrame = Self.resizedFrame(
+            startingFrame: startingFrame,
+            deltaX: deltaX,
+            deltaY: deltaY,
+            corner: corner,
+            visibleFrame: window.screen?.visibleFrame
         )
 
         window.setFrame(resizedFrame, display: true)
-        onViewportSizeChange?(PanelMetrics.viewportSize(forPanelSize: size))
+        onViewportSizeChange?(PanelMetrics.viewportSize(forPanelSize: resizedFrame.size))
     }
 
     override func mouseUp(with event: NSEvent) {
         startingMouseLocation = nil
         startingFrame = nil
+        if !isHovered {
+            restoreResizeCursorIfNeeded()
+        }
         onResizeEnded?()
     }
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        addCursorRect(bounds, cursor: .resizeLeftRight)
+        addCursorRect(bounds, cursor: corner.cursor)
+    }
+
+    static func resizedFrame(
+        startingFrame: NSRect,
+        deltaX: CGFloat,
+        deltaY: CGFloat,
+        corner: PanelResizeCorner,
+        visibleFrame: NSRect? = nil,
+        minimumSize: NSSize = PanelMetrics.minimumPanelSize
+    ) -> NSRect {
+        let growsRight = corner == .topRight || corner == .bottomRight
+        let growsTop = corner == .topLeft || corner == .topRight
+
+        let proposedWidth = (growsRight ? startingFrame.width + deltaX : startingFrame.width - deltaX).rounded()
+        let proposedHeight = (growsTop ? startingFrame.height + deltaY : startingFrame.height - deltaY).rounded()
+
+        var size = NSSize(
+            width: max(proposedWidth, minimumSize.width),
+            height: max(proposedHeight, minimumSize.height)
+        )
+
+        if let visibleFrame {
+            let maximumWidth = max(
+                minimumSize.width,
+                growsRight
+                    ? (visibleFrame.maxX - startingFrame.minX)
+                    : (startingFrame.maxX - visibleFrame.minX)
+            )
+            let maximumHeight = max(
+                minimumSize.height,
+                growsTop
+                    ? (visibleFrame.maxY - startingFrame.minY)
+                    : (startingFrame.maxY - visibleFrame.minY)
+            )
+            size.width = max(minimumSize.width, min(size.width, maximumWidth).rounded(.down))
+            size.height = max(minimumSize.height, min(size.height, maximumHeight).rounded(.down))
+        }
+
+        let originX = growsRight ? startingFrame.minX : (startingFrame.maxX - size.width)
+        let originY = growsTop ? startingFrame.minY : (startingFrame.maxY - size.height)
+
+        return NSRect(x: originX, y: originY, width: size.width, height: size.height)
     }
 
     private func pushResizeCursorIfNeeded() {
         guard !resizeCursorIsPushed else { return }
-        NSCursor.resizeLeftRight.push()
+        corner.cursor.push()
         resizeCursorIsPushed = true
     }
 
@@ -768,23 +912,33 @@ final class PanelResizeHandleView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
-        let color = NSColor.tertiaryLabelColor.withAlphaComponent(0.80)
-        color.setStroke()
+        let isBottomCorner = corner == .bottomLeft || corner == .bottomRight
+        let alpha: CGFloat = isBottomCorner
+            ? (isHovered ? 0.92 : 0.80)
+            : (isHovered ? 0.85 : 0.36)
+        NSColor.tertiaryLabelColor.withAlphaComponent(alpha).setStroke()
 
         let path = NSBezierPath()
         path.lineWidth = 1.25
         path.lineCapStyle = .round
 
         let inset = PanelMetrics.resizeHandleVisualInset
-        for offset in [5.0, 9.0, 13.0] {
-            path.move(to: NSPoint(
-                x: bounds.maxX - inset - CGFloat(offset),
-                y: bounds.minY + inset
-            ))
-            path.line(to: NSPoint(
-                x: bounds.maxX - inset,
-                y: bounds.minY + inset + CGFloat(offset)
-            ))
+        let offsets: [CGFloat] = isBottomCorner ? [5.0, 9.0, 13.0] : [5.0, 9.0]
+        for offset in offsets {
+            switch corner {
+            case .bottomRight:
+                path.move(to: NSPoint(x: bounds.maxX - inset - offset, y: bounds.minY + inset))
+                path.line(to: NSPoint(x: bounds.maxX - inset, y: bounds.minY + inset + offset))
+            case .bottomLeft:
+                path.move(to: NSPoint(x: bounds.minX + inset + offset, y: bounds.minY + inset))
+                path.line(to: NSPoint(x: bounds.minX + inset, y: bounds.minY + inset + offset))
+            case .topRight:
+                path.move(to: NSPoint(x: bounds.maxX - inset - offset, y: bounds.maxY - inset))
+                path.line(to: NSPoint(x: bounds.maxX - inset, y: bounds.maxY - inset - offset))
+            case .topLeft:
+                path.move(to: NSPoint(x: bounds.minX + inset + offset, y: bounds.maxY - inset))
+                path.line(to: NSPoint(x: bounds.minX + inset, y: bounds.maxY - inset - offset))
+            }
         }
         path.stroke()
     }
@@ -864,7 +1018,12 @@ final class ResizeReadoutView: NSView {
 /// state, and it never becomes a second presentation truth owner.
 private final class WebRestoringOverlayView: NSView {
     private let indicator = NSProgressIndicator()
-    private let label = NSTextField(labelWithString: "Restoring…")
+    private let label = NSTextField(labelWithString: "")
+    fileprivate let reloadButton = NSButton(title: "", target: nil, action: nil)
+    private var slowActionTask: Task<Void, Never>?
+    private var indicatorAnimationActive = false
+    var slowRestoreActionDelay: TimeInterval = 5.0
+    var onReloadRequested: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -881,11 +1040,23 @@ private final class WebRestoringOverlayView: NSView {
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
 
+        reloadButton.target = self
+        reloadButton.action = #selector(reloadPressed(_:))
+        reloadButton.bezelStyle = .rounded
+        reloadButton.controlSize = .small
+        reloadButton.setAccessibilityIdentifier("floatTabs.webRestoring.reload")
+        reloadButton.isHidden = true
+        reloadButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(reloadButton)
+        refreshLocalization()
+
         NSLayoutConstraint.activate([
             indicator.centerXAnchor.constraint(equalTo: centerXAnchor),
             label.centerXAnchor.constraint(equalTo: centerXAnchor),
             indicator.bottomAnchor.constraint(equalTo: centerYAnchor, constant: -6),
             label.topAnchor.constraint(equalTo: centerYAnchor, constant: 10),
+            reloadButton.centerXAnchor.constraint(equalTo: centerXAnchor),
+            reloadButton.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 12),
         ])
     }
 
@@ -894,12 +1065,75 @@ private final class WebRestoringOverlayView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func refreshLocalization() {
+        label.stringValue = L10n.tr("Restoring…", "正在恢复…")
+        reloadButton.title = L10n.tr("Reload", "重新加载")
+    }
+
+    var isReloadActionVisible: Bool {
+        !reloadButton.isHidden && superview != nil && !isHidden
+    }
+
+    func setSlowRestoreActionDelay(_ delay: TimeInterval) {
+        slowRestoreActionDelay = max(0, delay)
+        if indicatorAnimationActive {
+            scheduleSlowRestoreAction()
+        }
+    }
+
     func startIndicatorAnimation() {
         indicator.startAnimation(nil)
+        guard !indicatorAnimationActive else { return }
+        indicatorAnimationActive = true
+        reloadButton.isHidden = true
+        scheduleSlowRestoreAction()
     }
 
     func stopIndicatorAnimation() {
+        indicatorAnimationActive = false
+        slowActionTask?.cancel()
+        slowActionTask = nil
+        reloadButton.isHidden = true
         indicator.stopAnimation(nil)
+    }
+
+    func triggerReload() {
+        guard isReloadActionVisible, reloadButton.isEnabled else { return }
+        reloadButton.isHidden = true
+        scheduleSlowRestoreAction()
+        onReloadRequested?()
+    }
+
+    @objc private func reloadPressed(_ sender: NSButton) {
+        triggerReload()
+    }
+
+    private func scheduleSlowRestoreAction() {
+        slowActionTask?.cancel()
+        slowActionTask = nil
+        guard indicatorAnimationActive, !isHidden, superview != nil else { return }
+        let delay = max(0, slowRestoreActionDelay)
+        if delay == 0 {
+            reloadButton.isHidden = false
+            return
+        }
+        let nanoseconds = UInt64((delay * 1_000_000_000).rounded())
+        slowActionTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: nanoseconds)
+            } catch {
+                return
+            }
+            guard let self,
+                  !Task.isCancelled,
+                  self.indicatorAnimationActive,
+                  !self.isHidden,
+                  self.superview != nil else {
+                return
+            }
+            self.reloadButton.isHidden = false
+            self.slowActionTask = nil
+        }
     }
 
     override func viewDidMoveToSuperview() {
@@ -915,9 +1149,9 @@ private final class WebRestoringOverlayView: NSView {
 /// Native, content-free failure state for a selected configured Slot. Retry
 /// is an explicit user action; the view never schedules another navigation.
 private final class WebLoadFailureView: NSView {
-    private let titleLabel = NSTextField(labelWithString: "Page couldn’t load")
-    private let detailLabel = NSTextField(labelWithString: "Check your connection, then try again.")
-    fileprivate let retryButton = NSButton(title: "Retry", target: nil, action: nil)
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    fileprivate let retryButton = NSButton(title: "", target: nil, action: nil)
     private let stackView: NSStackView
     var onRetry: (() -> Void)?
 
@@ -937,6 +1171,7 @@ private final class WebLoadFailureView: NSView {
         retryButton.target = self
         retryButton.action = #selector(retryPressed(_:))
         retryButton.setAccessibilityIdentifier("floatTabs.webLoadFailure.retry")
+        refreshLocalization()
 
         stackView.orientation = .vertical
         stackView.alignment = .centerX
@@ -961,6 +1196,15 @@ private final class WebLoadFailureView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func refreshLocalization() {
+        titleLabel.stringValue = L10n.tr("Page couldn’t load", "页面无法加载")
+        detailLabel.stringValue = L10n.tr(
+            "Check your connection, then try again.",
+            "请检查网络连接后重试。"
+        )
+        retryButton.title = L10n.tr("Retry", "重试")
+    }
+
     func triggerRetry() {
         guard retryButton.isEnabled else { return }
         onRetry?()
@@ -978,25 +1222,33 @@ final class WebPanelContainerView: NSView {
     private let clipView = NSView()
     private let logicalHostView = NSView()
     private let emptyView = EmptyWebAppView()
-    private let unsupportedBrowserProfileView = UnsupportedBrowserProfileView()
     private let loadFailureView = WebLoadFailureView()
     private let restoringOverlayView = WebRestoringOverlayView()
     private weak var currentContentView: NSView?
     private weak var hostedWebView: WKWebView?
     private weak var activeWebView: WKWebView?
     private var activeSlotID: UUID?
+    private var languageObserver: NSObjectProtocol?
 
     private(set) var websiteLayoutScale: CGFloat = 1
+    var onAddWebAppRequested: (() -> Void)?
     var onRetryRequested: (() -> Void)?
+    var onRestoringReloadRequested: (() -> Void)?
+
+    var emptyStateActionTitleForTesting: String {
+        emptyView.titleText
+    }
+
+    func debugTriggerEmptyStateAddWebApp() {
+        emptyView.performAddWebApp()
+    }
 
     var currentWebView: WKWebView? {
         activeWebView
     }
 
-    var isShowingUnsupportedBrowserProfile: Bool {
-        currentContentView === unsupportedBrowserProfileView
-            && !unsupportedBrowserProfileView.isHidden
-            && !isShowingRestoringState
+    var isRestoringReloadActionVisible: Bool {
+        isShowingRestoringState && restoringOverlayView.isReloadActionVisible
     }
 
     var isShowingLoadFailure: Bool {
@@ -1009,19 +1261,40 @@ final class WebPanelContainerView: NSView {
         loadFailureView.retryButton.isEnabled
     }
 
-    var displayedUnsupportedBrowserProfileName: String? {
-        isShowingUnsupportedBrowserProfile
-            ? unsupportedBrowserProfileView.displayedProfileName
-            : nil
-    }
-
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         configureShell()
+        emptyView.onAddWebApp = { [weak self] in
+            self?.onAddWebAppRequested?()
+        }
         loadFailureView.onRetry = { [weak self] in
             self?.onRetryRequested?()
         }
+        restoringOverlayView.onReloadRequested = { [weak self] in
+            self?.onRestoringReloadRequested?()
+        }
+        languageObserver = NotificationCenter.default.addObserver(
+            forName: .floatTabsLanguageDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshLocalization()
+            }
+        }
         showEmptyState()
+    }
+
+    deinit {
+        if let languageObserver {
+            NotificationCenter.default.removeObserver(languageObserver)
+        }
+    }
+
+    func refreshLocalization() {
+        emptyView.refreshLocalization()
+        loadFailureView.refreshLocalization()
+        restoringOverlayView.refreshLocalization()
     }
 
     convenience init() {
@@ -1127,27 +1400,6 @@ final class WebPanelContainerView: NSView {
         hideRestoringState()
     }
 
-    func showUnsupportedBrowserProfile(
-        profileName: String,
-        defaultProfileName: String = "Default"
-    ) {
-        prepareForNonWebPresentation()
-        unsupportedBrowserProfileView.show(
-            profileName: profileName,
-            defaultProfileName: defaultProfileName
-        )
-
-        if currentContentView !== unsupportedBrowserProfileView
-            || unsupportedBrowserProfileView.superview !== clipView {
-            setContentView(unsupportedBrowserProfileView)
-        }
-        unsupportedBrowserProfileView.isHidden = false
-        bringToFront(unsupportedBrowserProfileView)
-        // An unsupported-profile presentation is terminal for this Slot; any
-        // restoring state it replaces is stale.
-        hideRestoringState()
-    }
-
     func showLoadFailure(retryEnabled: Bool) {
         prepareForNonWebPresentation()
 
@@ -1163,6 +1415,15 @@ final class WebPanelContainerView: NSView {
     func debugTriggerLoadFailureRetry() {
         guard isShowingLoadFailure else { return }
         loadFailureView.triggerRetry()
+    }
+
+    func setSlowRestoreActionDelay(_ delay: TimeInterval) {
+        restoringOverlayView.setSlowRestoreActionDelay(delay)
+    }
+
+    func debugTriggerRestoringReload() {
+        guard isShowingRestoringState else { return }
+        restoringOverlayView.triggerReload()
     }
 
     private func prepareForNonWebPresentation() {

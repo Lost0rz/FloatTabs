@@ -38,17 +38,32 @@ enum AttentionSoundAssetError: LocalizedError, Equatable, Sendable {
     var errorDescription: String? {
         switch self {
         case .notARegularFile:
-            return "Choose a regular audio file."
+            return L10n.tr("Choose a regular audio file.", "请选择常规音频文件。")
         case let .fileTooLarge(maxBytes):
-            return "The audio file is too large. Choose a file no larger than \(maxBytes / 1_048_576) MiB."
+            return L10n.tr(
+                "The audio file is too large. Choose a file no larger than \(maxBytes / 1_048_576) MiB.",
+                "音频文件过大，请选择不超过 \(maxBytes / 1_048_576) MiB 的文件。"
+            )
         case .cannotDecode:
-            return "FloatTabs could not decode that audio file. Choose a WAV, AIFF, MP3, or M4A file that macOS can play."
+            return L10n.tr(
+                "FloatTabs could not decode that audio file. Choose a WAV, AIFF, MP3, or M4A file that macOS can play.",
+                "FloatTabs 无法解码该音频文件，请选择 macOS 可播放的 WAV、AIFF、MP3 或 M4A 文件。"
+            )
         case .invalidDuration:
-            return "The audio file must have a duration greater than zero."
+            return L10n.tr(
+                "The audio file must have a duration greater than zero.",
+                "音频文件时长必须大于 0。"
+            )
         case let .durationTooLong(maxSeconds):
-            return "The audio file is too long. Choose a file no longer than \(Int(maxSeconds)) seconds."
+            return L10n.tr(
+                "The audio file is too long. Choose a file no longer than \(Int(maxSeconds)) seconds.",
+                "音频文件过长，请选择不超过 \(Int(maxSeconds)) 秒的文件。"
+            )
         case .importFailed:
-            return "FloatTabs could not copy the audio file into its managed sound library."
+            return L10n.tr(
+                "FloatTabs could not copy the audio file into its managed sound library.",
+                "FloatTabs 无法将该音频文件复制到托管音效库。"
+            )
         }
     }
 }
@@ -64,7 +79,10 @@ struct AttentionSoundBatchImportError: LocalizedError, Equatable, Sendable {
     var errorDescription: String? {
         let count = failures.count
         let names = failures.map(\.displayName).joined(separator: ", ")
-        return "\(count) file\(count == 1 ? "" : "s") failed to import: \(names)."
+        return L10n.tr(
+            "\(count) file\(count == 1 ? "" : "s") failed to import: \(names).",
+            "\(count) 个文件导入失败：\(names)。"
+        )
     }
 
     var failureReason: String? {

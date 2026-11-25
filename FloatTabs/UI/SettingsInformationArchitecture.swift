@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 enum GlobalSettingsSection: String, Equatable {
     case interfaceAppearance
+    case bookmarks
     case browserProfiles
     case performance
     case readyAlerts
@@ -15,34 +16,39 @@ enum GlobalSettingsSection: String, Equatable {
 
 enum GlobalSettingsPage: CaseIterable, Equatable {
     case general
-    case browserPerformance
-    case audio
+    case bookmarks
+    case profilesStorage
+    case alerts
     case shortcuts
     case advanced
 
     var title: String {
         switch self {
         case .general:
-            return "General"
-        case .browserPerformance:
-            return "Browser"
-        case .audio:
-            return "Audio"
+            return L10n.tr("General", "通用")
+        case .bookmarks:
+            return L10n.tr("Bookmarks", "书签")
+        case .profilesStorage:
+            return L10n.tr("Profiles & Storage", "配置与存储")
+        case .alerts:
+            return L10n.tr("Alerts", "提醒与通知")
         case .shortcuts:
-            return "Shortcuts"
+            return L10n.tr("Shortcuts", "快捷键")
         case .advanced:
-            return "Advanced"
+            return L10n.tr("Advanced", "高级")
         }
     }
 
     var symbol: String {
         switch self {
         case .general:
-            return "circle.lefthalf.filled"
-        case .browserPerformance:
-            return "gauge.with.dots.needle.67percent"
-        case .audio:
-            return "speaker.wave.2"
+            return "slider.horizontal.3"
+        case .bookmarks:
+            return "bookmark"
+        case .profilesStorage:
+            return "person.2.badge.gearshape"
+        case .alerts:
+            return "bell.badge"
         case .shortcuts:
             return "keyboard"
         case .advanced:
@@ -53,11 +59,13 @@ enum GlobalSettingsPage: CaseIterable, Equatable {
     var sections: [GlobalSettingsSection] {
         switch self {
         case .general:
-            return [.interfaceAppearance, .unreadTabAttention]
-        case .browserPerformance:
+            return [.interfaceAppearance]
+        case .bookmarks:
+            return [.bookmarks]
+        case .profilesStorage:
             return [.browserProfiles, .performance]
-        case .audio:
-            return [.readyAlerts]
+        case .alerts:
+            return [.unreadTabAttention, .readyAlerts]
         case .shortcuts:
             return [.shortcuts]
         case .advanced:
@@ -139,8 +147,8 @@ private final class SettingsPageDocumentView: NSView {
 
 @MainActor
 final class BackupRestoreSettingsViewController: NSViewController {
-    let exportButton = NSButton(title: "Export Backup…", target: nil, action: nil)
-    let restoreButton = NSButton(title: "Restore Backup…", target: nil, action: nil)
+    let exportButton = NSButton(title: L10n.tr("Export Backup…", "导出备份…"), target: nil, action: nil)
+    let restoreButton = NSButton(title: L10n.tr("Restore Backup…", "恢复备份…"), target: nil, action: nil)
 
     private let onExportBackup: GlobalSettingsController.ExportBackupHandler
     private let onRestoreBackup: GlobalSettingsController.RestoreBackupHandler
@@ -172,10 +180,20 @@ final class BackupRestoreSettingsViewController: NSViewController {
         actions.spacing = 10
 
         let stack = NSStackView(views: [
-            Self.sectionTitle("Backup & Restore"),
-            Self.detailLabel("Exports settings and Profiles, not website logins or cookies."),
+            Self.sectionTitle(L10n.tr("Backup & Restore", "备份与恢复")),
+            Self.detailLabel(
+                L10n.tr(
+                    "Exports settings and Profiles, not website logins or cookies.",
+                    "导出应用设置与配置，不包含网站登录态或 Cookie。"
+                )
+            ),
             actions,
-            Self.detailLabel("A rollback backup is created before restore."),
+            Self.detailLabel(
+                L10n.tr(
+                    "A rollback backup is created before restore.",
+                    "恢复前会自动创建回滚备份。"
+                )
+            ),
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -195,7 +213,7 @@ final class BackupRestoreSettingsViewController: NSViewController {
     @objc private func exportBackup() {
         guard let window = view.window else { return }
         let panel = NSSavePanel()
-        panel.title = "Export FloatTabs Backup"
+        panel.title = L10n.tr("Export FloatTabs Backup", "导出 FloatTabs 备份")
         panel.nameFieldStringValue = FloatTabsBackupService.suggestedExportFileName()
         panel.canCreateDirectories = true
         panel.allowedContentTypes = [backupContentType]
@@ -204,8 +222,11 @@ final class BackupRestoreSettingsViewController: NSViewController {
             do {
                 try self.onExportBackup(url)
                 self.showMessage(
-                    title: "Backup Exported",
-                    detail: "Your FloatTabs configuration backup was saved successfully."
+                    title: L10n.tr("Backup Exported", "备份已导出"),
+                    detail: L10n.tr(
+                        "Your FloatTabs configuration backup was saved successfully.",
+                        "已成功保存 FloatTabs 配置备份。"
+                    )
                 )
             } catch {
                 self.showError(error)
@@ -216,7 +237,7 @@ final class BackupRestoreSettingsViewController: NSViewController {
     @objc private func restoreBackup() {
         guard let window = view.window else { return }
         let panel = NSOpenPanel()
-        panel.title = "Restore FloatTabs Backup"
+        panel.title = L10n.tr("Restore FloatTabs Backup", "恢复 FloatTabs 备份")
         panel.allowedContentTypes = [backupContentType]
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -234,17 +255,26 @@ final class BackupRestoreSettingsViewController: NSViewController {
         guard let window = view.window else { return }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Replace current FloatTabs configuration?"
-        alert.informativeText = "FloatTabs will create a local rollback backup first, then replace current Slot and global settings with the selected backup. Website login/session data is not changed or restored."
-        alert.addButton(withTitle: "Restore and Replace")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.tr(
+            "Replace current FloatTabs configuration?",
+            "替换当前的 FloatTabs 配置？"
+        )
+        alert.informativeText = L10n.tr(
+            "FloatTabs will create a local rollback backup first, then replace current Slot and global settings with the selected backup. Website login/session data is not changed or restored.",
+            "FloatTabs 会先创建一个本地回滚备份，然后用所选备份替换当前的标签与全局设置。网站的登录状态和会话数据不会被修改或覆盖。"
+        )
+        alert.addButton(withTitle: L10n.tr("Restore and Replace", "恢复并替换"))
+        alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn, let self else { return }
             do {
                 let rollbackURL = try self.onRestoreBackup(url)
                 self.showMessage(
-                    title: "Backup Restored",
-                    detail: "FloatTabs configuration was restored. A rollback backup was saved at:\n\(rollbackURL.path)"
+                    title: L10n.tr("Backup Restored", "备份已恢复"),
+                    detail: L10n.tr(
+                        "FloatTabs configuration was restored. A rollback backup was saved at:\n\(rollbackURL.path)",
+                        "FloatTabs 配置已恢复。回滚备份已保存至：\n\(rollbackURL.path)"
+                    )
                 )
             } catch {
                 self.showError(error)
@@ -257,12 +287,15 @@ final class BackupRestoreSettingsViewController: NSViewController {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = detail
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: L10n.tr("OK", "好"))
         alert.beginSheetModal(for: window)
     }
 
     private func showError(_ error: Error) {
-        showMessage(title: "Backup Operation Failed", detail: error.localizedDescription)
+        showMessage(
+            title: L10n.tr("Backup Operation Failed", "备份操作失败"),
+            detail: error.localizedDescription
+        )
     }
 
     private static func sectionTitle(_ text: String) -> NSTextField {
@@ -296,7 +329,7 @@ final class AboutSettingsViewController: NSViewController {
         displayedLatestFixes = ""
 
         let stack = NSStackView(views: [
-            Self.sectionTitle("About FloatTabs"),
+            Self.sectionTitle(L10n.tr("About FloatTabs", "关于 FloatTabs")),
             versionLabel,
         ])
         stack.orientation = .vertical

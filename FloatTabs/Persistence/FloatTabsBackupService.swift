@@ -7,6 +7,7 @@ struct FloatTabsBackupShortcut: Codable, Equatable {
 
 struct FloatTabsBackupPreferences: Codable, Equatable {
     let appearanceMode: AppAppearanceMode
+    let appLanguage: AppLanguage?
     let followPreferredSize: Bool
     let borderTheme: PanelBorderTheme?
     let customBorderColorHex: String?
@@ -14,12 +15,23 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
     let fixedViewportHeight: Double?
     let isTabRailCollapsed: Bool?
     let menuBarDisplayMode: MenuBarDisplayMode?
+    let attentionStyle: TabAttentionStyle?
+    let attentionPalette: TabAttentionPalette?
     let attentionSoundEnabled: Bool?
     let attentionSoundName: String?
     let attentionSoundVolume: Double?
+    let externalCommandsEnabled: Bool?
 
     var resolvedMenuBarDisplayMode: MenuBarDisplayMode {
         menuBarDisplayMode ?? .iconAndName
+    }
+
+    var resolvedAttentionStyle: TabAttentionStyle {
+        attentionStyle ?? .dot
+    }
+
+    var resolvedAttentionPalette: TabAttentionPalette {
+        attentionPalette ?? .red
     }
 
     var resolvedAttentionSoundEnabled: Bool {
@@ -38,8 +50,17 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
         AppPreferencesStore.normalizedAttentionSoundVolume(attentionSoundVolume ?? 1)
     }
 
+    var resolvedAppLanguage: AppLanguage {
+        appLanguage ?? .system
+    }
+
+    var resolvedExternalCommandsEnabled: Bool {
+        externalCommandsEnabled ?? true
+    }
+
     init(
         appearanceMode: AppAppearanceMode,
+        appLanguage: AppLanguage? = nil,
         followPreferredSize: Bool,
         borderTheme: PanelBorderTheme? = nil,
         customBorderColorHex: String? = nil,
@@ -47,11 +68,15 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
         fixedViewportHeight: Double? = nil,
         isTabRailCollapsed: Bool? = nil,
         menuBarDisplayMode: MenuBarDisplayMode? = nil,
+        attentionStyle: TabAttentionStyle? = nil,
+        attentionPalette: TabAttentionPalette? = nil,
         attentionSoundEnabled: Bool? = nil,
         attentionSoundName: String? = nil,
-        attentionSoundVolume: Double? = nil
+        attentionSoundVolume: Double? = nil,
+        externalCommandsEnabled: Bool? = nil
     ) {
         self.appearanceMode = appearanceMode
+        self.appLanguage = appLanguage
         self.followPreferredSize = followPreferredSize
         self.borderTheme = borderTheme
         self.customBorderColorHex = customBorderColorHex
@@ -59,10 +84,18 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
         self.fixedViewportHeight = fixedViewportHeight
         self.isTabRailCollapsed = isTabRailCollapsed
         self.menuBarDisplayMode = menuBarDisplayMode
+        self.attentionStyle = attentionStyle
+        self.attentionPalette = attentionPalette
         self.attentionSoundEnabled = attentionSoundEnabled
         self.attentionSoundName = attentionSoundName
         self.attentionSoundVolume = attentionSoundVolume
+        self.externalCommandsEnabled = externalCommandsEnabled
     }
+}
+
+struct FloatTabsNamedBackupShortcut: Codable, Equatable {
+    let name: String
+    let shortcut: FloatTabsBackupShortcut?
 }
 
 struct FloatTabsBackupDocument: Codable, Equatable {
@@ -75,6 +108,30 @@ struct FloatTabsBackupDocument: Codable, Equatable {
     let webAppState: StoredWebAppState
     let globalPreferences: FloatTabsBackupPreferences
     let globalShowHideShortcut: FloatTabsBackupShortcut?
+    let appShortcuts: [FloatTabsNamedBackupShortcut]?
+    let websiteCachePolicy: WebsiteCachePolicy?
+
+    init(
+        schemaVersion: Int,
+        createdAt: Date,
+        sourceAppVersion: String,
+        sourceBuild: String,
+        webAppState: StoredWebAppState,
+        globalPreferences: FloatTabsBackupPreferences,
+        globalShowHideShortcut: FloatTabsBackupShortcut?,
+        appShortcuts: [FloatTabsNamedBackupShortcut]? = nil,
+        websiteCachePolicy: WebsiteCachePolicy? = nil
+    ) {
+        self.schemaVersion = schemaVersion
+        self.createdAt = createdAt
+        self.sourceAppVersion = sourceAppVersion
+        self.sourceBuild = sourceBuild
+        self.webAppState = webAppState
+        self.globalPreferences = globalPreferences
+        self.globalShowHideShortcut = globalShowHideShortcut
+        self.appShortcuts = appShortcuts
+        self.websiteCachePolicy = websiteCachePolicy
+    }
 }
 
 enum FloatTabsBackupError: LocalizedError, Equatable {
@@ -87,15 +144,30 @@ enum FloatTabsBackupError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case let .unsupportedSchema(version):
-            return "This FloatTabs backup uses unsupported backup schema version \(version)."
+            return L10n.tr(
+                "This FloatTabs backup uses unsupported backup schema version \(version).",
+                "此 FloatTabs 备份使用了不受支持的备份架构版本 \(version)。"
+            )
         case let .unsupportedWebAppStateVersion(version):
-            return "This backup contains unsupported Web App state version \(version)."
+            return L10n.tr(
+                "This backup contains unsupported Web App state version \(version).",
+                "此备份包含不受支持的网页应用状态版本 \(version)。"
+            )
         case let .mismatchedVersions(schemaVersion, webAppStateVersion):
-            return "This backup combines unsupported schema/state versions (\(schemaVersion)/\(webAppStateVersion))."
+            return L10n.tr(
+                "This backup combines unsupported schema/state versions (\(schemaVersion)/\(webAppStateVersion)).",
+                "此备份包含不匹配的架构/状态版本（\(schemaVersion)/\(webAppStateVersion)）。"
+            )
         case .restoreFailed:
-            return "FloatTabs could not replace the current configuration. The rollback backup was kept."
+            return L10n.tr(
+                "FloatTabs could not replace the current configuration. The rollback backup was kept.",
+                "FloatTabs 无法替换当前配置，已保留回滚备份。"
+            )
         case .startupRecoveryFailed:
-            return "FloatTabs could not safely preserve and replace the unreadable startup configuration. The original profile store remains protected."
+            return L10n.tr(
+                "FloatTabs could not safely preserve and replace the unreadable startup configuration. The original profile store remains protected.",
+                "FloatTabs 无法安全保存并替换无法读取的启动配置，原始配置文件仍受保护。"
+            )
         }
     }
 }
@@ -210,7 +282,9 @@ struct FloatTabsBackupService {
             sourceBuild: document.sourceBuild,
             webAppState: normalizedState,
             globalPreferences: document.globalPreferences,
-            globalShowHideShortcut: document.globalShowHideShortcut
+            globalShowHideShortcut: document.globalShowHideShortcut,
+            appShortcuts: document.appShortcuts,
+            websiteCachePolicy: document.websiteCachePolicy
         )
     }
 

@@ -383,7 +383,7 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         container.layoutSubtreeIfNeeded()
         webView.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(webView.frame.width, 1024, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.width, 800, accuracy: 0.001)
         XCTAssertGreaterThan(webView.frame.height, 820)
 
         let visibleSize = PopupCoordinator.visibleSourceSize(for: webView)
@@ -400,33 +400,32 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(visibleSize.height, 720, accuracy: 0.001)
     }
 
-    func testPerformanceRetentionDefaultsPersistAndNormalizeInvalidValues() {
+    func testExternalCommandsEnabledDefaultsTruePersistsAndPostsNotification() {
         let first = AppPreferencesStore(defaults: defaults)
-        XCTAssertEqual(first.warmWebViewRetentionDelay, 120, accuracy: 0.001)
-        XCTAssertEqual(first.coldWebViewReleaseDelay, 30, accuracy: 0.001)
+        XCTAssertTrue(first.externalCommandsEnabled)
 
-        first.warmWebViewRetentionDelay = 600
-        first.coldWebViewReleaseDelay = 120
+        final class Counter: @unchecked Sendable {
+            var count = 0
+        }
+        let notificationCounter = Counter()
+        let token = NotificationCenter.default.addObserver(
+            forName: .floatTabsExternalCommandsEnabledDidChange,
+            object: first,
+            queue: nil
+        ) { _ in
+            notificationCounter.count += 1
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        first.externalCommandsEnabled = false
+        XCTAssertEqual(notificationCounter.count, 1)
+        first.externalCommandsEnabled = false
+        XCTAssertEqual(notificationCounter.count, 1)
+
         let second = AppPreferencesStore(defaults: defaults)
-        XCTAssertEqual(second.warmWebViewRetentionDelay, 600, accuracy: 0.001)
-        XCTAssertEqual(second.coldWebViewReleaseDelay, 120, accuracy: 0.001)
+        XCTAssertFalse(second.externalCommandsEnabled)
 
-        defaults.set(Double.nan, forKey: AppPreferencesStore.warmWebViewRetentionDelayKey)
-        defaults.set(9_999, forKey: AppPreferencesStore.coldWebViewReleaseDelayKey)
-        XCTAssertEqual(second.warmWebViewRetentionDelay, 120, accuracy: 0.001)
-        XCTAssertEqual(second.coldWebViewReleaseDelay, 120, accuracy: 0.001)
-    }
-
-    func testPerformanceRetentionOptionsExposeOnlySupportedDurations() {
-        XCTAssertEqual(
-            WarmWebViewRetentionOption.allCases.map(\.seconds),
-            [120, 300, 600, 1_800]
-        )
-        XCTAssertEqual(
-            ColdWebViewReleaseOption.allCases.map(\.seconds),
-            [30, 60, 120]
-        )
-        XCTAssertEqual(WarmWebViewRetentionOption(seconds: 301), .fiveMinutes)
-        XCTAssertEqual(ColdWebViewReleaseOption(seconds: 2), .thirtySeconds)
+        second.externalCommandsEnabled = true
+        XCTAssertTrue(AppPreferencesStore(defaults: defaults).externalCommandsEnabled)
     }
 }

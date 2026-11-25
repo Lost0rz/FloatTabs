@@ -13,15 +13,15 @@ enum BrowserProfileColorPreset: String, CaseIterable, Codable, Equatable {
 
     var displayName: String {
         switch self {
-        case .blue: return "Blue"
-        case .purple: return "Purple"
-        case .pink: return "Pink"
-        case .red: return "Red"
-        case .orange: return "Orange"
-        case .yellow: return "Yellow"
-        case .green: return "Green"
-        case .graphite: return "Graphite"
-        case .custom: return "Custom…"
+        case .blue: return L10n.tr("Blue", "蓝色")
+        case .purple: return L10n.tr("Purple", "紫色")
+        case .pink: return L10n.tr("Pink", "粉色")
+        case .red: return L10n.tr("Red", "红色")
+        case .orange: return L10n.tr("Orange", "橙色")
+        case .yellow: return L10n.tr("Yellow", "黄色")
+        case .green: return L10n.tr("Green", "绿色")
+        case .graphite: return L10n.tr("Graphite", "石墨灰")
+        case .custom: return L10n.tr("Custom…", "自定义…")
         }
     }
 }

@@ -1119,10 +1119,9 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(
             actionTitles,
             [
-                "Return to Home", "Reload", "Lock Current Icon", "Unlock Icon",
-                "Refresh & Choose Icon", "Shared by tabs on this website",
+                "Return to Home", "Reload", "Save to Bookmarks…",
                 "Website Mode", "Window Size", "Zoom", "Profile",
-                "Open in New Tab with Profile", "Runtime Retention", "Background Media",
+                "Runtime Retention", "Background Media",
                 "Edit Web App…", "Remove Web App…",
             ]
         )
@@ -1149,12 +1148,13 @@ final class ExternalShellTests: XCTestCase {
             menu.item(withTitle: "Background Media")?.submenu?.items.map(\.title),
             ["Pause When Inactive", "Allow Background Audio"]
         )
+        let profileMenu = try! XCTUnwrap(menu.item(withTitle: "Profile")?.submenu)
         XCTAssertEqual(
-            menu.item(withTitle: "Profile")?.submenu?.items.map(\.title),
-            ["Default", "", "Manage Profiles…"]
+            profileMenu.items.map(\.title),
+            ["Default", "", "Open in New Tab with Profile", "Manage Profiles…"]
         )
         XCTAssertEqual(
-            menu.item(withTitle: "Open in New Tab with Profile")?.submenu?.items.map(\.title),
+            profileMenu.item(withTitle: "Open in New Tab with Profile")?.submenu?.items.map(\.title),
             ["Default"]
         )
         XCTAssertFalse(actionTitles.contains("Rename…"))
@@ -2471,7 +2471,7 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(hitDuringRestore?.isDescendant(of: hotWebView) ?? false)
     }
 
-    func testEmptyAndUnsupportedPresentationsClearStaleRestoringState() {
+    func testEmptyAndFailurePresentationsClearStaleRestoringState() {
         let container = WebPanelContainerView(
             frame: NSRect(x: 0, y: 0, width: 600, height: 800)
         )
@@ -2481,14 +2481,6 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertTrue(container.isShowingRestoringState)
         container.showEmptyState()
         XCTAssertFalse(container.isShowingRestoringState)
-
-        container.showRestoringState()
-        container.showUnsupportedBrowserProfile(
-            profileName: "Custom",
-            defaultProfileName: "Default"
-        )
-        XCTAssertFalse(container.isShowingRestoringState)
-        XCTAssertFalse(container.isShowingLoadFailure)
 
         container.showRestoringState()
         container.showLoadFailure(retryEnabled: true)
@@ -3927,6 +3919,390 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(summonedFrameOnB.size, positionedFrameOnA.size)
 
         controller.hideFloatTabs()
+    }
+
+    func testPostCommitInteractiveReadinessDismissesRestoringWhenSubresourcesStall() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (_, pool, controller, profile) = try makePhase6Harness(
+            slotName: "InteractiveReady",
+            diagnostics: diagnostics
+        )
+        pool.hibernate(slotID: profile.id)
+        controller.showFloatTabs()
+        drainMainThreadTurns()
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        let webView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        controller.handleSlotNavigationStart(
+            slotID: profile.id,
+            runtimeIdentity: identity,
+            navigationGeneration: 1
+        )
+
+        // Stale runtime or superseded generation cannot dismiss Restoring.
+        controller.handleSlotNavigationInteractiveReady(
+            slotID: profile.id,
+            runtimeIdentity: WebRuntimeDiagnosticIdentity(
+                runtimeGeneration: identity.runtimeGeneration &+ 99,
+                webViewInstanceID: UUID()
+            ),
+            navigationGeneration: 1
+        )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        // Interactive readiness for the exact current runtime & generation reveals
+        // the committed page without waiting for subresource didFinish.
+        controller.handleSlotNavigationInteractiveReady(
+            slotID: profile.id,
+            runtimeIdentity: identity,
+            navigationGeneration: 1
+        )
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: profile.id), "ready")
+        XCTAssertTrue(controller.debugPresentedWebView === webView)
+        XCTAssertTrue(controller.debugCurrentWebFocusWebView === webView)
+        let readinessCompleted = try XCTUnwrap(
+            writer.events.last {
+                $0.event == "panel.materialization.readiness_completed"
+                    && $0.fields["slot_id"] == .string(profile.id.uuidString)
+            }
+        )
+        XCTAssertEqual(
+            readinessCompleted.fields["readiness_source"],
+            .string("post_commit_interactive")
+        )
+
+        // Late didFinish on the same generation stays idempotent.
+        controller.handleSlotNavigationFinish(
+            slotID: profile.id,
+            runtimeIdentity: identity,
+            navigationGeneration: 1
+        )
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertEqual(controller.debugRuntimeReadiness(for: profile.id), "ready")
+        XCTAssertTrue(controller.debugPresentedWebView === webView)
+        XCTAssertTrue(controller.debugCurrentWebFocusWebView === webView)
+    }
+
+    func testSlowRestoringOverlayRevealsExplicitReloadEscapeWithoutAutoLooping() async throws {
+        var initialLoadCount = 0
+        let (_, pool, controller, profile) = try makePhase6Harness(
+            slotName: "SlowRestoreReload",
+            initialLoad: { _, _ in initialLoadCount += 1 }
+        )
+        controller.debugSetRestoringSlowActionDelay(0.02)
+        pool.hibernate(slotID: profile.id)
+        let baselineLoads = initialLoadCount
+
+        controller.showFloatTabs()
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        for _ in 0..<40 where !controller.debugIsShowingRestoringReloadAction {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+        XCTAssertNotNil(pool.existingWebView(for: profile.id))
+        XCTAssertTrue(controller.debugIsShowingRestoringReloadAction)
+
+        controller.debugTriggerRestoringReload()
+        XCTAssertEqual(initialLoadCount, baselineLoads + 1)
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        controller.handleSlotNavigationFinish(
+            slotID: profile.id,
+            runtimeIdentity: identity
+        )
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertFalse(controller.debugIsShowingRestoringReloadAction)
+    }
+
+    func testShowFloatTabsOrdersSourceWindowSynchronouslyAlongsideShell() throws {
+        let (_, pool, controller, profile) = try makePhase6Harness(slotName: "SyncShow")
+        let webView = try pool.webView(for: profile)
+        let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        controller.handleSlotNavigationStart(
+            slotID: profile.id,
+            runtimeIdentity: identity,
+            navigationGeneration: 1
+        )
+        controller.handleSlotNavigationFinish(
+            slotID: profile.id,
+            runtimeIdentity: identity,
+            navigationGeneration: 1
+        )
+
+        controller.showFloatTabs()
+        defer { controller.hideFloatTabs() }
+
+        XCTAssertTrue(controller.isVisible)
+        XCTAssertTrue(controller.debugSourceWindowIsVisible)
+        XCTAssertTrue(controller.debugPresentedWebView === webView)
+        XCTAssertEqual(
+            controller.debugSourceWindowAccessibilityDocument,
+            "https://syncshow.example.com/"
+        )
+
+        controller.hideFloatTabs()
+        XCTAssertNil(controller.debugSourceWindowAccessibilityDocument)
+    }
+
+    func testSystemCredentialHelperBundleIdentifiersAreExemptFromAutoHide() {
+        XCTAssertTrue(
+            PanelController.isSystemCredentialHelperBundleIdentifier("com.apple.Passwords")
+        )
+        XCTAssertTrue(
+            PanelController.isSystemCredentialHelperBundleIdentifier("com.apple.AutoFillPanelService")
+        )
+        XCTAssertTrue(
+            PanelController.isSystemCredentialHelperBundleIdentifier("com.apple.CoreAuthUI")
+        )
+        XCTAssertTrue(
+            PanelController.isSystemCredentialHelperBundleIdentifier("com.apple.SecurityAgent")
+        )
+        XCTAssertFalse(
+            PanelController.isSystemCredentialHelperBundleIdentifier("com.apple.Safari")
+        )
+        XCTAssertFalse(
+            PanelController.isSystemCredentialHelperBundleIdentifier("com.google.Chrome")
+        )
+    }
+
+    func testCancelledProvisionalNavigationOnCommittedTabPreservesReadyPresentation() throws {
+        let initialURL = URL(string: "https://committed.example.com/app")!
+        let store = TabStore(repository: MemoryProfileRepository())
+        let profile = try XCTUnwrap(
+            store.add(name: "CancelledNav", homeURL: initialURL)
+        )
+        let committedPool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            committedURLProvider: { _ in initialURL }
+        )
+        let committedController = PanelController(
+            tabStore: store,
+            webViewPool: committedPool,
+            attentionCoordinator: WebAttentionCoordinator()
+        )
+        let committedWebView = try committedPool.webView(for: profile)
+        let observer = try XCTUnwrap(committedWebView.navigationDelegate as? SlotNavigationObserver)
+        committedWebView.navigationDelegate = nil
+
+        let firstNav = try XCTUnwrap(
+            committedWebView.loadHTMLString("<html><body>nav1</body></html>", baseURL: initialURL)
+        )
+        observer.webView(committedWebView, didStartProvisionalNavigation: firstNav)
+        observer.webView(committedWebView, didCommit: firstNav)
+        observer.webView(committedWebView, didFinish: firstNav)
+
+        committedController.showFloatTabs()
+        defer { committedController.hideFloatTabs() }
+        XCTAssertEqual(committedController.debugRuntimeReadiness(for: profile.id), "ready")
+        XCTAssertFalse(committedController.debugIsShowingLoadFailure)
+
+        // Start a second navigation (e.g. SPA cancel or download handoff) and cancel it.
+        let secondNav = try XCTUnwrap(
+            committedWebView.loadHTMLString("<html><body>nav2</body></html>", baseURL: initialURL)
+        )
+        observer.webView(committedWebView, didStartProvisionalNavigation: secondNav)
+        XCTAssertEqual(committedController.debugRuntimeReadiness(for: profile.id), "loading")
+
+        observer.webView(
+            committedWebView,
+            didFailProvisionalNavigation: secondNav,
+            withError: NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+        )
+        XCTAssertEqual(committedController.debugRuntimeReadiness(for: profile.id), "ready")
+        XCTAssertFalse(committedController.debugIsShowingLoadFailure)
+        XCTAssertTrue(committedController.debugPresentedWebView === committedWebView)
+    }
+
+    func testStatusItemControllerDynamicMenuPinAndSlotSelection() throws {
+        let slotA = UUID()
+        let slotB = UUID()
+        var isPinned = true
+        var pinToggles = 0
+        var selectedSlots: [UUID] = []
+
+        let controller = StatusItemController(
+            onToggle: {},
+            isVisible: { false },
+            onSettings: {},
+            onQuit: {},
+            menuSnapshotProvider: {
+                StatusItemMenuSnapshot(
+                    slots: [
+                        StatusItemSlotMenuEntry(id: slotA, title: "ChatGPT", isSelected: true, isUnread: false),
+                        StatusItemSlotMenuEntry(id: slotB, title: "Claude", isSelected: false, isUnread: true),
+                    ],
+                    isPinned: isPinned
+                )
+            },
+            onSelectSlot: { selectedSlots.append($0) },
+            onTogglePin: { pinToggles += 1 }
+        )
+
+        let menu = controller.rebuildMenu()
+        let pinIndex = menu.indexOfItem(withTitle: "Pin Window")
+        XCTAssertGreaterThanOrEqual(pinIndex, 0)
+        XCTAssertEqual(menu.item(at: pinIndex)?.state, .on)
+
+        let slotAIndex = menu.indexOfItem(withTitle: "ChatGPT")
+        let slotBIndex = menu.indexOfItem(withTitle: "Claude")
+        XCTAssertGreaterThanOrEqual(slotAIndex, 0)
+        XCTAssertGreaterThanOrEqual(slotBIndex, 0)
+        XCTAssertEqual(menu.item(at: slotAIndex)?.state, .on)
+        XCTAssertNil(menu.item(at: slotAIndex)?.image)
+        XCTAssertEqual(menu.item(at: slotBIndex)?.state, .off)
+        XCTAssertNotNil(menu.item(at: slotBIndex)?.image)
+        XCTAssertEqual(menu.item(at: slotBIndex)?.accessibilityLabel(), "Claude · Unread response")
+
+        menu.performActionForItem(at: pinIndex)
+        menu.performActionForItem(at: slotBIndex)
+        XCTAssertEqual(pinToggles, 1)
+        XCTAssertEqual(selectedSlots, [slotB])
+
+        isPinned = false
+        let rebuilt = controller.rebuildMenu()
+        XCTAssertEqual(rebuilt.item(withTitle: "Pin Window")?.state, .off)
+    }
+
+    func testWebAppEditorMakeValuePreservesRuntimeRetentionAndBrowserProfile() {
+        let browserProfileID = UUID()
+        let rendering = WebRenderingProfile.canonicalDefault
+            .settingWebsiteMode(.mobile)
+            .settingSimplePreset(.large)
+            .settingZoom(1.25)
+        let value = WebAppEditorController.makeValue(
+            name: "Claude",
+            url: URL(string: "https://claude.ai")!,
+            homeURLSchemeWasInferred: false,
+            renderingProfile: rendering,
+            browserProfileID: browserProfileID,
+            runtimeRetentionPreference: .keepLoaded
+        )
+
+        XCTAssertEqual(value.name, "Claude")
+        XCTAssertEqual(value.renderingProfile, rendering)
+        XCTAssertEqual(value.browserProfileID, browserProfileID)
+        XCTAssertEqual(value.runtimeRetentionPreference, .keepLoaded)
+    }
+
+    func testExternalControlZoneSetPresentationVisiblePausesAndResumesAttentionAnimations() throws {
+        let profile = makeProfile(order: 0, name: "ChatGPT")
+        let zone = ExternalControlZoneView(frame: NSRect(x: 0, y: 0, width: 120, height: 400))
+        zone.apply(profiles: [profile], activeTabID: nil)
+        zone.setAttentionStyle(.pulse, palette: .blue)
+        zone.setUnreadSlotIDs([profile.id])
+        let tabView = try XCTUnwrap(zone.tabView(for: profile.id))
+        tabView.setAttentionStyleReduceMotionOverride(false)
+        zone.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(tabView.attentionSurfaceMotionIsActive)
+
+        zone.setPresentationVisible(false)
+        XCTAssertFalse(tabView.attentionSurfaceMotionIsActive)
+
+        zone.setPresentationVisible(true)
+        XCTAssertTrue(tabView.attentionSurfaceMotionIsActive)
+    }
+
+    func testAllFourWebCornersProvideResizeHitTargetsInSourceHostAndRootView() {
+        let root = PanelRootView()
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
+
+        let webFrame = root.webViewportLayoutView.frame
+        let rootCorners = [
+            NSPoint(x: webFrame.minX + 6, y: webFrame.maxY - 6),
+            NSPoint(x: webFrame.maxX - 6, y: webFrame.maxY - 6),
+            NSPoint(x: webFrame.minX + 6, y: webFrame.minY + 6),
+            NSPoint(x: webFrame.maxX - 6, y: webFrame.minY + 6),
+        ]
+        for point in rootCorners {
+            XCTAssertTrue(
+                root.hitTest(point) is PanelResizeHandleView,
+                "Expected corner \(point) in PanelRootView to hit PanelResizeHandleView"
+            )
+        }
+
+        let shell = FloatingPanel(
+            contentRect: NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        )
+        shell.contentView = root
+        let host = FullscreenSourceHostController(
+            container: root.webPanelContainerView,
+            topLeftResizeHandle: root.topLeftResizeHandleView,
+            topRightResizeHandle: root.topRightResizeHandleView,
+            resizeHandle: root.resizeHandleView,
+            resizeReadout: root.resizeReadoutView,
+            shellWindow: shell
+        )
+        let sourceContent = try! XCTUnwrap(host.window.contentView)
+        sourceContent.frame = NSRect(origin: .zero, size: PanelMetrics.defaultViewportSize)
+        sourceContent.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(
+            sourceContent.hitTest(NSPoint(x: 6, y: sourceContent.bounds.maxY - 6))
+                === root.topLeftResizeHandleView
+        )
+        XCTAssertTrue(
+            sourceContent.hitTest(NSPoint(x: sourceContent.bounds.maxX - 6, y: sourceContent.bounds.maxY - 6))
+                === root.topRightResizeHandleView
+        )
+        XCTAssertTrue(
+            sourceContent.hitTest(NSPoint(x: 6, y: 6)) === host.railFoldControl
+        )
+        XCTAssertTrue(
+            sourceContent.hitTest(NSPoint(x: sourceContent.bounds.maxX - 6, y: 6))
+                === root.resizeHandleView
+        )
+    }
+
+    func testRailFoldControlDistinguishesClickToggleFromBottomLeftDragResize() {
+        let initialFrame = NSRect(x: 300, y: 200, width: 688, height: 844)
+        let shell = FloatingPanel(contentRect: initialFrame)
+        shell.setFrame(initialFrame, display: false)
+        let root = PanelRootView()
+        root.frame = NSRect(origin: .zero, size: initialFrame.size)
+        shell.contentView = root
+        let host = FullscreenSourceHostController(
+            container: root.webPanelContainerView,
+            topLeftResizeHandle: root.topLeftResizeHandleView,
+            topRightResizeHandle: root.topRightResizeHandleView,
+            resizeHandle: root.resizeHandleView,
+            resizeReadout: root.resizeReadoutView,
+            shellWindow: shell
+        )
+
+        var foldCount = 0
+        var resizeEndedCount = 0
+        host.railFoldControl.onActivate = { foldCount += 1 }
+        host.onResizeEnded = { resizeEndedCount += 1 }
+
+        // Short click (< 4pt movement) toggles Tab Rail without resizing or ending resize.
+        host.railFoldControl.beginPointerInteraction(atScreenLocation: NSPoint(x: 390, y: 220))
+        host.railFoldControl.updatePointerInteraction(atScreenLocation: NSPoint(x: 391, y: 221))
+        host.railFoldControl.finishPointerInteraction()
+        XCTAssertEqual(foldCount, 1)
+        XCTAssertEqual(resizeEndedCount, 0)
+        XCTAssertEqual(shell.frame, initialFrame)
+        XCTAssertTrue(root.resizeReadoutView.isHidden)
+
+        // Dragging bottom-left resizes the panel while keeping top-right anchored and does not fold rail.
+        host.railFoldControl.beginPointerInteraction(atScreenLocation: NSPoint(x: 390, y: 220))
+        host.railFoldControl.updatePointerInteraction(atScreenLocation: NSPoint(x: 340, y: 180))
+        XCTAssertFalse(root.resizeReadoutView.isHidden)
+        XCTAssertEqual(shell.frame.maxX, initialFrame.maxX, accuracy: 0.001)
+        XCTAssertEqual(shell.frame.maxY, initialFrame.maxY, accuracy: 0.001)
+        XCTAssertEqual(shell.frame.width, initialFrame.width + 50, accuracy: 0.001)
+        XCTAssertEqual(shell.frame.height, initialFrame.height + 40, accuracy: 0.001)
+
+        host.railFoldControl.finishPointerInteraction()
+        XCTAssertEqual(foldCount, 1)
+        XCTAssertEqual(resizeEndedCount, 1)
+        XCTAssertTrue(root.resizeReadoutView.isHidden)
     }
 }
 

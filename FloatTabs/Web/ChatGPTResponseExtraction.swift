@@ -51,12 +51,23 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
             "stop",
             "stop generating",
             "stop generating response",
-            "stop streaming"
+            "stop response",
+            "stop streaming",
+            "停止",
+            "停止生成",
+            "停止回答",
+            "停止流式传输",
+            "停止输出",
+            "停止响应"
           ]);
           const RESPONSE_ACTION_LABELS = new Set([
             "regenerate",
             "regenerate response",
-            "regenerate answer"
+            "regenerate answer",
+            "retry",
+            "重新生成",
+            "重新生成回复",
+            "重试"
           ]);
           const RESPONSE_CONTENT_SELECTOR =
             'h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,table,' +
@@ -92,20 +103,22 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
             if (!element
                 || !element.matches
                 || !element.matches('button,[role="button"]')
-                || !isRendered(element)
                 || !isEnabled(element)) {
               return false;
             }
-            return ["aria-label", "title"].some((attribute) =>
+            const hasMatchingLabel = ["aria-label", "title"].some((attribute) =>
               RESPONSE_ACTION_LABELS.has(
                 normalizedSemanticLabel(element.getAttribute(attribute))
               )
             );
+            return hasMatchingLabel && isRendered(element);
           };
 
           const responseActions = (root) => {
             const controls = [root].concat(
-              Array.from(root.querySelectorAll('button,[role="button"]'))
+              Array.from(root.querySelectorAll(
+                'button[aria-label],button[title],[role="button"][aria-label],[role="button"][title]'
+              ))
             );
             return controls.filter(isResponseAction);
           };
@@ -122,8 +135,8 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
             }
             candidates.push(...Array.from(root.querySelectorAll(RESPONSE_CONTENT_SELECTOR)));
             return candidates.some(
-              (element) => isRendered(element)
-                && !element.closest(RESPONSE_EXCLUDED_SELECTOR)
+              (element) => !element.closest(RESPONSE_EXCLUDED_SELECTOR)
+                && isRendered(element)
             );
           };
 
@@ -150,6 +163,11 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
           const CONTENT_UNIT_SELECTOR = '[data-content-search-unit-key]';
           const ASSISTANT_CONTENT_UNIT_MARKER_SELECTOR =
             '[data-conversation-role="assistant"],[data-chatgpt-agent-turn-start]';
+          const COMBINED_ASSISTANT_CANDIDATE_SELECTOR =
+            ASSISTANT_ROLE_MARKER_SELECTOR +
+            ',[data-testid*="conversation-turn"][data-turn="assistant"]' +
+            ',[data-testid*="conversation-turn"],' +
+            CONTENT_UNIT_SELECTOR;
 
           const isAssistantSemanticConversationTurn = (turn) => {
             if (!turn || !turn.matches
@@ -177,8 +195,8 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
             candidates.push(...Array.from(unit.querySelectorAll(RESPONSE_CONTENT_SELECTOR)));
             return candidates.some((element) =>
               element.closest(CONTENT_UNIT_SELECTOR) === unit
-                && isRendered(element)
                 && !element.closest(RESPONSE_EXCLUDED_SELECTOR)
+                && isRendered(element)
             );
           };
 
@@ -186,22 +204,54 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
             unit
               && unit.matches
               && unit.matches(CONTENT_UNIT_SELECTOR)
-              && isRendered(unit)
               && !isComposerContainer(unit)
               && !hasNonAssistantOwnershipMarker(unit)
               && hasMarkerWithinContentUnit(
                 unit,
                 ASSISTANT_CONTENT_UNIT_MARKER_SELECTOR
               )
+              && isRendered(unit)
               && hasResponseContentWithinContentUnit(unit)
           );
 
           const isPositiveAssistantRoot = (root) => Boolean(
             root
-              && isRendered(root)
               && !isComposerContainer(root)
               && !hasNonAssistantOwnershipMarker(root)
+              && isRendered(root)
           );
+
+          const isPositiveAssistantCandidate = (candidate) => {
+            if (!candidate || !candidate.matches) return false;
+            if ((candidate.matches(ASSISTANT_ROLE_MARKER_SELECTOR)
+                 || isAssistantSemanticConversationTurn(candidate))
+                && isPositiveAssistantRoot(candidate)) {
+              return true;
+            }
+            if (candidate.matches(CONTENT_UNIT_SELECTOR)
+                && isAssistantContentUnit(candidate)) {
+              return true;
+            }
+            return false;
+          };
+
+          const hasNarrowerPositiveAssistantDescendant = (candidate) => {
+            if (!candidate || typeof candidate.querySelectorAll !== 'function') {
+              return false;
+            }
+            const descendants = candidate.querySelectorAll(
+              COMBINED_ASSISTANT_CANDIDATE_SELECTOR
+            );
+            for (let index = 0; index < descendants.length; index += 1) {
+              const other = descendants[index];
+              if (other !== candidate
+                  && isPositiveAssistantCandidate(other)
+                  && hasResponseContent(other)) {
+                return true;
+              }
+            }
+            return false;
+          };
 
           const nearestSemanticConversationTurn = (element) => {
             let ancestor = element && element.parentElement;
@@ -221,18 +271,23 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
           // so Regenerate fallback requires a positive semantic turn boundary.
           // Never widen that ownership to a generic ancestor.
           const latestRegenerateOwnedResponse = () => {
-            const controls = Array.from(
-              document.querySelectorAll('button,[role="button"]')
-            ).filter((element) => isResponseAction(element));
+            if (typeof document.querySelector === 'function'
+                && !document.querySelector('[data-testid*="conversation-turn"]')) {
+              return null;
+            }
+            const controls = document.querySelectorAll(
+              'button[aria-label],button[title],[role="button"][aria-label],[role="button"][title]'
+            );
             for (let index = controls.length - 1; index >= 0; index -= 1) {
               const control = controls[index];
+              if (!isResponseAction(control)) continue;
               const turn = nearestSemanticConversationTurn(control);
               if (turn
-                  && isRendered(turn)
                   && !isComposerContainer(turn)
+                  && !hasNonAssistantOwnershipMarker(turn)
+                  && isRendered(turn)
                   && responseActions(turn).length === 1
-                  && hasResponseContent(turn)
-                  && !hasNonAssistantOwnershipMarker(turn)) {
+                  && hasResponseContent(turn)) {
                 return turn;
               }
             }
@@ -251,43 +306,12 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
           };
 
           const positiveAssistantRoots = () => {
-            const candidates = [];
-            const seen = new Set();
-            const addCandidate = (root) => {
-              if (!isPositiveAssistantRoot(root) || seen.has(root)) return;
-              seen.add(root);
-              candidates.push(root);
-            };
-
-            Array.from(document.querySelectorAll(ASSISTANT_ROLE_MARKER_SELECTOR))
-              .forEach(addCandidate);
-
-            Array.from(document.querySelectorAll(
-              '[data-testid*="conversation-turn"][data-turn="assistant"]'
-            )).forEach(addCandidate);
-
-            Array.from(document.querySelectorAll('[data-testid*="conversation-turn"]'))
-              .filter(isAssistantSemanticConversationTurn)
-              .forEach(addCandidate);
-
-            Array.from(document.querySelectorAll(CONTENT_UNIT_SELECTOR))
-              .filter(isAssistantContentUnit)
-              .forEach(addCandidate);
-
-            const narrowed = candidates.filter((candidate) =>
-              !candidates.some((other) =>
-                other !== candidate
-                  && candidate.contains(other)
-                  && hasResponseContent(other)
-              )
+            const candidates = Array.from(
+              document.querySelectorAll(COMBINED_ASSISTANT_CANDIDATE_SELECTOR)
+            ).filter(isPositiveAssistantCandidate);
+            return candidates.filter((candidate) =>
+              !hasNarrowerPositiveAssistantDescendant(candidate)
             );
-            return narrowed.sort((left, right) => {
-              if (left === right) return 0;
-              const position = left.compareDocumentPosition(right);
-              if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
-              if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
-              return 0;
-            });
           };
 
           const assistantResponseRoots = () => {
@@ -298,22 +322,37 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
           };
 
           const assistantResponseRootFor = (eventTarget) => {
-            const element = eventTarget && eventTarget.nodeType === Node.ELEMENT_NODE
+            let cursor = eventTarget && eventTarget.nodeType === Node.ELEMENT_NODE
               ? eventTarget
               : eventTarget?.parentElement;
-            if (!element) return null;
-            const containingRoots = positiveAssistantRoots().filter(
-              (root) => root === element || root.contains(element)
-            );
-            return containingRoots.reduce((selected, candidate) => {
-              if (!selected || selected.contains(candidate)) return candidate;
-              return selected;
-            }, null);
+            while (cursor
+                   && cursor !== document.body
+                   && cursor !== document.documentElement) {
+              if (typeof cursor.matches === 'function'
+                  && cursor.matches(COMBINED_ASSISTANT_CANDIDATE_SELECTOR)
+                  && isPositiveAssistantCandidate(cursor)) {
+                if (!hasNarrowerPositiveAssistantDescendant(cursor)) {
+                  return cursor;
+                }
+                return null;
+              }
+              cursor = cursor.parentElement;
+            }
+            return null;
           };
 
           const latestAssistantResponseRoot = () => {
-            const roots = assistantResponseRoots();
-            return roots.length ? roots[roots.length - 1] : null;
+            const candidates = document.querySelectorAll(
+              COMBINED_ASSISTANT_CANDIDATE_SELECTOR
+            );
+            for (let index = candidates.length - 1; index >= 0; index -= 1) {
+              const candidate = candidates[index];
+              if (isPositiveAssistantCandidate(candidate)
+                  && !hasNarrowerPositiveAssistantDescendant(candidate)) {
+                return candidate;
+              }
+            }
+            return latestRegenerateOwnedResponse();
           };
 
           const isGenerating = () => {
@@ -500,9 +539,16 @@ enum ChatGPTResponseExtraction {
             return false;
           };
 
+          const WHEEL_SCROLL_COALESCE_MS = 200;
+          let lastWheelScrollAt = -WHEEL_SCROLL_COALESCE_MS;
+
           document.addEventListener('wheel', (event) => {
+            if (!event.isTrusted) return;
+            const now = Date.now();
+            if (now - lastWheelScrollAt < WHEEL_SCROLL_COALESCE_MS) return;
+            lastWheelScrollAt = now;
             if (event.isTrusted) postManualScroll();
-          }, true);
+          }, { capture: true, passive: true });
           document.addEventListener('keydown', (event) => {
             if (event.isTrusted
                 && isScrollKey(event)
@@ -516,11 +562,19 @@ enum ChatGPTResponseExtraction {
             if (assistantRoot) {
               postTrustedAssistantPointer(assistantRoot);
             }
-            const root = document.documentElement;
-            const likelyScrollbar = event.clientX >= root.clientWidth
-              || event.clientY >= root.clientHeight;
-            if (likelyScrollbar) postManualScroll();
-          }, true);
+            const nearRightEdge = typeof window.innerWidth !== 'number'
+              || event.clientX >= window.innerWidth - 24;
+            const nearBottomEdge = typeof window.innerHeight !== 'number'
+              || event.clientY >= window.innerHeight - 24;
+            if (nearRightEdge || nearBottomEdge) {
+              const root = document.documentElement;
+              const likelyScrollbar = root && (
+                event.clientX >= root.clientWidth
+                || event.clientY >= root.clientHeight
+              );
+              if (likelyScrollbar) postManualScroll();
+            }
+          }, { capture: true, passive: true });
 
           globalThis.__floatTabsChatGPTResponseIdentitySnapshotV1 = () => {
             const latestRoot = latestAssistantResponseRoot();

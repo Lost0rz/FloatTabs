@@ -180,7 +180,10 @@ enum RuntimeDiagnosticPrivacy {
         _ event: RuntimeDiagnosticEvent,
         mode: RuntimeDiagnosticMode = .verbose
     ) -> RuntimeDiagnosticEvent {
-        RuntimeDiagnosticEvent(
+        if event.isPrivacySanitized {
+            return event
+        }
+        return RuntimeDiagnosticEvent(
             schemaVersion: event.schemaVersion,
             timestamp: event.timestamp,
             uptime: event.uptime,
@@ -190,7 +193,8 @@ enum RuntimeDiagnosticPrivacy {
             level: event.level,
             subsystem: event.subsystem,
             event: event.event,
-            fields: sanitize(fields: event.fields, mode: mode)
+            fields: sanitize(fields: event.fields, mode: mode),
+            isPrivacySanitized: true
         )
     }
 

@@ -87,7 +87,6 @@ final class BrowserProfileBackupTests: XCTestCase {
         }
     ) -> WebViewPool {
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             defaultStoreResolver: { WKWebsiteDataStore.nonPersistent() },
             customStoreResolver: customStoreResolver
         )

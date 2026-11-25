@@ -682,6 +682,103 @@ final class PanelMovementHitTestingTests: XCTestCase {
             "430.0 × 820.0 px  ·  W/H 0.5"
         )
     }
+
+    func testFourCornerResizedFrameAnchorsOppositeCornerAndClampsMinimumAndVisibleBounds() {
+        let starting = NSRect(x: 300, y: 200, width: 600, height: 700)
+        let visible = NSRect(x: 100, y: 50, width: 1200, height: 1000)
+
+        let topLeftGrown = PanelResizeHandleView.resizedFrame(
+            startingFrame: starting,
+            deltaX: -60,
+            deltaY: 80,
+            corner: .topLeft,
+            visibleFrame: visible
+        )
+        XCTAssertEqual(topLeftGrown, NSRect(x: 240, y: 200, width: 660, height: 780))
+
+        let topRightGrown = PanelResizeHandleView.resizedFrame(
+            startingFrame: starting,
+            deltaX: 50,
+            deltaY: 40,
+            corner: .topRight,
+            visibleFrame: visible
+        )
+        XCTAssertEqual(topRightGrown, NSRect(x: 300, y: 200, width: 650, height: 740))
+
+        let bottomLeftGrown = PanelResizeHandleView.resizedFrame(
+            startingFrame: starting,
+            deltaX: -40,
+            deltaY: -50,
+            corner: .bottomLeft,
+            visibleFrame: visible
+        )
+        XCTAssertEqual(bottomLeftGrown, NSRect(x: 260, y: 150, width: 640, height: 750))
+
+        let bottomRightGrown = PanelResizeHandleView.resizedFrame(
+            startingFrame: starting,
+            deltaX: 30,
+            deltaY: -20,
+            corner: .bottomRight,
+            visibleFrame: visible
+        )
+        XCTAssertEqual(bottomRightGrown, NSRect(x: 300, y: 180, width: 630, height: 720))
+
+        // Shrinking beyond minimum keeps opposite corner anchored rather than drifting.
+        let topLeftClampedMin = PanelResizeHandleView.resizedFrame(
+            startingFrame: starting,
+            deltaX: 900,
+            deltaY: -900,
+            corner: .topLeft,
+            visibleFrame: visible
+        )
+        XCTAssertEqual(topLeftClampedMin.size, PanelMetrics.minimumPanelSize)
+        XCTAssertEqual(topLeftClampedMin.maxX, starting.maxX, accuracy: 0.001)
+        XCTAssertEqual(topLeftClampedMin.minY, starting.minY, accuracy: 0.001)
+
+        // Growing past visibleFrame stays within screen bounds while preserving anchor.
+        let topLeftClampedScreen = PanelResizeHandleView.resizedFrame(
+            startingFrame: starting,
+            deltaX: -500,
+            deltaY: 600,
+            corner: .topLeft,
+            visibleFrame: visible
+        )
+        XCTAssertEqual(topLeftClampedScreen.minX, visible.minX, accuracy: 0.001)
+        XCTAssertEqual(topLeftClampedScreen.maxY, visible.maxY, accuracy: 0.001)
+        XCTAssertEqual(topLeftClampedScreen.maxX, starting.maxX, accuracy: 0.001)
+        XCTAssertEqual(topLeftClampedScreen.minY, starting.minY, accuracy: 0.001)
+    }
+
+    func testInnerMovementExcludesAllFourCornerResizeRegions() {
+        let bounds = NSRect(origin: .zero, size: PanelMetrics.defaultViewportSize)
+        let dragRects = WebSourceEdgeDragView.dragRects(in: bounds)
+
+        let cornerPoints = [
+            NSPoint(x: bounds.minX + 6, y: bounds.maxY - 6), // topLeft
+            NSPoint(x: bounds.maxX - 6, y: bounds.maxY - 6), // topRight
+            NSPoint(x: bounds.minX + 20, y: bounds.minY + 20), // bottomLeft
+            NSPoint(x: bounds.maxX - 20, y: bounds.minY + 20), // bottomRight
+        ]
+        for cornerPoint in cornerPoints {
+            XCTAssertFalse(
+                dragRects.contains(where: { $0.contains(cornerPoint) }),
+                "Edge drag band must exclude corner point \(cornerPoint)"
+            )
+        }
+
+        let midEdgePoints = [
+            NSPoint(x: bounds.midX, y: bounds.maxY - 6),
+            NSPoint(x: bounds.midX, y: bounds.minY + 6),
+            NSPoint(x: bounds.minX + 6, y: bounds.midY),
+            NSPoint(x: bounds.maxX - 6, y: bounds.midY),
+        ]
+        for midEdgePoint in midEdgePoints {
+            XCTAssertTrue(
+                dragRects.contains(where: { $0.contains(midEdgePoint) }),
+                "Edge drag band must remain active at middle edge \(midEdgePoint)"
+            )
+        }
+    }
 }
 
 private extension NSRect {

@@ -288,11 +288,30 @@ struct RuntimeDiagnosticCheckpointDeltaTracker: Sendable {
     }
 }
 
+struct RuntimeDiagnosticsSessionSummary: Equatable, Sendable {
+    let mode: RuntimeDiagnosticMode
+    let sessionID: UUID
+    let sessionEventCount: Int
+    let sessionWarningCount: Int
+    let sessionErrorCount: Int
+    let sessionIncidentEventCount: Int
+}
+
+struct RuntimeDiagnosticsLiveStatusSnapshot: Equatable, Sendable {
+    let diagnosticsSummary: RuntimeDiagnosticsSessionSummary
+    let residentSlotCount: Int
+    let totalSlotCount: Int
+    let activeSlotName: String?
+    let hostResidentSizeBytes: UInt64?
+}
+
 @MainActor
 final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
     typealias TimestampProvider = () -> Date
     typealias UptimeProvider = () -> TimeInterval
     typealias ModeProvider = @MainActor () -> RuntimeDiagnosticMode
+
+    static let recentSessionBufferCapacity = 400
 
     private let writer: any RuntimeDiagnosticWriting
     private let sessionID: UUID
@@ -305,6 +324,11 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
     )
     private var nextSequence: UInt64 = 1
     private var checkpointDeltaTracker = RuntimeDiagnosticCheckpointDeltaTracker()
+    private var recentSessionEvents: [RuntimeDiagnosticEvent] = []
+    private var sessionEventCount = 0
+    private var sessionWarningCount = 0
+    private var sessionErrorCount = 0
+    private var sessionIncidentEventCount = 0
 
     private static let staticEnvironmentFieldNames: Set<String> = [
         "app_version",
@@ -432,12 +456,98 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
             level: level,
             subsystem: subsystem,
             event: event,
-            fields: eventFields
+            fields: eventFields,
+            isPrivacySanitized: true
         )
         nextSequence += 1
+        sessionEventCount += 1
+        switch level {
+        case .warning:
+            sessionWarningCount += 1
+        case .error, .fault:
+            sessionErrorCount += 1
+        case .debug, .info, .notice:
+            break
+        }
+        if diagnosticEvent.isIncidentRelated {
+            sessionIncidentEventCount += 1
+        }
+        recentSessionEvents.append(diagnosticEvent)
+        if recentSessionEvents.count > Self.recentSessionBufferCapacity {
+            recentSessionEvents.removeFirst(
+                recentSessionEvents.count - Self.recentSessionBufferCapacity
+            )
+        }
         log(diagnosticEvent)
         writer.enqueue(diagnosticEvent)
         return diagnosticEvent
+    }
+
+    func sessionSummary() -> RuntimeDiagnosticsSessionSummary {
+        RuntimeDiagnosticsSessionSummary(
+            mode: mode,
+            sessionID: sessionID,
+            sessionEventCount: sessionEventCount,
+            sessionWarningCount: sessionWarningCount,
+            sessionErrorCount: sessionErrorCount,
+            sessionIncidentEventCount: sessionIncidentEventCount
+        )
+    }
+
+    func recentEventsSnapshot(limit: Int = RuntimeDiagnostics.recentSessionBufferCapacity) -> [RuntimeDiagnosticEvent] {
+        guard limit > 0 else { return [] }
+        return Array(recentSessionEvents.suffix(limit))
+    }
+
+    func loadRecentCombinedEvents(
+        limit: Int = RuntimeDiagnostics.recentSessionBufferCapacity,
+        completion: @escaping @MainActor ([RuntimeDiagnosticEvent]) -> Void
+    ) {
+        let boundedLimit = max(0, limit)
+        guard boundedLimit > 0 else {
+            completion([])
+            return
+        }
+        let inMemory = recentEventsSnapshot(limit: boundedLimit)
+        writer.readRecentEvents(limit: boundedLimit) { diskEvents in
+            Task { @MainActor in
+                let combined = Self.mergedUniqueEvents(
+                    diskEvents: diskEvents,
+                    inMemoryEvents: inMemory,
+                    limit: boundedLimit
+                )
+                completion(combined)
+            }
+        }
+    }
+
+    private static func mergedUniqueEvents(
+        diskEvents: [RuntimeDiagnosticEvent],
+        inMemoryEvents: [RuntimeDiagnosticEvent],
+        limit: Int
+    ) -> [RuntimeDiagnosticEvent] {
+        struct EventKey: Hashable {
+            let sessionID: UUID
+            let sequence: UInt64
+        }
+        var byKey: [EventKey: RuntimeDiagnosticEvent] = [:]
+        byKey.reserveCapacity(diskEvents.count + inMemoryEvents.count)
+        for event in diskEvents {
+            byKey[EventKey(sessionID: event.sessionID, sequence: event.sequence)] = event
+        }
+        for event in inMemoryEvents {
+            byKey[EventKey(sessionID: event.sessionID, sequence: event.sequence)] = event
+        }
+        let sorted = byKey.values.sorted { lhs, rhs in
+            if lhs.timestamp != rhs.timestamp {
+                return lhs.timestamp < rhs.timestamp
+            }
+            if lhs.sessionID == rhs.sessionID {
+                return lhs.sequence < rhs.sequence
+            }
+            return lhs.uptime < rhs.uptime
+        }
+        return Array(sorted.suffix(limit))
     }
 
     private static func isPeriodicSample(_ event: String) -> Bool {

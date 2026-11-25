@@ -36,11 +36,11 @@ final class BrowserProfileSwitchTests: XCTestCase {
 
         XCTAssertEqual(
             profileMenu.items.filter { !$0.isSeparatorItem }.map(\.title),
-            ["Default", "Company", "Personal", "Manage Profiles…"]
+            ["Default", "Company", "Personal", "Open in New Tab with Profile", "Manage Profiles…"]
         )
         XCTAssertTrue(profileMenu.items[2].state == .on)
-        XCTAssertTrue(profileMenu.items[4].target === tab)
-        XCTAssertEqual(profileMenu.items[4].title, "Manage Profiles…")
+        XCTAssertTrue(profileMenu.items[5].target === tab)
+        XCTAssertEqual(profileMenu.items[5].title, "Manage Profiles…")
     }
 
     func testRenamedDefaultAppearsDynamicallyInMenusHoverAccessibilityAndTooltip() throws {
@@ -62,11 +62,11 @@ final class BrowserProfileSwitchTests: XCTestCase {
         let menu = try XCTUnwrap(tab.menu(for: makeMenuEvent()))
         let profileMenu = try XCTUnwrap(menu.item(withTitle: "Profile")?.submenu)
         let duplicateMenu = try XCTUnwrap(
-            menu.item(withTitle: "Open in New Tab with Profile")?.submenu
+            profileMenu.item(withTitle: "Open in New Tab with Profile")?.submenu
         )
 
         XCTAssertEqual(profileMenu.items.filter { !$0.isSeparatorItem }.map(\.title), [
-            "Jack", "Company", "Manage Profiles…"
+            "Jack", "Company", "Open in New Tab with Profile", "Manage Profiles…"
         ])
         XCTAssertEqual(duplicateMenu.items.map(\.title), ["Jack", "Company"])
         XCTAssertEqual(profileMenu.items[0].state, .on)
@@ -447,16 +447,14 @@ final class BrowserProfileSwitchTests: XCTestCase {
         XCTAssertTrue(repository.events.isEmpty)
     }
 
-    func testMissingOrUnsupportedProfileFailsClosedWithoutDefaultFallback() throws {
+    func testMissingTargetProfileFailsClosedWithoutDefaultFallback() throws {
         let repository = StageFProfileRepository()
         let store = TabStore(repository: repository)
-        let unsupportedProfile = try XCTUnwrap(store.createBrowserProfile(name: "Company"))
         let slot = try XCTUnwrap(store.add(name: "Web App", homeURL: homeURL))
         repository.events.removeAll()
         var defaultResolverCalls = 0
         var customResolverCalls = 0
         let pool = makePool(
-            customProfilesSupported: false,
             defaultStoreResolver: {
                 defaultResolverCalls += 1
                 return WKWebsiteDataStore.nonPersistent()
@@ -479,12 +477,6 @@ final class BrowserProfileSwitchTests: XCTestCase {
                 targetProfileID: missingID
             )
         )
-        XCTAssertFalse(
-            controller.requestBrowserProfileSwitch(
-                slotID: slot.id,
-                targetProfileID: unsupportedProfile.id
-            )
-        )
         XCTAssertNil(store.profiles.first?.browserProfileID)
         XCTAssertTrue(pool.existingWebView(for: slot.id) === oldWebView)
         XCTAssertEqual(defaultResolverCalls, 0)
@@ -500,7 +492,6 @@ final class BrowserProfileSwitchTests: XCTestCase {
                 currentProfileID: nil,
                 targetProfileID: targetID,
                 targetExists: true,
-                customProfilesSupported: true,
                 sessionIsLocked: true
             )
         )
@@ -509,7 +500,6 @@ final class BrowserProfileSwitchTests: XCTestCase {
                 currentProfileID: currentID,
                 targetProfileID: currentID,
                 targetExists: true,
-                customProfilesSupported: false,
                 sessionIsLocked: true
             )
         )
@@ -551,7 +541,6 @@ final class BrowserProfileSwitchTests: XCTestCase {
     }
 
     private func makePool(
-        customProfilesSupported: Bool = true,
         defaultStoreResolver: @escaping () -> WKWebsiteDataStore = {
             WKWebsiteDataStore.nonPersistent()
         },
@@ -561,7 +550,6 @@ final class BrowserProfileSwitchTests: XCTestCase {
         initialLoad: @escaping WebViewPool.LoadHandler = { _, _ in }
     ) -> WebViewPool {
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { customProfilesSupported },
             defaultStoreResolver: defaultStoreResolver,
             customStoreResolver: customStoreResolver
         )

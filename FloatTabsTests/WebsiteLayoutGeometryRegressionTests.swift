@@ -46,21 +46,36 @@ final class WebsiteLayoutGeometryRegressionTests: XCTestCase {
             }
         }
 
-        // Medium maps to the balanced 1024-class with an integral height.
+        // Small clamps to the 600pt floor with an integral height.
+        let small = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: CGSize(width: 420, height: 760),
+            websiteMode: .desktop
+        )
+        XCTAssertEqual(small.width, 600, accuracy: 0.001)
+        XCTAssertEqual(small.height, 1086, accuracy: 0.001)
+
+        // Medium maps to 800 CSS width (scale = 0.75) with an integral height.
         let medium = WebsiteLayoutViewport.logicalSize(
             forVisibleSize: CGSize(width: 600, height: 820),
             websiteMode: .desktop
         )
-        XCTAssertEqual(medium.width, 1024, accuracy: 0.001)
-        XCTAssertEqual(medium.height, 1400, accuracy: 0.001)
+        XCTAssertEqual(medium.width, 800, accuracy: 0.001)
+        XCTAssertEqual(medium.height, 1094, accuracy: 0.001)
 
-        // Large maps to the standard 1280-class with an integral height.
+        // Large caps at the 1024 CSS desktop breakpoint with an integral height.
         let large = WebsiteLayoutViewport.logicalSize(
             forVisibleSize: CGSize(width: 820, height: 850),
             websiteMode: .desktop
         )
-        XCTAssertEqual(large.width, 1280, accuracy: 0.001)
-        XCTAssertEqual(large.height, 1327, accuracy: 0.001)
+        XCTAssertEqual(large.width, 1024, accuracy: 0.001)
+        XCTAssertEqual(large.height, 1062, accuracy: 0.001)
+
+        // Wide (>= 1024) renders natively 1:1.
+        let wide = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: CGSize(width: 1080, height: 850),
+            websiteMode: .desktop
+        )
+        XCTAssertEqual(wide, CGSize(width: 1080, height: 850))
 
         // Mobile stays exactly 1:1 with the visible surface.
         let mobileVisible = CGSize(width: 600.0, height: 820.0)
@@ -120,7 +135,7 @@ final class WebsiteLayoutGeometryRegressionTests: XCTestCase {
         container.layoutSubtreeIfNeeded()
 
         let logicalFrame = webView.frame
-        XCTAssertEqual(logicalFrame.width, 1024, accuracy: 0.001)
+        XCTAssertEqual(logicalFrame.width, 800, accuracy: 0.001)
 
         for _ in 0..<3 {
             container.layoutSubtreeIfNeeded()
@@ -142,7 +157,7 @@ final class WebsiteLayoutGeometryRegressionTests: XCTestCase {
         container.setFrameSize(largeVisible)
         container.layoutSubtreeIfNeeded()
         webView.layoutSubtreeIfNeeded()
-        XCTAssertEqual(webView.frame.width, 1280, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.width, 1024, accuracy: 0.001)
 
         container.setFrameSize(mediumVisible)
         container.layoutSubtreeIfNeeded()
@@ -257,7 +272,7 @@ final class WebsiteLayoutGeometryRegressionTests: XCTestCase {
             forVisibleSize: mediumVisible,
             websiteMode: .desktop
         )
-        XCTAssertEqual(logical.width, 1024, accuracy: 0.001)
+        XCTAssertEqual(logical.width, 800, accuracy: 0.001)
 
         WebsiteLayoutViewport.oneToOneViewportOverrideEnabled = true
         let oneToOne = WebsiteLayoutViewport.logicalSize(

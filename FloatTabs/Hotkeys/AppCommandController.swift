@@ -146,43 +146,50 @@ struct AppShortcutBinding {
 }
 
 enum AppShortcutCatalog {
-    static let slotBindings: [AppShortcutBinding] = [
-        .init(title: "Select Slot 1", command: .selectSlot(1), name: .selectSlot1),
-        .init(title: "Select Slot 2", command: .selectSlot(2), name: .selectSlot2),
-        .init(title: "Select Slot 3", command: .selectSlot(3), name: .selectSlot3),
-        .init(title: "Select Slot 4", command: .selectSlot(4), name: .selectSlot4),
-        .init(title: "Select Slot 5", command: .selectSlot(5), name: .selectSlot5),
-        .init(title: "Select Slot 6", command: .selectSlot(6), name: .selectSlot6),
-        .init(title: "Select Slot 7", command: .selectSlot(7), name: .selectSlot7),
-        .init(title: "Select Slot 8", command: .selectSlot(8), name: .selectSlot8),
-        .init(title: "Select Slot 9", command: .selectSlot(9), name: .selectSlot9),
-    ]
+    static var slotBindings: [AppShortcutBinding] {
+        [
+            .init(title: L10n.tr("Select Tab 1", "选择标签 1"), command: .selectSlot(1), name: .selectSlot1),
+            .init(title: L10n.tr("Select Tab 2", "选择标签 2"), command: .selectSlot(2), name: .selectSlot2),
+            .init(title: L10n.tr("Select Tab 3", "选择标签 3"), command: .selectSlot(3), name: .selectSlot3),
+            .init(title: L10n.tr("Select Tab 4", "选择标签 4"), command: .selectSlot(4), name: .selectSlot4),
+            .init(title: L10n.tr("Select Tab 5", "选择标签 5"), command: .selectSlot(5), name: .selectSlot5),
+            .init(title: L10n.tr("Select Tab 6", "选择标签 6"), command: .selectSlot(6), name: .selectSlot6),
+            .init(title: L10n.tr("Select Tab 7", "选择标签 7"), command: .selectSlot(7), name: .selectSlot7),
+            .init(title: L10n.tr("Select Tab 8", "选择标签 8"), command: .selectSlot(8), name: .selectSlot8),
+            .init(title: L10n.tr("Select Tab 9", "选择标签 9"), command: .selectSlot(9), name: .selectSlot9),
+        ]
+    }
 
-    static let navigationBindings: [AppShortcutBinding] = [
-        .init(title: "Next Slot", command: .nextSlot, name: .nextSlot),
-        .init(title: "Previous Slot", command: .previousSlot, name: .previousSlot),
-        .init(title: "Add Web App", command: .addWebApp, name: .addWebApp),
-        .init(title: "Address Bar", command: .addressBar, name: .addressBar),
-        .init(title: "Return Home", command: .returnHome, name: .returnHome),
-        .init(title: "Reload", command: .reload, name: .reload),
-        .init(
-            title: "Toggle Conversation / Web Focus",
-            command: .togglePrimaryFocus,
-            name: .togglePrimaryFocus
-        ),
-    ]
+    static var navigationBindings: [AppShortcutBinding] {
+        [
+            .init(title: L10n.tr("Next Tab", "下一个标签"), command: .nextSlot, name: .nextSlot),
+            .init(title: L10n.tr("Previous Tab", "上一个标签"), command: .previousSlot, name: .previousSlot),
+            .init(title: L10n.tr("Add Web App", "添加网页应用"), command: .addWebApp, name: .addWebApp),
+            .init(title: L10n.tr("Address Bar", "地址栏"), command: .addressBar, name: .addressBar),
+            .init(title: L10n.tr("Return Home", "返回主页"), command: .returnHome, name: .returnHome),
+            .init(title: L10n.tr("Reload", "重新加载"), command: .reload, name: .reload),
+            .init(
+                title: L10n.tr("Toggle Conversation / Web Focus", "切换输入/网页焦点"),
+                command: .togglePrimaryFocus,
+                name: .togglePrimaryFocus
+            ),
+        ]
+    }
 
-    static let viewBindings: [AppShortcutBinding] = [
-        .init(title: "Zoom In", command: .zoomIn, name: .zoomIn),
-        .init(title: "Zoom Out", command: .zoomOut, name: .zoomOut),
-        .init(title: "Reset Zoom", command: .resetZoom, name: .resetZoom),
-        .init(title: "Pin / Auto-hide", command: .togglePin, name: .togglePin),
-    ]
+    static var viewBindings: [AppShortcutBinding] {
+        [
+            .init(title: L10n.tr("Zoom In", "放大页面"), command: .zoomIn, name: .zoomIn),
+            .init(title: L10n.tr("Zoom Out", "缩小页面"), command: .zoomOut, name: .zoomOut),
+            .init(title: L10n.tr("Reset Zoom", "实际大小"), command: .resetZoom, name: .resetZoom),
+            .init(title: L10n.tr("Pin / Auto-hide", "置顶 / 自动隐藏"), command: .togglePin, name: .togglePin),
+        ]
+    }
 
-
-    static let applicationBindings: [AppShortcutBinding] = [
-        .init(title: "Global Settings", command: .settings, name: .floatTabsSettings),
-    ]
+    static var applicationBindings: [AppShortcutBinding] {
+        [
+            .init(title: L10n.tr("Global Settings", "全局设置"), command: .settings, name: .floatTabsSettings),
+        ]
+    }
 
     static var allBindings: [AppShortcutBinding] {
         slotBindings
@@ -259,15 +266,18 @@ enum AppShortcutCatalog {
 final class AppCommandController {
     private var monitor: Any?
     private let isEnabled: () -> Bool
+    private let presentedAddressOverlayProvider: (() -> AddressOverlayView?)?
     private let onCommand: (AppCommand) -> Void
     private let diagnostics: any RuntimeDiagnosticRecording
 
     init(
         isEnabled: @escaping () -> Bool,
+        presentedAddressOverlayProvider: (() -> AddressOverlayView?)? = nil,
         onCommand: @escaping (AppCommand) -> Void,
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
     ) {
         self.isEnabled = isEnabled
+        self.presentedAddressOverlayProvider = presentedAddressOverlayProvider
         self.onCommand = onCommand
         self.diagnostics = diagnostics
 
@@ -280,7 +290,12 @@ final class AppCommandController {
         ) { [weak self] event in
             guard let self else { return event }
 
-            if let overlay = Self.presentedAddressOverlay(in: event.window ?? NSApp.keyWindow),
+            let overlay = if let provider = self.presentedAddressOverlayProvider {
+                provider()
+            } else {
+                Self.presentedAddressOverlay(in: event.window ?? NSApp.keyWindow)
+            }
+            if let overlay,
                Self.shouldDismissAddressBar(for: event, overlay: overlay) {
                 overlay.dismiss()
                 overlay.onDismiss?()

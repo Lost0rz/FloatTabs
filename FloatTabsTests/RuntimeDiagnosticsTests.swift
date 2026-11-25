@@ -808,6 +808,211 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         XCTAssertEqual(sleeper.requestedIntervals, [60])
     }
 
+    func testPreSanitizedEventSkipsDuplicatePrivacyWalkWhileDirectWriterStillSanitizes() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(
+            mode: .verbose,
+            writer: writer,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        let recorded = try XCTUnwrap(
+            diagnostics.record(
+                event: "diagnostics.fastpath",
+                level: .notice,
+                subsystem: "diagnostics",
+                fields: [
+                    "url": .string("https://example.com/private?token=abc"),
+                    "access_token": .string("secret-value"),
+                    "latency_ms": .integer(42)
+                ]
+            )
+        )
+        XCTAssertTrue(recorded.isPrivacySanitized)
+        XCTAssertEqual(recorded.fields["url"], .string("https://example.com/private"))
+        XCTAssertNil(recorded.fields["access_token"])
+        XCTAssertEqual(recorded.fields["latency_ms"], .integer(42))
+
+        let lineText = try XCTUnwrap(String(data: XCTUnwrap(writer.lines.first), encoding: .utf8))
+        XCTAssertFalse(lineText.contains("isPrivacySanitized"))
+        XCTAssertFalse(lineText.contains("is_privacy_sanitized"))
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(RuntimeDiagnosticEvent.self, from: XCTUnwrap(writer.lines.first))
+        XCTAssertEqual(decoded, recorded)
+        XCTAssertFalse(decoded.isPrivacySanitized)
+
+        let rawEvent = RuntimeDiagnosticEvent(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            uptime: 10,
+            sequence: 99,
+            sessionID: UUID(),
+            traceID: nil,
+            level: .notice,
+            subsystem: "tests",
+            event: "tests.direct_writer",
+            fields: [
+                "url": .string("https://192.168.1.50/admin?token=xyz"),
+                "token": .string("secret"),
+                "safe": .string("ok")
+            ],
+            isPrivacySanitized: false
+        )
+        writer.enqueue(rawEvent)
+        let sanitizedWritten = try XCTUnwrap(writer.events.last)
+        XCTAssertTrue(sanitizedWritten.isPrivacySanitized)
+        XCTAssertNil(sanitizedWritten.fields["url"])
+        XCTAssertNil(sanitizedWritten.fields["token"])
+        XCTAssertEqual(sanitizedWritten.fields["safe"], .string("ok"))
+    }
+
+    func testLoadRecentCombinedEventsDeduplicatesAndSummarizesCounts() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-combined-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let oldSession = UUID()
+        let firstWriter = RuntimeDiagnosticWriter(directory: directory, debounceInterval: 0.01)
+        firstWriter.enqueue(
+            RuntimeDiagnosticEvent(
+                timestamp: Date(timeIntervalSince1970: 1_700_000_001),
+                uptime: 1,
+                sequence: 1,
+                sessionID: oldSession,
+                traceID: nil,
+                level: .notice,
+                subsystem: "app",
+                event: "app.launch",
+                fields: [:]
+            )
+        )
+        let firstFlushed = expectation(description: "first session flushed")
+        firstWriter.requestFinalFlush(timeout: 2) { firstFlushed.fulfill() }
+        await fulfillment(of: [firstFlushed], timeout: 3)
+
+        let liveWriter = RuntimeDiagnosticWriter(directory: directory, debounceInterval: 60)
+        let diagnostics = RuntimeDiagnostics(
+            mode: .standard,
+            writer: liveWriter,
+            timestamp: { Date(timeIntervalSince1970: 1_700_000_010) }
+        )
+        diagnostics.record(event: "navigation.commit", level: .info, subsystem: "navigation")
+        diagnostics.record(
+            event: "navigation.failed",
+            level: .warning,
+            subsystem: "navigation",
+            fields: ["error_category": .string("network")]
+        )
+        diagnostics.record(
+            event: "web_runtime.post_finish_stall_detected",
+            level: .warning,
+            subsystem: "web",
+            fields: ["incident_id": .string(UUID().uuidString)]
+        )
+
+        let summary = diagnostics.sessionSummary()
+        XCTAssertEqual(summary.sessionEventCount, 3)
+        XCTAssertEqual(summary.sessionWarningCount, 2)
+        XCTAssertEqual(summary.sessionErrorCount, 0)
+        XCTAssertEqual(summary.sessionIncidentEventCount, 1)
+
+        let combined: [RuntimeDiagnosticEvent] = await withCheckedContinuation { continuation in
+            diagnostics.loadRecentCombinedEvents(limit: 20) { events in
+                continuation.resume(returning: events)
+            }
+        }
+        XCTAssertEqual(combined.map(\.event), [
+            "app.launch",
+            "navigation.commit",
+            "navigation.failed",
+            "web_runtime.post_finish_stall_detected"
+        ])
+
+        let closing = expectation(description: "live writer closed")
+        liveWriter.requestFinalFlush(timeout: 2) { closing.fulfill() }
+        await fulfillment(of: [closing], timeout: 3)
+    }
+
+    func testViewerFiltersAndConciseSummaryFormatSanitizedMetrics() {
+        let slotID = UUID(uuidString: "11223344-5566-7788-99AA-BBCCDDEEFF00")!
+        let navEvent = RuntimeDiagnosticEvent(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_001),
+            uptime: 1,
+            sequence: 1,
+            sessionID: UUID(),
+            traceID: nil,
+            level: .debug,
+            subsystem: "navigation",
+            event: "navigation.finished",
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "provisional_to_finish_ms": .integer(420),
+                "url": .string("https://chatgpt.com")
+            ]
+        )
+        let cacheEvent = RuntimeDiagnosticEvent(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_002),
+            uptime: 2,
+            sequence: 2,
+            sessionID: UUID(),
+            traceID: nil,
+            level: .notice,
+            subsystem: "storage",
+            event: "storage.cache_cleanup.completed",
+            fields: [
+                "cleaned_profile_count": .integer(2),
+                "released_bytes": .integer(4096),
+                "duration_ms": .integer(18)
+            ]
+        )
+        let stallEvent = RuntimeDiagnosticEvent(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_003),
+            uptime: 3,
+            sequence: 3,
+            sessionID: UUID(),
+            traceID: nil,
+            level: .warning,
+            subsystem: "web",
+            event: "web_runtime.post_finish_stall_detected",
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "incident_kind": .string("post_finish_stall"),
+                "stall_class": .string("POST_FINISH_RUNTIME_STALL")
+            ]
+        )
+
+        let navSummary = RuntimeDiagnosticsEventFormatter.conciseSummary(for: navEvent)
+        XCTAssertTrue(navSummary.contains("tab=11223344"))
+        XCTAssertTrue(navSummary.contains("provisional_to_finish_ms=420ms"))
+        XCTAssertTrue(navSummary.contains("https://chatgpt.com"))
+
+        let cacheSummary = RuntimeDiagnosticsEventFormatter.conciseSummary(for: cacheEvent)
+        XCTAssertTrue(cacheSummary.contains("cleaned=2"))
+
+        let viewer = RuntimeDiagnosticsViewerWindowController(preferencesStore: AppPreferencesStore())
+        viewer.applyEvents([navEvent, cacheEvent, stallEvent], liveStatus: nil)
+        XCTAssertEqual(viewer.filteredEvents.map(\.event), [
+            "web_runtime.post_finish_stall_detected",
+            "storage.cache_cleanup.completed",
+            "navigation.finished"
+        ])
+
+        viewer.updateFilters(level: .warningsAndErrors, subsystem: .all, searchText: "")
+        XCTAssertEqual(viewer.filteredEvents.map(\.event), ["web_runtime.post_finish_stall_detected"])
+
+        viewer.updateFilters(level: .all, subsystem: .storage, searchText: "")
+        XCTAssertEqual(viewer.filteredEvents.map(\.event), ["storage.cache_cleanup.completed"])
+
+        viewer.updateFilters(level: .all, subsystem: .all, searchText: "420")
+        XCTAssertEqual(viewer.filteredEvents.map(\.event), ["navigation.finished"])
+        viewer.updateFilters(level: .all, subsystem: .all, searchText: "provisional_to_finish_ms")
+        XCTAssertEqual(viewer.filteredEvents.map(\.event), ["navigation.finished"])
+
+        let jsonl = RuntimeDiagnosticsEventFormatter.jsonLinesString(for: [cacheEvent, stallEvent])
+        XCTAssertEqual(jsonl.split(separator: "\n").count, 2)
+    }
+
     private func waitUntil(
         file: StaticString = #filePath,
         line: UInt = #line,

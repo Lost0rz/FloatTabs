@@ -408,9 +408,15 @@ final class DownloadCoordinator: NSObject, WKDownloadDelegate {
     ) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Couldn’t Finish Saving Download"
-        alert.informativeText = "The existing file was kept. The completed download remains at \(stagingURL.path)."
-        alert.addButton(withTitle: "OK")
+        alert.messageText = L10n.tr(
+            "Couldn’t Finish Saving Download",
+            "无法完成保存下载"
+        )
+        alert.informativeText = L10n.tr(
+            "The existing file was kept. The completed download remains at \(stagingURL.path).",
+            "原文件已保留，已下载的文件仍保存在：\(stagingURL.path)。"
+        )
+        alert.addButton(withTitle: L10n.tr("OK", "好"))
         if let window, window.attachedSheet == nil {
             alert.beginSheetModal(for: window)
         } else {
@@ -446,7 +452,21 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         let generation: UInt64
         var phase: DiagnosticNavigationPhase
         var didEmitStall: Bool
+        var didEmitInteractiveReady: Bool
+        let startedAtUptime: TimeInterval
+        var committedAtUptime: TimeInterval?
     }
+
+    private static let interactiveReadinessContentWorld = WKContentWorld.world(
+        name: "FloatTabsNavigationReadiness"
+    )
+    private static let interactiveReadinessScript = """
+    (() => {
+      const state = document.readyState;
+      if (state === "interactive" || state === "complete") return true;
+      return Boolean(document.body && document.body.childElementCount > 0);
+    })()
+    """
 
     private weak var webView: WKWebView?
     private var observation: NSKeyValueObservation?
@@ -464,8 +484,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let onIncidentRequest: @MainActor (UUID, RuntimeDiagnosticIncidentContext) -> Void
     private let onNavigationCommit: @MainActor (UUID, URL?) -> Void
     private let onNavigationStart: @MainActor (UUID, UInt64) -> Void
+    private let onNavigationInteractiveReady: @MainActor (UUID, URL?, UInt64) -> Void
     private let onNavigationFinish: @MainActor (UUID, URL?, UInt64) -> Void
     private let onNavigationFailure: @MainActor (UUID, UInt64) -> Void
+    private let onProvisionalNavigationCancelled: (@MainActor (UUID, UInt64) -> Void)?
     private let onInstantBackRequest: @MainActor (UUID, URL?) -> Void
     private let onInstantBackCancellation: @MainActor (UUID) -> Void
     private let onInstantBackActivation: @MainActor (UUID) -> Void
@@ -473,6 +495,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let instantBackURLSafetyCheck: (URL) -> Bool
     private let diagnostics: any RuntimeDiagnosticRecording
     private let navigationStallTimeout: TimeInterval
+    private let postCommitInteractiveGraceDelay: TimeInterval
+    private let postCommitInteractiveFallbackDelay: TimeInterval
+    private let interactiveReadinessEvaluator: (@MainActor (WKWebView) async -> Bool)?
     private let rendererProbeTimeout: TimeInterval
     private let rendererJavaScriptEvaluator: RendererJavaScriptEvaluator?
     private let attentionStateQuery: WebAttentionStateQuery
@@ -484,6 +509,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private var observedContentProcessEpoch: UInt64 = 1
     private var observedContentProcessTerminationCount: UInt64 = 0
     private var navigationStallTask: Task<Void, Never>?
+    private var postCommitInteractiveTask: Task<Void, Never>?
     private var pendingRendererProbeID: UUID?
     private var rendererProbeTimeoutTask: Task<Void, Never>?
     private var rendererProbeStartedAt: TimeInterval?
@@ -497,6 +523,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private var incidentAwaitingRuntimeRecovery = false
     private var lastHealthyCrossWorldUptime: TimeInterval?
     private var lastHealthyCrossWorldNavigationGeneration: UInt64?
+    private var lastObservedURLString: String?
 
     static let defaultCrossWorldLivenessInterval: TimeInterval = 30
     static let defaultCrossWorldLivenessTimeout: TimeInterval = 5
@@ -537,13 +564,18 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         onIncidentRequest: @escaping @MainActor (UUID, RuntimeDiagnosticIncidentContext) -> Void = { _, _ in },
         onNavigationCommit: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
         onNavigationStart: @escaping @MainActor (UUID, UInt64) -> Void = { _, _ in },
+        onNavigationInteractiveReady: @escaping @MainActor (UUID, URL?, UInt64) -> Void = { _, _, _ in },
         onNavigationFinish: @escaping @MainActor (UUID, URL?, UInt64) -> Void = { _, _, _ in },
         onNavigationFailure: @escaping @MainActor (UUID, UInt64) -> Void = { _, _ in },
+        onProvisionalNavigationCancelled: (@MainActor (UUID, UInt64) -> Void)? = nil,
         onInstantBackRequest: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
         onInstantBackCancellation: @escaping @MainActor (UUID) -> Void = { _ in },
         onInstantBackActivation: @escaping @MainActor (UUID) -> Void = { _ in },
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         navigationStallTimeout: TimeInterval = 120,
+        postCommitInteractiveGraceDelay: TimeInterval = 1.2,
+        postCommitInteractiveFallbackDelay: TimeInterval = 3.5,
+        interactiveReadinessEvaluator: (@MainActor (WKWebView) async -> Bool)? = nil,
         rendererProbeTimeout: TimeInterval = 5,
         rendererJavaScriptEvaluator: RendererJavaScriptEvaluator? = nil,
         attentionStateQuery: @escaping WebAttentionStateQuery = { _ in .idle },
@@ -568,13 +600,18 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.onIncidentRequest = onIncidentRequest
         self.onNavigationCommit = onNavigationCommit
         self.onNavigationStart = onNavigationStart
+        self.onNavigationInteractiveReady = onNavigationInteractiveReady
         self.onNavigationFinish = onNavigationFinish
         self.onNavigationFailure = onNavigationFailure
+        self.onProvisionalNavigationCancelled = onProvisionalNavigationCancelled
         self.onInstantBackRequest = onInstantBackRequest
         self.onInstantBackCancellation = onInstantBackCancellation
         self.onInstantBackActivation = onInstantBackActivation
         self.diagnostics = diagnostics
         self.navigationStallTimeout = max(0, navigationStallTimeout)
+        self.postCommitInteractiveGraceDelay = postCommitInteractiveGraceDelay
+        self.postCommitInteractiveFallbackDelay = max(0, postCommitInteractiveFallbackDelay)
+        self.interactiveReadinessEvaluator = interactiveReadinessEvaluator
         self.rendererProbeTimeout = max(0, rendererProbeTimeout)
         self.rendererJavaScriptEvaluator = rendererJavaScriptEvaluator
         self.attentionStateQuery = attentionStateQuery
@@ -606,23 +643,32 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             Task { @MainActor [weak self, weak webView] in
                 guard let self,
                       let webView,
-                      self.webView === webView,
-                      let url = webView.url,
+                      self.webView === webView else {
+                    return
+                }
+                self.synchronizeCrossWorldLivenessObservation(for: webView)
+                guard let url = webView.url,
                       WebAppURL.isSafe(url) else {
                     return
                 }
-                self.onURLChange(self.slotID, url)
+                let urlString = url.absoluteString
+                let isDuplicateURL = (urlString == self.lastObservedURLString)
+                self.lastObservedURLString = urlString
+                if !isDuplicateURL {
+                    self.onURLChange(self.slotID, url)
+                }
                 self.confirmInstantBackActivation(in: webView, observedURL: url)
             }
         }
 
         webView.navigationDelegate = self
-        startCrossWorldLivenessObservation(for: webView)
+        synchronizeCrossWorldLivenessObservation(for: webView)
     }
 
     deinit {
         observation?.invalidate()
         livenessObservationTask?.cancel()
+        postCommitInteractiveTask?.cancel()
     }
 
     func invalidate() {
@@ -631,12 +677,14 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         observation = nil
         livenessObservationTask?.cancel()
         livenessObservationTask = nil
+        cancelPostCommitInteractiveTask()
         if livenessContextGeneration < UInt64.max {
             livenessContextGeneration += 1
         }
         invalidateDiagnosticNavigation()
         pendingInstantBack = nil
         pendingHTTPEntryFallback = nil
+        lastObservedURLString = nil
         isInvalidated = true
         webView = nil
     }
@@ -667,7 +715,13 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
 
         case .loadInCurrentSlot:
             decisionHandler(.cancel, preferences)
-            webView.load(navigationAction.request)
+            let sourceURL = navigationAction.sourceFrame.request.url ?? webView.url
+            webView.load(
+                WebNavigationCoordinator.requestPreservingReferrer(
+                    navigationAction.request,
+                    sourceURL: sourceURL
+                )
+            )
         }
     }
 
@@ -749,12 +803,19 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         guard !isInvalidated else { return }
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
+        synchronizeCrossWorldLivenessObservation(for: webView)
         cancelPendingInstantBack()
         pendingHTTPEntryFallback = nil
-        let ticket = navigation.flatMap(commitDiagnosticNavigation)
+        let now = ProcessInfo.processInfo.systemUptime
+        let ticket = navigation.flatMap { commitDiagnosticNavigation($0, committedAtUptime: now) }
         var commitFields = runtimeFields(for: webView).merging(
             ticket.map(navigationFields(for:)) ?? staleNavigationFields
         ) { _, new in new }
+        if let ticket {
+            commitFields["provisional_to_commit_ms"] = .integer(
+                Self.boundedMilliseconds(now - ticket.startedAtUptime)
+            )
+        }
         commitFields["url"] = webView.url.flatMap {
             RuntimeDiagnosticPrivacy.safeURLString($0, mode: .standard)
         }.map(RuntimeDiagnosticValue.string) ?? .null
@@ -785,15 +846,27 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
 
+        let now = ProcessInfo.processInfo.systemUptime
         let ticket = navigation.flatMap { completeDiagnosticNavigation($0, phase: .finished) }
+        var finishFields = runtimeFields(for: webView).merging(
+            ticket.map(navigationFields(for:)) ?? staleNavigationFields
+        ) { _, new in new }
+        if let ticket {
+            finishFields["provisional_to_finish_ms"] = .integer(
+                Self.boundedMilliseconds(now - ticket.startedAtUptime)
+            )
+            if let committedAt = ticket.committedAtUptime {
+                finishFields["commit_to_finish_ms"] = .integer(
+                    Self.boundedMilliseconds(now - committedAt)
+                )
+            }
+        }
 
         diagnostics.record(
             event: "navigation.finished",
             level: .debug,
             subsystem: "navigation",
-            fields: runtimeFields(for: webView).merging(
-                ticket.map(navigationFields(for:)) ?? staleNavigationFields
-            ) { _, new in new }
+            fields: finishFields
         )
 
         if let ticket {
@@ -817,18 +890,25 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     ) {
         guard !isInvalidated else { return }
         restoreHiddenScrollerPolicy(in: webView)
+        let now = ProcessInfo.processInfo.systemUptime
         let ticket = navigation.flatMap { completeDiagnosticNavigation($0, phase: .failed) }
+        var failFields = runtimeFields(for: webView).merging([
+            "slot_id": .string(slotID.uuidString),
+            "failure": .string("navigation"),
+            "provisional": .bool(false)
+        ]) { _, new in new }
+            .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
+            .merging(ticket.map(navigationFields(for:)) ?? staleNavigationFields) { _, new in new }
+        if let ticket {
+            failFields["navigation_elapsed_ms"] = .integer(
+                Self.boundedMilliseconds(now - ticket.startedAtUptime)
+            )
+        }
         diagnostics.record(
             event: "navigation.failed",
             level: .warning,
             subsystem: "navigation",
-            fields: runtimeFields(for: webView).merging([
-                "slot_id": .string(slotID.uuidString),
-                "failure": .string("navigation"),
-                "provisional": .bool(false)
-            ]) { _, new in new }
-                .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
-                .merging(ticket.map(navigationFields(for:)) ?? staleNavigationFields) { _, new in new }
+            fields: failFields
         )
         if let incidentContext = activeIncidentContext, !incidentAwaitingRuntimeRecovery {
             closeIncident(incidentContext, outcome: "navigation_failed")
@@ -845,18 +925,25 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     ) {
         guard !isInvalidated else { return }
         restoreHiddenScrollerPolicy(in: webView)
+        let now = ProcessInfo.processInfo.systemUptime
         let ticket = navigation.flatMap { completeDiagnosticNavigation($0, phase: .failed) }
+        var provisionalFailFields = runtimeFields(for: webView).merging([
+            "slot_id": .string(slotID.uuidString),
+            "url": failingURLForDiagnostics(error: error, webView: webView),
+            "provisional": .bool(true)
+        ]) { _, new in new }
+            .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
+            .merging(ticket.map(navigationFields(for:)) ?? staleNavigationFields) { _, new in new }
+        if let ticket {
+            provisionalFailFields["navigation_elapsed_ms"] = .integer(
+                Self.boundedMilliseconds(now - ticket.startedAtUptime)
+            )
+        }
         diagnostics.record(
             event: "navigation.failed",
             level: .warning,
             subsystem: "navigation",
-            fields: runtimeFields(for: webView).merging([
-                "slot_id": .string(slotID.uuidString),
-                "url": failingURLForDiagnostics(error: error, webView: webView),
-                "provisional": .bool(true)
-            ]) { _, new in new }
-                .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
-                .merging(ticket.map(navigationFields(for:)) ?? staleNavigationFields) { _, new in new }
+            fields: provisionalFailFields
         )
         if let incidentContext = activeIncidentContext, !incidentAwaitingRuntimeRecovery {
             closeIncident(incidentContext, outcome: "navigation_failed")
@@ -881,9 +968,25 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         } else {
             pendingHTTPEntryFallback = nil
             if let ticket {
-                onNavigationFailure(slotID, ticket.generation)
+                if Self.isBenignProvisionalInterruption(error),
+                   let onProvisionalNavigationCancelled {
+                    onProvisionalNavigationCancelled(slotID, ticket.generation)
+                } else {
+                    onNavigationFailure(slotID, ticket.generation)
+                }
             }
         }
+    }
+
+    static func isBenignProvisionalInterruption(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return true
+        }
+        if nsError.domain == "WebKitErrorDomain" && nsError.code == 102 {
+            return true
+        }
+        return false
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -1033,6 +1136,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             startedAtUptime: ProcessInfo.processInfo.systemUptime
         )
         activeIncidentContext = context
+        if let webView {
+            synchronizeCrossWorldLivenessObservation(for: webView)
+        }
         onIncidentRequest(slotID, context)
         return context
     }
@@ -1054,6 +1160,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         if activeIncidentContext?.id == context.id {
             activeIncidentContext = nil
             incidentAwaitingRuntimeRecovery = false
+            if let webView {
+                synchronizeCrossWorldLivenessObservation(for: webView)
+            }
         }
     }
 
@@ -1264,7 +1373,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             navigationID: navigationID,
             generation: nextNavigationGeneration,
             phase: .provisional,
-            didEmitStall: false
+            didEmitStall: false,
+            didEmitInteractiveReady: false,
+            startedAtUptime: ProcessInfo.processInfo.systemUptime,
+            committedAtUptime: nil
         )
         currentNavigationTicket = ticket
         scheduleStallWatchdog(for: ticket)
@@ -1272,13 +1384,16 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     private func commitDiagnosticNavigation(
-        _ navigation: WKNavigation
+        _ navigation: WKNavigation,
+        committedAtUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
     ) -> DiagnosticNavigationTicket? {
         guard var ticket = matchingActiveTicket(for: navigation) else { return nil }
         if ticket.phase == .provisional {
             ticket.phase = .postCommit
+            ticket.committedAtUptime = committedAtUptime
             currentNavigationTicket = ticket
             scheduleStallWatchdog(for: ticket)
+            schedulePostCommitInteractiveReadiness(for: ticket)
         }
         return ticket
     }
@@ -1291,6 +1406,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         ticket.phase = phase
         currentNavigationTicket = ticket
         cancelNavigationStallWatchdog()
+        cancelPostCommitInteractiveTask()
         invalidateRendererProbe()
         return ticket
     }
@@ -1310,6 +1426,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
 
     private func invalidateDiagnosticNavigation(phase: DiagnosticNavigationPhase?) {
         cancelNavigationStallWatchdog()
+        cancelPostCommitInteractiveTask()
         invalidateRendererProbe()
         guard var ticket = currentNavigationTicket else { return }
         if let phase {
@@ -1317,6 +1434,138 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             currentNavigationTicket = ticket
         } else {
             currentNavigationTicket = nil
+        }
+    }
+
+    private func cancelPostCommitInteractiveTask() {
+        postCommitInteractiveTask?.cancel()
+        postCommitInteractiveTask = nil
+    }
+
+    private func schedulePostCommitInteractiveReadiness(
+        for ticket: DiagnosticNavigationTicket
+    ) {
+        cancelPostCommitInteractiveTask()
+        guard postCommitInteractiveGraceDelay >= 0 else { return }
+        let ticketNavigationID = ticket.navigationID
+        let ticketGeneration = ticket.generation
+        let graceDelay = postCommitInteractiveGraceDelay
+        let fallbackDelay = max(postCommitInteractiveFallbackDelay, graceDelay)
+        postCommitInteractiveTask = Task { @MainActor [weak self] in
+            let commitUptime = ProcessInfo.processInfo.systemUptime
+            if graceDelay > 0 {
+                let graceNanoseconds = UInt64((graceDelay * 1_000_000_000).rounded())
+                do {
+                    try await Task.sleep(nanoseconds: graceNanoseconds)
+                } catch {
+                    return
+                }
+            }
+            while !Task.isCancelled {
+                guard let self,
+                      !self.isInvalidated,
+                      let webView = self.webView,
+                      let current = self.currentNavigationTicket,
+                      current.navigationID == ticketNavigationID,
+                      current.generation == ticketGeneration,
+                      current.phase == .postCommit,
+                      !current.didEmitInteractiveReady else {
+                    return
+                }
+                let elapsed = ProcessInfo.processInfo.systemUptime - commitUptime
+                let fallbackReached = elapsed >= fallbackDelay
+                let isInteractive = await self.evaluateInteractiveReadiness(in: webView)
+                guard !Task.isCancelled,
+                      !self.isInvalidated,
+                      self.webView === webView,
+                      var refreshed = self.currentNavigationTicket,
+                      refreshed.navigationID == ticketNavigationID,
+                      refreshed.generation == ticketGeneration,
+                      refreshed.phase == .postCommit,
+                      !refreshed.didEmitInteractiveReady else {
+                    return
+                }
+                if isInteractive || fallbackReached {
+                    refreshed.didEmitInteractiveReady = true
+                    self.currentNavigationTicket = refreshed
+                    self.postCommitInteractiveTask = nil
+                    let readyAt = ProcessInfo.processInfo.systemUptime
+                    var fields = self.runtimeFields(for: webView).merging(
+                        self.navigationFields(for: refreshed)
+                    ) { _, new in new }
+                    fields["readiness_trigger"] = .string(
+                        isInteractive ? "dom_interactive" : "post_commit_fallback"
+                    )
+                    fields["provisional_to_interactive_ms"] = .integer(
+                        Self.boundedMilliseconds(readyAt - refreshed.startedAtUptime)
+                    )
+                    if let committedAt = refreshed.committedAtUptime {
+                        fields["commit_to_interactive_ms"] = .integer(
+                            Self.boundedMilliseconds(readyAt - committedAt)
+                        )
+                    }
+                    self.diagnostics.record(
+                        event: "navigation.interactive_ready",
+                        level: .info,
+                        subsystem: "navigation",
+                        fields: fields
+                    )
+                    self.onNavigationInteractiveReady(
+                        self.slotID,
+                        webView.url,
+                        refreshed.generation
+                    )
+                    return
+                }
+                do {
+                    try await Task.sleep(nanoseconds: 250_000_000)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func evaluateInteractiveReadiness(in webView: WKWebView) async -> Bool {
+        if let evaluator = interactiveReadinessEvaluator {
+            return await evaluator(webView)
+        }
+        return await Self.productionInteractiveReadinessProbe(
+            webView: webView,
+            timeout: 1.0
+        )
+    }
+
+    private static func productionInteractiveReadinessProbe(
+        webView: WKWebView,
+        timeout: TimeInterval
+    ) async -> Bool {
+        let gate = WebRuntimeProbeGate<Bool>()
+        return await withCheckedContinuation { continuation in
+            gate.install(continuation)
+            let timeoutTask = Task { @MainActor [weak gate] in
+                do {
+                    try await Task.sleep(
+                        nanoseconds: UInt64((max(timeout, 0.1) * 1_000_000_000).rounded())
+                    )
+                } catch {
+                    return
+                }
+                gate?.finish(false)
+            }
+            gate.installTimeoutTask(timeoutTask)
+            webView.evaluateJavaScript(
+                Self.interactiveReadinessScript,
+                in: nil,
+                in: Self.interactiveReadinessContentWorld
+            ) { result in
+                switch result {
+                case let .success(value):
+                    gate.finish(value as? Bool ?? false)
+                case .failure:
+                    gate.finish(false)
+                }
+            }
         }
     }
 
@@ -1361,6 +1610,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         var fields = runtimeFields(for: webView)
         fields.merge(navigationFields(for: current)) { _, new in new }
         fields.merge(incidentContext.fields(phase: .trigger)) { _, new in new }
+        fields["navigation_elapsed_ms"] = .integer(
+            Self.boundedMilliseconds(ProcessInfo.processInfo.systemUptime - current.startedAtUptime)
+        )
         fields["stall_class"] = .string(
             current.phase == .provisional
                 ? "PRE_COMMIT_NAVIGATION_STALL"
@@ -1570,19 +1822,63 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         navigationStallTask = nil
     }
 
+    var hasActiveCrossWorldLivenessObservationTask: Bool {
+        livenessObservationTask != nil
+    }
+
+    private func synchronizeCrossWorldLivenessObservation(for webView: WKWebView) {
+        guard !isInvalidated else { return }
+        let isSupportedChatGPT = webView.url.map(ChatGPTSitePolicy.isSupportedChatGPTURL) ?? false
+        if isSupportedChatGPT || activeIncidentContext != nil {
+            if livenessObservationTask == nil {
+                startCrossWorldLivenessObservation(for: webView)
+            }
+        } else {
+            livenessObservationTask?.cancel()
+            livenessObservationTask = nil
+        }
+    }
+
     private func startCrossWorldLivenessObservation(for webView: WKWebView) {
         livenessObservationTask?.cancel()
         livenessObservationTask = Task { @MainActor [weak self, weak webView] in
             while !Task.isCancelled {
+                let baseInterval = self?.livenessProbeIntervalNanoseconds ?? 0
+                let isVisible = webView?.window?.isVisible == true
+                    && webView?.isHiddenOrHasHiddenAncestor == false
+                let sleepInterval: UInt64
+                if isVisible {
+                    sleepInterval = baseInterval
+                } else {
+                    let (multiplied, overflow) = baseInterval.multipliedReportingOverflow(by: 4)
+                    sleepInterval = min(overflow ? 300_000_000_000 : multiplied, 300_000_000_000)
+                }
                 do {
-                    try await Task.sleep(nanoseconds: self?.livenessProbeIntervalNanoseconds ?? 0)
+                    try await Task.sleep(nanoseconds: sleepInterval)
                 } catch {
                     return
                 }
-                guard let self, let webView, self.webView === webView else { return }
+                guard let self,
+                      !self.isInvalidated,
+                      let webView,
+                      self.webView === webView else {
+                    return
+                }
+                let isNativeVisible = webView.window?.isVisible == true
+                    && !webView.isHiddenOrHasHiddenAncestor
+                if !isNativeVisible,
+                   self.attentionStateQuery(self.slotID) != .generating,
+                   self.activeIncidentContext == nil {
+                    continue
+                }
                 await self.captureCrossWorldLivenessOnce(source: .periodic)
             }
         }
+    }
+
+    private static func boundedMilliseconds(_ elapsedSeconds: TimeInterval) -> Int64 {
+        let clamped = min(max(elapsedSeconds.isFinite ? elapsedSeconds : 0, 0) * 1_000, 3_600_000)
+        return Int64(clamped.rounded())
     }
 
     private static let runtimeLivenessProbeScript = """
@@ -1794,7 +2090,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         }
     }
 
-    private static func currentProcessResidentSizeBytes() -> UInt64? {
+    static func currentProcessResidentSizeBytes() -> UInt64? {
         var info = mach_task_basic_info_data_t()
         var count = mach_msg_type_number_t(
             MemoryLayout<mach_task_basic_info_data_t>.size / MemoryLayout<natural_t>.size

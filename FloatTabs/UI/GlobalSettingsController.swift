@@ -2,9 +2,9 @@ import AppKit
 import KeyboardShortcuts
 
 enum BrowserProfileManagementError: LocalizedError, Equatable {
-    case unsupported
     case notFound
     case referenced
+    case lastRemainingProfile
     case invalidName
     case duplicateName
     case runtimeStillResident
@@ -12,20 +12,41 @@ enum BrowserProfileManagementError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .unsupported:
-            return "Additional Browser Profiles require macOS 14 or later."
         case .notFound:
-            return "That Browser Profile no longer exists."
+            return L10n.tr(
+                "That Browser Profile no longer exists.",
+                "该浏览器配置文件已不存在。"
+            )
         case .referenced:
-            return "This Profile is used by one or more Web Apps."
+            return L10n.tr(
+                "This Profile is used by one or more Web Apps.",
+                "此配置文件正在被一个或多个网页应用使用。"
+            )
+        case .lastRemainingProfile:
+            return L10n.tr(
+                "At least one Browser Profile must remain.",
+                "至少需要保留一个浏览器配置文件。"
+            )
         case .invalidName:
-            return "Enter a non-empty Profile name."
+            return L10n.tr(
+                "Enter a non-empty Profile name.",
+                "请输入非空的配置文件名称。"
+            )
         case .duplicateName:
-            return "That Profile name is already in use."
+            return L10n.tr(
+                "That Profile name is already in use.",
+                "该配置文件名称已被占用。"
+            )
         case .runtimeStillResident:
-            return "The Profile is still in use by a live runtime. Try again."
+            return L10n.tr(
+                "The Profile is still in use by a live runtime. Try again.",
+                "该配置文件仍有运行中的页面，请稍后再试。"
+            )
         case .metadataPersistenceFailed:
-            return "FloatTabs could not save the Profile metadata. Your previous settings were kept."
+            return L10n.tr(
+                "FloatTabs could not save the Profile metadata. Your previous settings were kept.",
+                "FloatTabs 无法保存配置文件信息，原有设置已保留。"
+            )
         }
     }
 }
@@ -33,22 +54,32 @@ enum BrowserProfileManagementError: LocalizedError, Equatable {
 struct BrowserProfileManagementSnapshot: Equatable {
     let customProfiles: [BrowserProfile]
     let defaultProfilePresentation: DefaultBrowserProfilePresentation
+    let includesDefaultProfile: Bool
     let referencedProfileIDs: Set<UUID>
+    let isDefaultProfileReferenced: Bool
     let referencingWebAppNamesByProfileID: [UUID: [String]]
-    let customProfilesSupported: Bool
+    let defaultReferencingWebAppNames: [String]
+
+    var totalProfileCount: Int {
+        (includesDefaultProfile ? 1 : 0) + customProfiles.count
+    }
 
     init(
         customProfiles: [BrowserProfile],
         defaultProfilePresentation: DefaultBrowserProfilePresentation = .default,
+        includesDefaultProfile: Bool = true,
         referencedProfileIDs: Set<UUID>,
+        isDefaultProfileReferenced: Bool = false,
         referencingWebAppNamesByProfileID: [UUID: [String]] = [:],
-        customProfilesSupported: Bool
+        defaultReferencingWebAppNames: [String] = []
     ) {
         self.customProfiles = customProfiles
         self.defaultProfilePresentation = defaultProfilePresentation
+        self.includesDefaultProfile = includesDefaultProfile
         self.referencedProfileIDs = referencedProfileIDs
+        self.isDefaultProfileReferenced = isDefaultProfileReferenced
         self.referencingWebAppNamesByProfileID = referencingWebAppNamesByProfileID
-        self.customProfilesSupported = customProfilesSupported
+        self.defaultReferencingWebAppNames = defaultReferencingWebAppNames
     }
 }
 
@@ -57,7 +88,7 @@ struct BrowserProfileManagementClient {
     typealias SnapshotHandler = () -> BrowserProfileManagementSnapshot
     typealias CreateHandler = (String) throws -> BrowserProfile
     typealias RenameHandler = (UUID?, String) throws -> Void
-    typealias DeleteHandler = (UUID) async throws -> Void
+    typealias DeleteHandler = (UUID?) async throws -> Void
 
     private let snapshotHandler: SnapshotHandler
     private let createHandler: CreateHandler
@@ -80,13 +111,12 @@ struct BrowserProfileManagementClient {
         snapshot: {
             BrowserProfileManagementSnapshot(
                 customProfiles: [],
-                referencedProfileIDs: [],
-                customProfilesSupported: false
+                referencedProfileIDs: []
             )
         },
-        create: { _ in throw BrowserProfileManagementError.unsupported },
-        rename: { _, _ in throw BrowserProfileManagementError.unsupported },
-        delete: { _ in throw BrowserProfileManagementError.unsupported }
+        create: { _ in throw BrowserProfileManagementError.notFound },
+        rename: { _, _ in throw BrowserProfileManagementError.notFound },
+        delete: { _ in throw BrowserProfileManagementError.notFound }
     )
 
     func snapshot() -> BrowserProfileManagementSnapshot {
@@ -102,7 +132,7 @@ struct BrowserProfileManagementClient {
         try renameHandler(id, name)
     }
 
-    func delete(id: UUID) async throws {
+    func delete(id: UUID?) async throws {
         try await deleteHandler(id)
     }
 }
@@ -119,9 +149,15 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
     private let onRestoreBackup: RestoreBackupHandler
     private let browserProfileManager: BrowserProfileManagementClient
     private let websiteCacheManager: WebsiteCacheManagementClient
+    private let bookmarkManager: BookmarkManagementClient
     private let onExportDiagnostics: RuntimeDiagnosticsExportHandler
     private let onOpenDiagnosticsLogs: () -> Void
     private let onCaptureDiagnosticsIncident: RuntimeDiagnosticsIncidentCaptureHandler?
+    private let onProvideDiagnosticsLiveStatus: RuntimeDiagnosticsLiveStatusProvider?
+    private let onLoadRecentDiagnosticsEvents: RuntimeDiagnosticsRecentEventsLoader?
+    private var bookmarksController: BookmarksSettingsViewController?
+    private var hasCreatedSettingsWindow = false
+    private var languageObserver: NSObjectProtocol?
     private lazy var settingsWindow: NSWindow = makeWindow()
 
     init(
@@ -132,11 +168,14 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         onRestoreBackup: @escaping RestoreBackupHandler = { _ in throw FloatTabsBackupError.restoreFailed },
         browserProfileManager: BrowserProfileManagementClient = .unavailable,
         websiteCacheManager: WebsiteCacheManagementClient = .unavailable,
+        bookmarkManager: BookmarkManagementClient = .unavailable,
         onExportDiagnostics: @escaping RuntimeDiagnosticsExportHandler = { _, completion in
             completion(.failure(.writerDisabled))
         },
         onOpenDiagnosticsLogs: @escaping () -> Void = {},
-        onCaptureDiagnosticsIncident: RuntimeDiagnosticsIncidentCaptureHandler? = nil
+        onCaptureDiagnosticsIncident: RuntimeDiagnosticsIncidentCaptureHandler? = nil,
+        onProvideDiagnosticsLiveStatus: RuntimeDiagnosticsLiveStatusProvider? = nil,
+        onLoadRecentDiagnosticsEvents: RuntimeDiagnosticsRecentEventsLoader? = nil
     ) {
         self.preferencesStore = preferencesStore
         self.attentionSoundAssetStore = attentionSoundAssetStore
@@ -145,24 +184,82 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         self.onRestoreBackup = onRestoreBackup
         self.browserProfileManager = browserProfileManager
         self.websiteCacheManager = websiteCacheManager
+        self.bookmarkManager = bookmarkManager
         self.onExportDiagnostics = onExportDiagnostics
         self.onOpenDiagnosticsLogs = onOpenDiagnosticsLogs
         self.onCaptureDiagnosticsIncident = onCaptureDiagnosticsIncident
+        self.onProvideDiagnosticsLiveStatus = onProvideDiagnosticsLiveStatus
+        self.onLoadRecentDiagnosticsEvents = onLoadRecentDiagnosticsEvents
         super.init()
+        languageObserver = NotificationCenter.default.addObserver(
+            forName: .floatTabsLanguageDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.rebuildForLanguageChange()
+            }
+        }
+    }
+
+    deinit {
+        if let languageObserver {
+            NotificationCenter.default.removeObserver(languageObserver)
+        }
     }
 
     var isVisible: Bool { settingsWindow.isVisible }
 
-    func show() {
+    var windowTitleForTesting: String {
+        settingsWindow.title
+    }
+
+    var toolbarTabTitlesForTesting: [String] {
+        (settingsWindow.contentViewController as? NSTabViewController)?.tabViewItems.map(\.label) ?? []
+    }
+
+    var selectedTabIndexForTesting: Int {
+        (settingsWindow.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex ?? -1
+    }
+
+    func show(selecting page: GlobalSettingsPage? = nil) {
+        if let page,
+           let tabs = settingsWindow.contentViewController as? NSTabViewController,
+           let index = GlobalSettingsPage.allCases.firstIndex(of: page),
+           tabs.tabViewItems.indices.contains(index) {
+            tabs.selectedTabViewItemIndex = index
+        }
+        bookmarksController?.reloadData()
         // Settings is also opened from the accessory app's status menu, so it
         // needs the same explicit user-presentation activation semantics as the
         // primary FloatTabs window group.
         settingsWindow.orderFrontRegardless()
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         settingsWindow.makeKeyAndOrderFront(nil)
     }
 
-    private func makeWindow() -> NSWindow {
+    func refreshBookmarksIfLoaded() {
+        bookmarksController?.reloadData()
+    }
+
+    private func rebuildForLanguageChange() {
+        guard hasCreatedSettingsWindow else { return }
+        let selectedIndex = (settingsWindow.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex ?? 0
+        let existingFrame = settingsWindow.frame
+        bookmarksController = nil
+        let rebuiltTabs = makeTabsController()
+        if rebuiltTabs.tabViewItems.indices.contains(selectedIndex) {
+            rebuiltTabs.selectedTabViewItemIndex = selectedIndex
+        }
+        settingsWindow.title = L10n.tr("FloatTabs Settings", "FloatTabs 设置")
+        settingsWindow.contentViewController = rebuiltTabs
+        settingsWindow.setFrame(existingFrame, display: true)
+        if isVisible {
+            bookmarksController?.reloadData()
+        }
+    }
+
+    private func makeTabsController() -> NSTabViewController {
         let tabs = NSTabViewController()
         tabs.tabStyle = .toolbar
         tabs.transitionOptions = []
@@ -176,11 +273,17 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
                 to: tabs
             )
         }
+        return tabs
+    }
+
+    private func makeWindow() -> NSWindow {
+        hasCreatedSettingsWindow = true
+        let tabs = makeTabsController()
 
         let window = NSWindow(contentViewController: tabs)
-        window.title = "FloatTabs Settings"
+        window.title = L10n.tr("FloatTabs Settings", "FloatTabs 设置")
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 620, height: 580))
+        window.setContentSize(NSSize(width: 620, height: 640))
         window.minSize = NSSize(width: 580, height: 500)
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -194,9 +297,15 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         case .general:
             children = [
                 AppearanceSettingsViewController(preferencesStore: preferencesStore),
-                UnreadTabAttentionSettingsViewController(preferencesStore: preferencesStore),
             ]
-        case .browserPerformance:
+        case .bookmarks:
+            let controller = BookmarksSettingsViewController(
+                client: bookmarkManager,
+                embedsInSettingsPage: true
+            )
+            bookmarksController = controller
+            children = [controller]
+        case .profilesStorage:
             children = [
                 BrowserProfilesSettingsViewController(
                     browserProfileManager: browserProfileManager,
@@ -208,8 +317,9 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
                     embedsInSettingsPage: true
                 ),
             ]
-        case .audio:
+        case .alerts:
             children = [
+                UnreadTabAttentionSettingsViewController(preferencesStore: preferencesStore),
                 NotificationsSettingsViewController(
                     preferencesStore: preferencesStore,
                     attentionSoundPlayer: attentionSoundPlayer,
@@ -218,7 +328,10 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
             ]
         case .shortcuts:
             children = [
-                ShortcutsSettingsViewController(embedsInSettingsPage: true)
+                ShortcutsSettingsViewController(
+                    preferencesStore: preferencesStore,
+                    embedsInSettingsPage: true
+                )
             ]
         case .advanced:
             children = [
@@ -226,7 +339,9 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
                     preferencesStore: preferencesStore,
                     exportHandler: onExportDiagnostics,
                     openLogsHandler: onOpenDiagnosticsLogs,
-                    captureIncidentHandler: onCaptureDiagnosticsIncident
+                    captureIncidentHandler: onCaptureDiagnosticsIncident,
+                    liveStatusProvider: onProvideDiagnosticsLiveStatus,
+                    recentEventsLoader: onLoadRecentDiagnosticsEvents
                 ),
                 BackupRestoreSettingsViewController(
                     onExportBackup: onExportBackup,
@@ -288,7 +403,12 @@ final class AttentionStyleChoiceButton: NSButton {
         layer?.cornerRadius = 10
         layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.62).cgColor
         setAccessibilityRole(.radioButton)
-        setAccessibilityLabel("\(style.displayName) unread Tab attention style")
+        setAccessibilityLabel(
+            L10n.tr(
+                "\(style.displayName) unread Tab attention style",
+                "\(style.displayName) 未读标签提醒样式"
+            )
+        )
 
         previewSurfaceView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(previewSurfaceView)
@@ -316,7 +436,7 @@ final class AttentionStyleChoiceButton: NSButton {
         selectionMarkView.translatesAutoresizingMaskIntoConstraints = false
         selectionMarkView.image = NSImage(
             systemSymbolName: "checkmark.circle.fill",
-            accessibilityDescription: "Selected"
+            accessibilityDescription: L10n.tr("Selected", "已选")
         )
         selectionMarkView.contentTintColor = .controlAccentColor
         selectionMarkView.isHidden = true
@@ -399,7 +519,9 @@ final class AttentionStyleChoiceButton: NSButton {
             layer?.borderWidth = selected ? 2 : 1
         }
         selectionMarkView.isHidden = !selected
-        setAccessibilityValue(selected ? "Selected" : "Not selected")
+        setAccessibilityValue(
+            selected ? L10n.tr("Selected", "已选") : L10n.tr("Not selected", "未选")
+        )
     }
 
     func setPalette(_ palette: TabAttentionPalette) {
@@ -438,7 +560,12 @@ final class AttentionPaletteChoiceButton: NSButton {
         layer?.cornerRadius = 8
         layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.55).cgColor
         setAccessibilityRole(.radioButton)
-        setAccessibilityLabel("\(palette.displayName) unread Tab attention palette")
+        setAccessibilityLabel(
+            L10n.tr(
+                "\(palette.displayName) unread Tab attention palette",
+                "\(palette.displayName) 未读标签配色"
+            )
+        )
 
         swatchView.wantsLayer = true
         swatchView.layer?.cornerRadius = 6
@@ -481,7 +608,9 @@ final class AttentionPaletteChoiceButton: NSButton {
         layer?.borderColor = selected
             ? NSColor.controlAccentColor.cgColor
             : NSColor.separatorColor.withAlphaComponent(0.35).cgColor
-        setAccessibilityValue(selected ? "Selected" : "Not selected")
+        setAccessibilityValue(
+            selected ? L10n.tr("Selected", "已选") : L10n.tr("Not selected", "未选")
+        )
     }
 }
 
@@ -495,11 +624,11 @@ final class NotificationsSettingsViewController: NSViewController {
 
     private let enabledSwitch = NSSwitch()
     let soundPopup = NSPopUpButton()
-    let importAudioButton = NSButton(title: "Import Audio…", target: nil, action: nil)
-    let removeSelectedAudioButton = NSButton(title: "Remove Selected", target: nil, action: nil)
+    let importAudioButton = NSButton(title: L10n.tr("Import Audio…", "导入音频…"), target: nil, action: nil)
+    let removeSelectedAudioButton = NSButton(title: L10n.tr("Remove Selected", "移除所选"), target: nil, action: nil)
     let volumeSlider = NSSlider(value: 100, minValue: 0, maxValue: 100, target: nil, action: nil)
     private let volumeValueLabel = NSTextField(labelWithString: "100%")
-    let previewButton = NSButton(title: "Play Preview", target: nil, action: nil)
+    let previewButton = NSButton(title: L10n.tr("Play Preview", "试听"), target: nil, action: nil)
 
     init(
         preferencesStore: AppPreferencesStore,
@@ -516,7 +645,7 @@ final class NotificationsSettingsViewController: NSViewController {
         self.availableSoundNames = availableSoundNames ?? AttentionSound.availableNames()
         self.errorPresenter = errorPresenter
         super.init(nibName: nil, bundle: nil)
-        title = "Notifications"
+        title = L10n.tr("Notifications", "通知")
     }
 
     @available(*, unavailable)
@@ -557,8 +686,14 @@ final class NotificationsSettingsViewController: NSViewController {
         removeSelectedAudioButton.target = self
         removeSelectedAudioButton.action = #selector(removeSelectedAudio(_:))
 
-        let enabledRow = makeRow(label: "Play sound when ChatGPT is ready", control: enabledSwitch)
-        let soundRow = makeRow(label: "Ready Sound", control: soundPopup)
+        let enabledRow = makeRow(
+            label: L10n.tr("Play sound when ChatGPT is ready", "ChatGPT 回复完成时播放提示音"),
+            control: enabledSwitch
+        )
+        let soundRow = makeRow(
+            label: L10n.tr("Ready Sound", "完成提示音"),
+            control: soundPopup
+        )
         let audioActions = NSStackView(views: [importAudioButton, removeSelectedAudioButton])
         audioActions.orientation = .horizontal
         audioActions.alignment = .centerY
@@ -567,11 +702,11 @@ final class NotificationsSettingsViewController: NSViewController {
         volumeControls.orientation = .horizontal
         volumeControls.alignment = .centerY
         volumeControls.spacing = 10
-        let volumeRow = makeRow(label: "Volume", control: volumeControls)
+        let volumeRow = makeRow(label: L10n.tr("Volume", "音量"), control: volumeControls)
 
         let stack = NSStackView(views: [
-            Self.titleLabel("Ready Alerts"),
-            Self.detailLabel("Play a sound when ChatGPT is ready."),
+            Self.titleLabel(L10n.tr("Ready Alerts", "完成提示音")),
+            Self.detailLabel(L10n.tr("Play a sound when ChatGPT is ready.", "在 ChatGPT 回复完成时播放声音提示。")),
             Self.spacer(8),
             enabledRow,
             soundRow,
@@ -704,7 +839,7 @@ final class NotificationsSettingsViewController: NSViewController {
 
     private func importAudio() {
         let panel = NSOpenPanel()
-        panel.title = "Import Ready Audio"
+        panel.title = L10n.tr("Import Ready Audio", "导入提示音频")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
@@ -749,7 +884,7 @@ final class NotificationsSettingsViewController: NSViewController {
     private func configureSoundPopup() {
         soundPopup.removeAllItems()
 
-        soundPopup.addItem(withTitle: "System")
+        soundPopup.addItem(withTitle: L10n.tr("System", "系统音效"))
         soundPopup.lastItem?.isEnabled = false
         for name in availableSoundNames {
             soundPopup.addItem(withTitle: name)
@@ -757,17 +892,17 @@ final class NotificationsSettingsViewController: NSViewController {
         }
 
         soundPopup.menu?.addItem(NSMenuItem.separator())
-        soundPopup.addItem(withTitle: "Custom")
+        soundPopup.addItem(withTitle: L10n.tr("Custom", "自定义音效"))
         soundPopup.lastItem?.isEnabled = false
         for asset in preferencesStore.customAttentionSoundLibrary {
             let isMissing = assetStore.existingURL(for: asset) == nil
-            let title = asset.displayName + (isMissing ? " — Missing" : "")
+            let title = asset.displayName + (isMissing ? L10n.tr(" — Missing", " — 文件缺失") : "")
             soundPopup.addItem(withTitle: title)
             soundPopup.lastItem?.representedObject = Self.customSelection(asset.id)
         }
 
         soundPopup.menu?.addItem(NSMenuItem.separator())
-        soundPopup.addItem(withTitle: "Import Audio…")
+        soundPopup.addItem(withTitle: L10n.tr("Import Audio…", "导入音频…"))
         soundPopup.lastItem?.representedObject = Self.importMenuSelection
     }
 
@@ -847,7 +982,7 @@ final class UnreadTabAttentionSettingsViewController: NSViewController {
     init(preferencesStore: AppPreferencesStore) {
         self.preferencesStore = preferencesStore
         super.init(nibName: nil, bundle: nil)
-        title = "Unread Tab Attention"
+        title = L10n.tr("Unread Tab Attention", "未读标签提醒")
     }
 
     @available(*, unavailable)
@@ -863,10 +998,15 @@ final class UnreadTabAttentionSettingsViewController: NSViewController {
         let styleGrid = makeAttentionStyleGrid()
         let paletteGrid = makeAttentionPaletteGrid()
         let stack = NSStackView(views: [
-            Self.titleLabel("Unread Tab Attention"),
-            Self.detailLabel("Choose an effect style. Previews respect Reduce Motion."),
+            Self.titleLabel(L10n.tr("Unread Tab Attention", "未读标签提醒")),
+            Self.detailLabel(
+                L10n.tr(
+                    "Choose an effect style. Previews respect Reduce Motion.",
+                    "选择标签提醒动效样式，预览将遵循系统的“减弱动态效果”设置。"
+                )
+            ),
             styleGrid,
-            Self.titleLabel("Palette"),
+            Self.titleLabel(L10n.tr("Palette", "配色方案")),
             attentionPaletteDescriptionLabel,
             paletteGrid,
         ])
@@ -945,8 +1085,14 @@ final class UnreadTabAttentionSettingsViewController: NSViewController {
             choice.setSelectedPalette(choice.palette == displayedPalette)
         }
         attentionPaletteDescriptionLabel.stringValue = selectedStyle == .dot
-            ? "Dot always uses the classic red indicator."
-            : "Palette changes color while keeping the selected style."
+            ? L10n.tr(
+                "Dot always uses the classic red indicator.",
+                "圆点样式固定使用经典红色指示点。"
+            )
+            : L10n.tr(
+                "Palette changes color while keeping the selected style.",
+                "配色方案会改变当前动效样式的色彩。"
+            )
     }
 
     private func makeAttentionPaletteGrid() -> NSView {
@@ -1003,6 +1149,12 @@ private extension String {
 @MainActor
 private final class AppearanceSettingsViewController: NSViewController {
     private let preferencesStore: AppPreferencesStore
+    private let languageControl = NSSegmentedControl(
+        labels: AppLanguage.allCases.map(\.displayName),
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
     private let appearanceControl = NSSegmentedControl(
         labels: AppAppearanceMode.allCases.map(\.displayName),
         trackingMode: .selectOne,
@@ -1036,7 +1188,7 @@ private final class AppearanceSettingsViewController: NSViewController {
     init(preferencesStore: AppPreferencesStore) {
         self.preferencesStore = preferencesStore
         super.init(nibName: nil, bundle: nil)
-        title = "Appearance"
+        title = L10n.tr("Appearance", "外观")
     }
 
     @available(*, unavailable)
@@ -1046,6 +1198,11 @@ private final class AppearanceSettingsViewController: NSViewController {
 
     override func loadView() {
         let root = NSView()
+
+        languageControl.segmentStyle = .rounded
+        languageControl.target = self
+        languageControl.action = #selector(languageChanged(_:))
+        languageControl.widthAnchor.constraint(equalToConstant: 290).isActive = true
 
         appearanceControl.segmentStyle = .rounded
         appearanceControl.target = self
@@ -1074,7 +1231,12 @@ private final class AppearanceSettingsViewController: NSViewController {
         let multiplication = NSTextField(labelWithString: "×")
         multiplication.textColor = .secondaryLabelColor
         customFixedSizeRow.setViews(
-            [Self.detailInlineLabel("Custom viewport"), customFixedWidthField, multiplication, customFixedHeightField],
+            [
+                Self.detailInlineLabel(L10n.tr("Custom viewport", "自定义视口")),
+                customFixedWidthField,
+                multiplication,
+                customFixedHeightField,
+            ],
             in: .leading
         )
         customFixedSizeRow.orientation = .horizontal
@@ -1082,8 +1244,13 @@ private final class AppearanceSettingsViewController: NSViewController {
         customFixedSizeRow.spacing = 8
 
         fixedSizeSection.setViews([
-            Self.titleLabel("Fixed Window Size"),
-            Self.detailLabel("Shared size used by every Tab in Fixed mode."),
+            Self.titleLabel(L10n.tr("Fixed Window Size", "固定窗口尺寸")),
+            Self.detailLabel(
+                L10n.tr(
+                    "Shared size used by every Tab in Fixed mode.",
+                    "固定尺寸模式下所有标签页共用的窗口大小。"
+                )
+            ),
             fixedSizeControl,
             customFixedSizeRow,
         ], in: .leading)
@@ -1092,20 +1259,44 @@ private final class AppearanceSettingsViewController: NSViewController {
         fixedSizeSection.spacing = 7
 
         let stack = NSStackView(views: [
-            Self.titleLabel("Interface Appearance"),
-            Self.detailLabel("Choose FloatTabs' appearance."),
+            Self.titleLabel(L10n.tr("Language / 语言", "语言 / Language")),
+            Self.detailLabel(
+                L10n.tr(
+                    "Choose FloatTabs' interface language.",
+                    "切换 FloatTabs 的界面显示语言，即时生效。"
+                )
+            ),
+            languageControl,
+            Self.spacer(6),
+            Self.titleLabel(L10n.tr("Interface Appearance", "界面外观")),
+            Self.detailLabel(L10n.tr("Choose FloatTabs' appearance.", "选择 FloatTabs 的深浅色外观。")),
             appearanceControl,
             Self.spacer(6),
-            Self.titleLabel("Menu Bar"),
-            Self.detailLabel("Show the current Web App name in the menu bar."),
+            Self.titleLabel(L10n.tr("Menu Bar", "菜单栏图标")),
+            Self.detailLabel(
+                L10n.tr(
+                    "Show the current Web App name in the menu bar.",
+                    "是否在顶部菜单栏显示当前网页应用名称。"
+                )
+            ),
             menuBarDisplayControl,
             Self.spacer(6),
-            Self.titleLabel("Border Theme"),
-            Self.detailLabel("Choose a border style or custom color."),
+            Self.titleLabel(L10n.tr("Border Theme", "边框主题")),
+            Self.detailLabel(
+                L10n.tr(
+                    "Choose a border style or custom color.",
+                    "选择悬浮窗默认边框样式或自定义颜色。"
+                )
+            ),
             borderPalette,
             Self.spacer(6),
-            Self.titleLabel("Window Size Behavior"),
-            Self.detailLabel("Use each Web App's size or one shared size."),
+            Self.titleLabel(L10n.tr("Window Size Behavior", "窗口尺寸策略")),
+            Self.detailLabel(
+                L10n.tr(
+                    "Use each Web App's size or one shared size.",
+                    "为每个网页应用记忆独立尺寸，或全局统一固定尺寸。"
+                )
+            ),
             windowSizeControl,
             fixedSizeSection,
         ])
@@ -1128,6 +1319,13 @@ private final class AppearanceSettingsViewController: NSViewController {
     override func viewWillAppear() {
         super.viewWillAppear()
         synchronizeControls()
+    }
+
+    @objc private func languageChanged(_ sender: NSSegmentedControl) {
+        guard AppLanguage.allCases.indices.contains(sender.selectedSegment) else { return }
+        let selected = AppLanguage.allCases[sender.selectedSegment]
+        preferencesStore.appLanguage = selected
+        AppLocalization.apply(selected)
     }
 
     @objc private func appearanceChanged(_ sender: NSSegmentedControl) {
@@ -1228,6 +1426,9 @@ private final class AppearanceSettingsViewController: NSViewController {
     }
 
     private func synchronizeControls() {
+        languageControl.selectedSegment = AppLanguage.allCases.firstIndex(
+            of: preferencesStore.appLanguage
+        ) ?? 0
         appearanceControl.selectedSegment = AppAppearanceMode.allCases.firstIndex(
             of: preferencesStore.appearanceMode
         ) ?? 0
@@ -1295,7 +1496,7 @@ private final class AppearanceSettingsViewController: NSViewController {
 }
 
 @MainActor
-private final class BorderThemeSwatchButton: NSButton {
+final class BorderThemeSwatchButton: NSButton {
     let theme: PanelBorderTheme
     var customColor: NSColor {
         didSet { needsDisplay = true }
@@ -1365,12 +1566,18 @@ private final class SettingsDocumentView: NSView {
 
 @MainActor
 final class ShortcutsSettingsViewController: NSViewController {
+    private let preferencesStore: AppPreferencesStore
     private let embedsInSettingsPage: Bool
+    private var externalCommandsToggle: NSButton?
 
-    init(embedsInSettingsPage: Bool = false) {
+    init(
+        preferencesStore: AppPreferencesStore = AppPreferencesStore(),
+        embedsInSettingsPage: Bool = false
+    ) {
+        self.preferencesStore = preferencesStore
         self.embedsInSettingsPage = embedsInSettingsPage
         super.init(nibName: nil, bundle: nil)
-        title = "Shortcuts"
+        title = L10n.tr("Shortcuts", "快捷键")
     }
 
     @available(*, unavailable)
@@ -1383,27 +1590,60 @@ final class ShortcutsSettingsViewController: NSViewController {
         document.translatesAutoresizingMaskIntoConstraints = false
 
         var views: [NSView] = [
-            sectionTitle("Global"),
-            detailLabel("Show / Hide works everywhere; other shortcuts work in FloatTabs."),
-            shortcutRecorderRow("Show / Hide FloatTabs", name: .toggleFloatTabs),
+            sectionTitle(L10n.tr("Global", "全局快捷键")),
+            detailLabel(
+                L10n.tr(
+                    "Show / Hide works everywhere; other shortcuts work in FloatTabs.",
+                    "“显示 / 隐藏”在系统全局可用，其余快捷键在 FloatTabs 窗口激活时生效。"
+                )
+            ),
+            shortcutRecorderRow(
+                L10n.tr("Show / Hide FloatTabs", "显示 / 隐藏 FloatTabs"),
+                name: .toggleFloatTabs
+            ),
             spacer(10),
-            sectionTitle("Slots"),
+            sectionTitle(L10n.tr("Tabs", "标签页")),
         ]
         views.append(contentsOf: AppShortcutCatalog.slotBindings.map(shortcutRecorderRow(for:)))
-        views.append(contentsOf: [spacer(10), sectionTitle("Navigation")])
+        views.append(contentsOf: [spacer(10), sectionTitle(L10n.tr("Navigation", "导航与操作"))])
         views.append(contentsOf: AppShortcutCatalog.navigationBindings.map(shortcutRecorderRow(for:)))
-        views.append(contentsOf: [spacer(10), sectionTitle("View")])
+        views.append(contentsOf: [spacer(10), sectionTitle(L10n.tr("View", "视图与窗口"))])
         views.append(contentsOf: AppShortcutCatalog.viewBindings.map(shortcutRecorderRow(for:)))
-        views.append(contentsOf: [spacer(10), sectionTitle("Application")])
+        views.append(contentsOf: [spacer(10), sectionTitle(L10n.tr("Application", "应用"))])
         views.append(contentsOf: AppShortcutCatalog.applicationBindings.map(shortcutRecorderRow(for:)))
 
         let resetButton = NSButton(
-            title: "Reset All to Defaults",
+            title: L10n.tr("Reset All to Defaults", "全部恢复默认"),
             target: self,
             action: #selector(resetAllShortcuts)
         )
         resetButton.bezelStyle = .rounded
-        views.append(contentsOf: [spacer(10), resetButton, spacer(8)])
+
+        let externalCommandsCheckbox = NSButton(
+            checkboxWithTitle: L10n.tr(
+                "Allow external control commands (e.g. RemoteOrbit)",
+                "允许外部控制指令（例如 RemoteOrbit）"
+            ),
+            target: self,
+            action: #selector(externalCommandsToggled(_:))
+        )
+        externalCommandsCheckbox.state = preferencesStore.externalCommandsEnabled ? .on : .off
+        self.externalCommandsToggle = externalCommandsCheckbox
+
+        views.append(contentsOf: [
+            spacer(10),
+            resetButton,
+            spacer(12),
+            sectionTitle(L10n.tr("External Automation", "外部控制与自动化")),
+            externalCommandsCheckbox,
+            detailLabel(
+                L10n.tr(
+                    "Turn off to ignore distributed notifications from external companion tools while keeping your configured keyboard shortcuts active.",
+                    "关闭后将忽略来自外部联动工具的分布式控制指令，但应用内与全局快捷键仍正常工作。"
+                )
+            ),
+            spacer(8),
+        ])
 
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
@@ -1466,7 +1706,12 @@ final class ShortcutsSettingsViewController: NSViewController {
         recorder.validateShortcut = { [weak self] shortcut in
             guard let self else { return .allow }
             if let conflict = self.conflictingAction(for: shortcut, excluding: name) {
-                return .disallow(reason: "This shortcut is already used by “\(conflict)”.")
+                return .disallow(
+                    reason: L10n.tr(
+                        "This shortcut is already used by “\(conflict)”.",
+                        "该快捷键已被“\(conflict)”占用。"
+                    )
+                )
             }
             return .allow
         }
@@ -1483,7 +1728,7 @@ final class ShortcutsSettingsViewController: NSViewController {
         excluding excludedName: KeyboardShortcuts.Name
     ) -> String? {
         let entries: [(String, KeyboardShortcuts.Name)] = [
-            ("Show / Hide FloatTabs", .toggleFloatTabs),
+            (L10n.tr("Show / Hide FloatTabs", "显示 / 隐藏 FloatTabs"), .toggleFloatTabs),
         ] + AppShortcutCatalog.allBindings.map { ($0.title, $0.name) }
 
         for (title, name) in entries where name != excludedName {
@@ -1496,6 +1741,10 @@ final class ShortcutsSettingsViewController: NSViewController {
 
     @objc private func resetAllShortcuts() {
         KeyboardShortcuts.reset([.toggleFloatTabs] + AppShortcutCatalog.allNames)
+    }
+
+    @objc private func externalCommandsToggled(_ sender: NSButton) {
+        preferencesStore.externalCommandsEnabled = (sender.state == .on)
     }
 
     private func sectionTitle(_ text: String) -> NSTextField {
@@ -1529,8 +1778,8 @@ final class ShortcutsSettingsViewController: NSViewController {
 enum AppReleaseInfo {
     static func displayVersion(shortVersion: String?, build _: String?) -> String {
         let version = shortVersion?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedVersion = version.flatMap { $0.isEmpty ? nil : $0 } ?? "Unknown"
-        return "Version \(resolvedVersion)"
+        let resolvedVersion = version.flatMap { $0.isEmpty ? nil : $0 } ?? L10n.tr("Unknown", "未知")
+        return L10n.tr("Version \(resolvedVersion)", "版本 \(resolvedVersion)")
     }
 
     static var currentVersionDisplay: String {
@@ -1583,20 +1832,24 @@ final class PerformanceSettingsViewController: NSViewController {
     private let websiteCacheManager: WebsiteCacheManagementClient
     private let embedsInSettingsPage: Bool
 
-    private let websiteCacheUsageLabel = NSTextField(labelWithString: "Unavailable")
-    private let websiteCacheLastCleanupLabel = NSTextField(labelWithString: "Never")
+    private let websiteCacheUsageLabel = NSTextField(labelWithString: L10n.tr("Unavailable", "暂不可用"))
+    private let websiteCacheLastCleanupLabel = NSTextField(labelWithString: L10n.tr("Never", "从未清理"))
     private let websiteCacheAutomaticSwitch = NSSwitch()
     private let websiteCacheRetentionPopup = NSPopUpButton()
     private let websiteCacheMaximumPopup = NSPopUpButton()
-    private let releaseWebsiteCacheButton = NSButton(title: "Release Cache…", target: nil, action: nil)
+    private let releaseWebsiteCacheButton = NSButton(
+        title: L10n.tr("Release Cache…", "立即释放缓存…"),
+        target: nil,
+        action: nil
+    )
     private let websiteCacheResultLabel = NSTextField(wrappingLabelWithString: "")
     private var isWebsiteCacheReleaseInProgress = false
     private var websiteCacheMeasurementTask: Task<Void, Never>?
     private var isWebsiteCacheMeasurementInFlight = false
     private var websiteCacheMeasurementSequence = 0
 
-    private(set) var displayedWebsiteCacheUsage = "Unavailable"
-    private(set) var displayedWebsiteCacheLastCleanup = "Never"
+    private(set) var displayedWebsiteCacheUsage = L10n.tr("Unavailable", "暂不可用")
+    private(set) var displayedWebsiteCacheLastCleanup = L10n.tr("Never", "从未清理")
     private(set) var isReleaseCacheEnabled = false
     private(set) var websiteCacheResultMessage = ""
 
@@ -1661,20 +1914,45 @@ final class PerformanceSettingsViewController: NSViewController {
         websiteCacheResultLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 510).isActive = true
 
         let stack = NSStackView(views: [
-            sectionTitle("Runtime Lifecycle"),
-            detailLabel("Web App runtimes are managed automatically by default. Use Runtime Retention → Keep Loaded on a Tab only when you want an already loaded inactive runtime retained during normal operation; critical memory pressure may still reclaim it."),
+            sectionTitle(L10n.tr("Runtime Lifecycle", "运行时生命周期")),
+            detailLabel(
+                L10n.tr(
+                    "Automatic keeps recently used Tabs ready and hibernates inactive, unprotected Tabs after 30 minutes (or earlier under macOS memory pressure). Use Runtime Retention → Keep Loaded on a Tab’s menu when you want an already loaded Tab kept resident in the background.",
+                    "“自动管理”会保持近期使用的标签处于就绪状态，并在标签闲置 30 分钟后（或系统内存紧张时更早）休眠释放；如需已加载页面保持后台常驻，可在标签右键菜单的“驻留策略”中选择“保持常驻”。"
+                )
+            ),
             spacer(10),
-            sectionTitle("Website Storage"),
-            detailLabel("Only re-downloadable webpage caches are removed."),
-            websiteCacheSettingRow("Estimated cache usage", control: websiteCacheUsageLabel),
-            websiteCacheSettingRow("Last cleanup", control: websiteCacheLastCleanupLabel),
-            websiteCacheSettingRow("Automatically manage cache", control: websiteCacheAutomaticSwitch),
-            websiteCacheSettingRow("Remove cache unused for", control: websiteCacheRetentionPopup),
-            websiteCacheSettingRow("Maximum cache usage", control: websiteCacheMaximumPopup),
+            sectionTitle(L10n.tr("Website Storage", "网站存储空间")),
+            detailLabel(
+                L10n.tr(
+                    "Only re-downloadable webpage caches are removed.",
+                    "仅清理可重新下载的网页缓存，不影响登录状态与持久数据。"
+                )
+            ),
+            websiteCacheSettingRow(
+                L10n.tr("Estimated cache usage", "预计缓存占用"),
+                control: websiteCacheUsageLabel
+            ),
+            websiteCacheSettingRow(
+                L10n.tr("Last cleanup", "上次清理时间"),
+                control: websiteCacheLastCleanupLabel
+            ),
+            websiteCacheSettingRow(
+                L10n.tr("Automatically manage cache", "自动管理缓存"),
+                control: websiteCacheAutomaticSwitch
+            ),
+            websiteCacheSettingRow(
+                L10n.tr("Remove cache unused for", "清理未使用的缓存超过"),
+                control: websiteCacheRetentionPopup
+            ),
+            websiteCacheSettingRow(
+                L10n.tr("Maximum cache usage", "最大缓存上限"),
+                control: websiteCacheMaximumPopup
+            ),
             releaseWebsiteCacheButton,
             websiteCacheResultLabel,
             spacer(8),
-            detailLabel("Cache size is an estimate."),
+            detailLabel(L10n.tr("Cache size is an estimate.", "缓存大小为估算值。")),
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -1748,11 +2026,11 @@ final class PerformanceSettingsViewController: NSViewController {
         let snapshot = websiteCacheManager.snapshot()
         switch snapshot.measurementState {
         case .calculating:
-            displayedWebsiteCacheUsage = "Calculating…"
+            displayedWebsiteCacheUsage = L10n.tr("Calculating…", "正在统计…")
         case .available:
             displayedWebsiteCacheUsage = Self.formatByteCount(snapshot.estimatedBytes)
         case .unavailable:
-            displayedWebsiteCacheUsage = "Unavailable"
+            displayedWebsiteCacheUsage = L10n.tr("Unavailable", "暂不可用")
         }
         displayedWebsiteCacheLastCleanup = Self.formatDate(snapshot.lastSuccessfulCleanupAt)
         websiteCacheUsageLabel.stringValue = displayedWebsiteCacheUsage
@@ -1831,14 +2109,17 @@ final class PerformanceSettingsViewController: NSViewController {
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Release Website Cache?"
-        alert.informativeText = "This clears only re-downloadable webpage caches. Cookies, login state and persistent website data are not cleared. Currently open pages may reload."
-        alert.addButton(withTitle: "Release Cache")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.tr("Release Website Cache?", "释放网站缓存？")
+        alert.informativeText = L10n.tr(
+            "This clears only re-downloadable webpage caches. Cookies, login state and persistent website data are not cleared. Currently open pages may reload.",
+            "此操作仅清除可重新下载的网页缓存。Cookie、登录状态与本地持久数据不会被清除，当前打开的页面可能会重新加载。"
+        )
+        alert.addButton(withTitle: L10n.tr("Release Cache", "释放缓存"))
+        alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn, let self else { return }
             self.isWebsiteCacheReleaseInProgress = true
-            self.websiteCacheResultMessage = "Releasing cache…"
+            self.websiteCacheResultMessage = L10n.tr("Releasing cache…", "正在释放缓存…")
             self.refreshWebsiteCache()
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -1846,7 +2127,10 @@ final class PerformanceSettingsViewController: NSViewController {
                     let result = try await self.websiteCacheManager.releaseCache()
                     self.websiteCacheResultMessage = Self.cleanupResultText(result)
                 } catch {
-                    self.websiteCacheResultMessage = "Cache release failed: \(error.localizedDescription)"
+                    self.websiteCacheResultMessage = L10n.tr(
+                        "Cache release failed: \(error.localizedDescription)",
+                        "缓存释放失败：\(error.localizedDescription)"
+                    )
                 }
                 self.isWebsiteCacheReleaseInProgress = false
                 self.refreshWebsiteCache()
@@ -1855,7 +2139,7 @@ final class PerformanceSettingsViewController: NSViewController {
     }
 
     static func formatByteCount(_ bytes: Int64?) -> String {
-        guard let bytes else { return "Unavailable" }
+        guard let bytes else { return L10n.tr("Unavailable", "暂不可用") }
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useMB, .useGB]
         formatter.countStyle = .file
@@ -1863,8 +2147,11 @@ final class PerformanceSettingsViewController: NSViewController {
     }
 
     static func formatDate(_ date: Date?) -> String {
-        guard let date else { return "Never" }
+        guard let date else { return L10n.tr("Never", "从未清理") }
         let formatter = DateFormatter()
+        if AppLocalization.isChinese {
+            formatter.locale = Locale(identifier: "zh_Hans")
+        }
         formatter.dateStyle = .short
         formatter.timeStyle = .short
         return formatter.string(from: date)
@@ -1873,9 +2160,15 @@ final class PerformanceSettingsViewController: NSViewController {
     static func cleanupResultText(_ result: WebsiteCacheCleanupResult) -> String {
         let released = formatByteCount(result.releasedBytes)
         if result.estimatedBytesBefore == nil || result.estimatedBytesAfter == nil {
-            return "Cache released from \(result.cleanedProfileCount) Profile(s), \(result.cleanedRecordCount) record(s). Size unavailable."
+            return L10n.tr(
+                "Cache released from \(result.cleanedProfileCount) Profile(s), \(result.cleanedRecordCount) record(s). Size unavailable.",
+                "已从 \(result.cleanedProfileCount) 个配置文件释放 \(result.cleanedRecordCount) 条缓存记录（大小暂不可用）。"
+            )
         }
-        return "Estimated usage: \(formatByteCount(result.estimatedBytesBefore)) → \(formatByteCount(result.estimatedBytesAfter)). Released \(released) across \(result.cleanedProfileCount) Profile(s), \(result.cleanedRecordCount) record(s)."
+        return L10n.tr(
+            "Estimated usage: \(formatByteCount(result.estimatedBytesBefore)) → \(formatByteCount(result.estimatedBytesAfter)). Released \(released) across \(result.cleanedProfileCount) Profile(s), \(result.cleanedRecordCount) record(s).",
+            "预计占用：\(formatByteCount(result.estimatedBytesBefore)) → \(formatByteCount(result.estimatedBytesAfter))，共清理 \(result.cleanedProfileCount) 个配置文件的 \(result.cleanedRecordCount) 条记录，释放约 \(released)。"
+        )
     }
 
     private func sectionTitle(_ text: String) -> NSTextField {
@@ -1917,7 +2210,11 @@ class BrowserProfilesSettingsViewController: NSViewController {
     private let embedsInSettingsPage: Bool
 
     private let profileRowsStack = NSStackView()
-    private let newProfileButton = NSButton(title: "+ New Profile", target: nil, action: nil)
+    private let newProfileButton = NSButton(
+        title: L10n.tr("+ New Profile", "+ 新建配置文件"),
+        target: nil,
+        action: nil
+    )
     private let profileSupportLabel = NSTextField(wrappingLabelWithString: "")
 
     // Read-only derived seams keep UI tests focused on the injected snapshot;
@@ -1961,7 +2258,7 @@ class BrowserProfilesSettingsViewController: NSViewController {
         newProfileButton.bezelStyle = .rounded
 
         let stack = NSStackView(views: [
-            sectionTitle("Profiles"),
+            sectionTitle(L10n.tr("Profiles", "浏览器配置文件")),
             profileRowsStack,
             profileSupportLabel,
             newProfileButton,
@@ -2016,49 +2313,93 @@ class BrowserProfilesSettingsViewController: NSViewController {
     /// after a successful mutation. No Profile metadata is cached here.
     func refreshProfiles() {
         let snapshot = browserProfileManager.snapshot()
-        displayedBrowserProfileNames = [snapshot.defaultProfilePresentation.name]
-            + snapshot.customProfiles.map(\.name)
-        displayedBrowserProfileActionTitles = [["Rename…"]] + snapshot.customProfiles.map { _ in
-            ["Rename…", "Delete…"]
-        }
-        displayedBrowserProfileDeleteEnabled = [false] + snapshot.customProfiles.map {
-            !snapshot.referencedProfileIDs.contains($0.id)
-        }
-        displayedBrowserProfileDeleteToolTips = [nil] + snapshot.customProfiles.map { profile in
-            Self.profileDeletionTooltip(
-                for: snapshot.referencingWebAppNamesByProfileID[profile.id] ?? []
-            )
-        }
-        isNewProfileEnabled = snapshot.customProfilesSupported
-        newProfileButton.isEnabled = snapshot.customProfilesSupported
-        profileSupportDescription = snapshot.customProfilesSupported
-            ? "Each Profile uses its own FloatTabs website data."
-            : "Additional Profiles require macOS 14 or later."
-        profileSupportLabel.stringValue = profileSupportDescription
+        let hasAnotherProfile = snapshot.totalProfileCount > 1
+
+        var names: [String] = []
+        var actionTitles: [[String]] = []
+        var deleteEnabled: [Bool] = []
+        var deleteToolTips: [String?] = []
 
         for arrangedSubview in profileRowsStack.arrangedSubviews {
             profileRowsStack.removeArrangedSubview(arrangedSubview)
             arrangedSubview.removeFromSuperview()
         }
 
-        profileRowsStack.addArrangedSubview(
-            makeDefaultProfileRow(snapshot.defaultProfilePresentation)
-        )
-        for profile in snapshot.customProfiles {
+        let renameTitle = L10n.tr("Rename…", "重命名…")
+        let deleteTitle = L10n.tr("Delete…", "删除…")
+
+        if snapshot.includesDefaultProfile {
+            let canDeleteDefault = !snapshot.isDefaultProfileReferenced && hasAnotherProfile
+            let defaultDisplayName = L10n.defaultDisplayName(snapshot.defaultProfilePresentation.name)
+            let defaultTooltip = Self.profileDeletionTooltip(
+                for: snapshot.defaultReferencingWebAppNames,
+                isReferencedWithoutNames: snapshot.isDefaultProfileReferenced
+                    && snapshot.defaultReferencingWebAppNames.isEmpty,
+                isLastRemaining: !snapshot.isDefaultProfileReferenced && !hasAnotherProfile
+            )
+            names.append(defaultDisplayName)
+            actionTitles.append([renameTitle, deleteTitle])
+            deleteEnabled.append(canDeleteDefault)
+            deleteToolTips.append(defaultTooltip)
+
             profileRowsStack.addArrangedSubview(
-                makeCustomProfileRow(
-                    profile,
-                    isReferenced: snapshot.referencedProfileIDs.contains(profile.id),
-                    referencingWebAppNames: snapshot.referencingWebAppNamesByProfileID[profile.id] ?? []
+                makeProfileRow(
+                    name: defaultDisplayName,
+                    profileID: nil,
+                    renameAction: #selector(renameDefaultProfile),
+                    deleteAction: #selector(deleteDefaultProfile),
+                    isReferenced: snapshot.isDefaultProfileReferenced,
+                    referencingWebAppNames: snapshot.defaultReferencingWebAppNames,
+                    canDelete: canDeleteDefault,
+                    deleteToolTip: defaultTooltip
                 )
             )
         }
+
+        for profile in snapshot.customProfiles {
+            let isReferenced = snapshot.referencedProfileIDs.contains(profile.id)
+            let referencingNames = snapshot.referencingWebAppNamesByProfileID[profile.id] ?? []
+            let canDelete = !isReferenced && hasAnotherProfile
+            let tooltip = Self.profileDeletionTooltip(
+                for: referencingNames,
+                isReferencedWithoutNames: isReferenced && referencingNames.isEmpty,
+                isLastRemaining: !isReferenced && !hasAnotherProfile
+            )
+            names.append(profile.name)
+            actionTitles.append([renameTitle, deleteTitle])
+            deleteEnabled.append(canDelete)
+            deleteToolTips.append(tooltip)
+
+            profileRowsStack.addArrangedSubview(
+                makeProfileRow(
+                    name: profile.name,
+                    profileID: profile.id,
+                    renameAction: #selector(renameProfile(_:)),
+                    deleteAction: #selector(deleteProfile(_:)),
+                    isReferenced: isReferenced,
+                    referencingWebAppNames: referencingNames,
+                    canDelete: canDelete,
+                    deleteToolTip: tooltip
+                )
+            )
+        }
+
+        displayedBrowserProfileNames = names
+        displayedBrowserProfileActionTitles = actionTitles
+        displayedBrowserProfileDeleteEnabled = deleteEnabled
+        displayedBrowserProfileDeleteToolTips = deleteToolTips
+        isNewProfileEnabled = true
+        newProfileButton.isEnabled = true
+        profileSupportDescription = L10n.tr(
+            "Each Profile uses its own FloatTabs website data.",
+            "每个配置文件各自拥有独立的网站数据与登录状态。"
+        )
+        profileSupportLabel.stringValue = profileSupportDescription
     }
 
     /// Internal action seam used by focused tests to exercise the same trim
     /// and manager handoff used by the New Profile alert.
     func submitNewProfileNameForTesting(_ rawName: String) {
-        guard browserProfileManager.snapshot().customProfilesSupported else { return }
         submitNewProfileName(rawName)
     }
 
@@ -2067,57 +2408,44 @@ class BrowserProfilesSettingsViewController: NSViewController {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func makeDefaultProfileRow(
-        _ presentation: DefaultBrowserProfilePresentation
-    ) -> NSView {
-        let label = NSTextField(labelWithString: presentation.name)
-        label.font = .systemFont(ofSize: 12)
-        label.widthAnchor.constraint(equalToConstant: 230).isActive = true
-
-        let renameButton = NSButton(
-            title: "Rename…",
-            target: self,
-            action: #selector(renameDefaultProfile)
-        )
-        renameButton.bezelStyle = .rounded
-
-        let row = NSStackView(views: [label, renameButton])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 8
-        return row
-    }
-
-    private func makeCustomProfileRow(
-        _ profile: BrowserProfile,
+    private func makeProfileRow(
+        name: String,
+        profileID: UUID?,
+        renameAction: Selector,
+        deleteAction: Selector,
         isReferenced: Bool,
-        referencingWebAppNames: [String]
+        referencingWebAppNames: [String],
+        canDelete: Bool,
+        deleteToolTip: String?
     ) -> NSView {
-        let nameLabel = NSTextField(labelWithString: profile.name)
+        let nameLabel = NSTextField(labelWithString: name)
         nameLabel.font = .systemFont(ofSize: 12)
         nameLabel.widthAnchor.constraint(equalToConstant: 230).isActive = true
 
         let renameButton = NSButton(
-            title: "Rename…",
+            title: L10n.tr("Rename…", "重命名…"),
             target: self,
-            action: #selector(renameProfile(_:))
+            action: renameAction
         )
-        renameButton.identifier = NSUserInterfaceItemIdentifier(profile.id.uuidString)
+        if let profileID {
+            renameButton.identifier = NSUserInterfaceItemIdentifier(profileID.uuidString)
+        }
         renameButton.bezelStyle = .rounded
 
         let deleteButton = NSButton(
-            title: "Delete…",
+            title: L10n.tr("Delete…", "删除…"),
             target: self,
-            action: #selector(deleteProfile(_:))
+            action: deleteAction
         )
-        deleteButton.identifier = NSUserInterfaceItemIdentifier(profile.id.uuidString)
+        if let profileID {
+            deleteButton.identifier = NSUserInterfaceItemIdentifier(profileID.uuidString)
+        }
         deleteButton.bezelStyle = .rounded
-        deleteButton.isEnabled = !isReferenced
-        let deleteToolTip = Self.profileDeletionTooltip(for: referencingWebAppNames)
+        deleteButton.isEnabled = canDelete
         deleteButton.toolTip = deleteToolTip
 
         let deleteControl: NSView
-        if isReferenced, let deleteToolTip {
+        if !canDelete, let deleteToolTip {
             deleteControl = ProfileDeleteTooltipView(
                 button: deleteButton,
                 toolTip: deleteToolTip
@@ -2138,8 +2466,14 @@ class BrowserProfilesSettingsViewController: NSViewController {
 
         guard isReferenced else { return row }
         let detailText = referencingWebAppNames.isEmpty
-            ? "This Profile is used by one or more Web Apps."
-            : "Used by \(referencingWebAppNames.joined(separator: ", "))."
+            ? L10n.tr(
+                "This Profile is used by one or more Web Apps.",
+                "此配置文件正在被一个或多个网页应用使用。"
+            )
+            : L10n.tr(
+                "Used by \(referencingWebAppNames.joined(separator: ", ")).",
+                "正用于：\(referencingWebAppNames.joined(separator: "、"))。"
+            )
         let detail = detailLabel(detailText)
         let wrapper = NSStackView(views: [row, detail])
         wrapper.orientation = .vertical
@@ -2148,25 +2482,60 @@ class BrowserProfilesSettingsViewController: NSViewController {
         return wrapper
     }
 
+    static var lastRemainingProfileTooltip: String {
+        L10n.tr(
+            "At least one Browser Profile must remain.",
+            "至少需要保留一个浏览器配置文件。"
+        )
+    }
+
     static func profileDeletionTooltip(for webAppNames: [String]) -> String? {
-        guard !webAppNames.isEmpty else { return nil }
-        return "Used by Tabs: \(webAppNames.joined(separator: ", ")). Switch them to another Profile before deleting."
+        profileDeletionTooltip(
+            for: webAppNames,
+            isReferencedWithoutNames: false,
+            isLastRemaining: false
+        )
+    }
+
+    static func profileDeletionTooltip(
+        for webAppNames: [String],
+        isReferencedWithoutNames: Bool,
+        isLastRemaining: Bool
+    ) -> String? {
+        if !webAppNames.isEmpty {
+            return L10n.tr(
+                "Used by Tabs: \(webAppNames.joined(separator: ", ")). Switch them to another Profile before deleting.",
+                "正被标签页使用：\(webAppNames.joined(separator: "、"))。请先将它们切换到其他配置文件后再删除。"
+            )
+        }
+        if isReferencedWithoutNames {
+            return L10n.tr(
+                "This Profile is used by one or more Web Apps.",
+                "此配置文件正在被一个或多个网页应用使用。"
+            )
+        }
+        if isLastRemaining {
+            return lastRemainingProfileTooltip
+        }
+        return nil
     }
 
     @objc private func createProfile() {
-        guard browserProfileManager.snapshot().customProfilesSupported,
-              let window = view.window else { return }
+        guard let window = view.window else { return }
 
         let field = NSTextField(string: "")
-        field.placeholderString = "Profile name"
+        field.placeholderString = L10n.tr("Profile name", "配置文件名称")
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
 
         let alert = NSAlert()
-        alert.messageText = "New Browser Profile"
-        alert.informativeText = "Choose a name for this Profile. It will use separate FloatTabs website data."
+        alert.messageText = L10n.tr("New Browser Profile", "新建浏览器配置文件")
+        alert.informativeText = L10n.tr(
+            "Choose a name for this Profile. It will use separate FloatTabs website data.",
+            "为该配置文件命名，它将拥有独立的网页数据与登录会话。"
+        )
         alert.accessoryView = field
-        alert.addButton(withTitle: "Create")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.tr("Create", "创建"))
+        alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn, let self else { return }
             self.submitNewProfileName(field.stringValue)
@@ -2198,7 +2567,24 @@ class BrowserProfilesSettingsViewController: NSViewController {
         guard !snapshot.referencedProfileIDs.contains(id) else {
             throw BrowserProfileManagementError.referenced
         }
+        guard snapshot.totalProfileCount > 1 else {
+            throw BrowserProfileManagementError.lastRemainingProfile
+        }
         return profile
+    }
+
+    func defaultProfileDeletionCandidate() throws -> DefaultBrowserProfilePresentation {
+        let snapshot = browserProfileManager.snapshot()
+        guard snapshot.includesDefaultProfile else {
+            throw BrowserProfileManagementError.notFound
+        }
+        guard !snapshot.isDefaultProfileReferenced else {
+            throw BrowserProfileManagementError.referenced
+        }
+        guard snapshot.totalProfileCount > 1 else {
+            throw BrowserProfileManagementError.lastRemainingProfile
+        }
+        return snapshot.defaultProfilePresentation
     }
 
     @objc private func renameDefaultProfile() {
@@ -2206,6 +2592,18 @@ class BrowserProfilesSettingsViewController: NSViewController {
             id: nil,
             currentName: browserProfileManager.snapshot().defaultProfilePresentation.name
         )
+    }
+
+    @objc private func deleteDefaultProfile() {
+        do {
+            let presentation = try defaultProfileDeletionCandidate()
+            presentDeleteProfileConfirmation(
+                id: nil,
+                name: L10n.defaultDisplayName(presentation.name)
+            )
+        } catch {
+            showProfileError(error)
+        }
     }
 
     @objc private func renameProfile(_ sender: NSButton) {
@@ -2219,23 +2617,30 @@ class BrowserProfilesSettingsViewController: NSViewController {
     private func presentRenameProfile(id: UUID?, currentName: String) {
         guard let window = view.window else { return }
 
-        let field = NSTextField(string: currentName)
+        let displayedInitial = id == nil ? L10n.defaultDisplayName(currentName) : currentName
+        let field = NSTextField(string: displayedInitial)
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
 
         let alert = NSAlert()
-        alert.messageText = "Rename Browser Profile"
-        alert.informativeText = "Choose a new name for this Profile. Its website data and identity will remain unchanged."
+        alert.messageText = L10n.tr("Rename Browser Profile", "重命名浏览器配置文件")
+        alert.informativeText = L10n.tr(
+            "Choose a new name for this Profile. Its website data and identity will remain unchanged.",
+            "输入新的配置文件名称，其已有的网站数据与身份标识不会改变。"
+        )
         alert.accessoryView = field
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.tr("Rename", "重命名"))
+        alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn, let self else { return }
             guard let trimmedName = Self.trimmedProfileName(field.stringValue) else {
                 self.showProfileError(BrowserProfileManagementError.invalidName)
                 return
             }
+            let resolvedName = (id == nil && currentName == "Default" && trimmedName == L10n.tr("Default", "默认"))
+                ? "Default"
+                : trimmedName
             do {
-                try self.browserProfileManager.rename(id: id, name: trimmedName)
+                try self.browserProfileManager.rename(id: id, name: resolvedName)
                 self.refreshProfiles()
             } catch {
                 self.showProfileError(error)
@@ -2246,22 +2651,29 @@ class BrowserProfilesSettingsViewController: NSViewController {
     @objc private func deleteProfile(_ sender: NSButton) {
         guard let id = profileID(from: sender) else { return }
 
-        let profile: BrowserProfile
         do {
-            profile = try profileDeletionCandidate(id: id)
+            let profile = try profileDeletionCandidate(id: id)
+            presentDeleteProfileConfirmation(id: id, name: profile.name)
         } catch {
             showProfileError(error)
-            return
         }
+    }
 
+    private func presentDeleteProfileConfirmation(id: UUID?, name: String) {
         guard let window = view.window else { return }
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Delete Browser Profile \"\(profile.name)\"?"
-        alert.informativeText = "Deleting this Profile removes its FloatTabs website data, including its saved website sessions for this Profile. This cannot be undone. Apple Passwords and Keychain data are not affected."
-        alert.addButton(withTitle: "Delete Profile")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.tr(
+            "Delete Browser Profile \"\(name)\"?",
+            "删除浏览器配置文件“\(name)”？"
+        )
+        alert.informativeText = L10n.tr(
+            "Deleting this Profile removes its FloatTabs website data, including its saved website sessions for this Profile. This cannot be undone. Apple Passwords and Keychain data are not affected.",
+            "删除此配置文件将移除其独立的网站数据及已保存的登录会话，且无法撤销。Apple 密码和钥匙串数据不受影响。"
+        )
+        alert.addButton(withTitle: L10n.tr("Delete Profile", "删除配置文件"))
+        alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
             Task { @MainActor [weak self] in
@@ -2286,12 +2698,15 @@ class BrowserProfilesSettingsViewController: NSViewController {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = detail
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: L10n.tr("OK", "好"))
         alert.beginSheetModal(for: window)
     }
 
     private func showProfileError(_ error: Error) {
-        showMessage(title: "Profile Operation Failed", detail: error.localizedDescription)
+        showMessage(
+            title: L10n.tr("Profile Operation Failed", "配置文件操作失败"),
+            detail: error.localizedDescription
+        )
     }
 
     private func sectionTitle(_ text: String) -> NSTextField {

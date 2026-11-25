@@ -2396,24 +2396,212 @@ final class FaviconRecoveryTests: XCTestCase {
         provider.cancel(consumerID: consumerID)
     }
 
-    func testFaviconContextMenuOffersLockUnlockAndExplicitSelection() {
+    func testFaviconContextMenuOffersReloadWithoutRefreshIconOrLockWorkaroundItems() {
         let uniqueURL = URL(string: "https://menu-\(UUID().uuidString).example.test/")!
+        let slotID = UUID()
+        var reloadedSlots: [UUID] = []
         let tab = ExternalWebAppTabView(
-            slotID: UUID(),
+            slotID: slotID,
             faviconLoader: { _, completion in completion(nil) }
         )
-        tab.update(profile: makeProfile(url: uniqueURL.absoluteString), isActive: false, isResident: false)
+        tab.onReload = { reloadedSlots.append($0) }
+        tab.update(profile: makeProfile(url: uniqueURL.absoluteString), isActive: false, isResident: true)
         let menuItems = tab.makeContextMenu().items
-        let lock = menuItems.first { $0.title == "Lock Current Icon" }
-        let unlock = menuItems.first { $0.title == "Unlock Icon" }
-        let refresh = menuItems.first { $0.title == "Refresh & Choose Icon" }
-        XCTAssertNotNil(lock)
-        XCTAssertNotNil(unlock)
-        XCTAssertNotNil(refresh)
-        XCTAssertTrue(menuItems.contains { $0.title == "Shared by tabs on this website" })
-        XCTAssertFalse(lock?.isEnabled ?? true)
-        XCTAssertFalse(unlock?.isEnabled ?? true)
-        XCTAssertTrue(refresh?.isEnabled ?? false)
+        let reload = menuItems.first { $0.title == "Reload" }
+        XCTAssertNotNil(reload)
+        XCTAssertTrue(reload?.isEnabled ?? false)
+        XCTAssertNil(menuItems.first { $0.title == "Refresh Icon" })
+        XCTAssertNil(menuItems.first { $0.title == "Lock Current Icon" })
+        XCTAssertNil(menuItems.first { $0.title == "Unlock Icon" })
+        XCTAssertNil(menuItems.first { $0.title == "Refresh & Choose Icon" })
+        XCTAssertNil(menuItems.first { $0.title == "Shared by tabs on this website" })
+        if let reload, let action = reload.action, let target = reload.target as? NSObject {
+            _ = target.perform(action, with: reload)
+        }
+        XCTAssertEqual(reloadedSlots, [slotID])
+    }
+
+    func testAuthenticationRedirectStageRejectsSSOLoginIconAndRecordsFailure() async throws {
+        let appURL = URL(string: "https://sso-app.example.test/")!
+        let loginRedirectURL = URL(string: "https://accounts.google.com/v3/signin/identifier")!
+        let iconData = try fixtureImageData(color: .systemRed)
+        let store = WebsiteFaviconAssetStore()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let clock = FaviconTestClock(now: 100)
+        let retryGate = FaviconRetryGate()
+        let loader = FaviconTestLoader { _, _ in
+            (
+                iconData,
+                HTTPURLResponse(
+                    url: loginRedirectURL,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "text/html"]
+                )!
+            )
+        }
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            monotonicClock: { clock.now },
+            retryWaiter: { await retryGate.wait(for: $0) },
+            diagnosticRecorder: diagnostics,
+            assetStore: store
+        )
+
+        let fetchTask = Task { @MainActor in
+            await load(provider, from: appURL)
+        }
+        await retryGate.waitUntilScheduled()
+        retryGate.resumeNext()
+        let loaded = await fetchTask.value
+
+        XCTAssertNil(loaded)
+        XCTAssertFalse(storeHasRecord(store, origin: WebsiteFaviconProvider.originKey(for: appURL)!))
+        XCTAssertTrue(
+            writer.events.contains { event in
+                guard event.event == "favicon.fetch_attempt",
+                      case let .string(stages) = event.fields["failure_stages"] else {
+                    return false
+                }
+                return stages.contains("auth_redirect")
+            }
+        )
+    }
+
+    func testSlotScopedFaviconStorageIsolatesMultiPathAppsAndIgnoresAuthCommittedURL() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsSlotFavicons-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let sheetsSlot = UUID()
+        let docsSlot = UUID()
+        let sheetsHome = URL(string: "https://docs.example.test/spreadsheets/u/0/")!
+        let docsHome = URL(string: "https://docs.example.test/document/u/0/")!
+        let authURL = URL(string: "https://accounts.google.com/v3/signin")!
+
+        let sheetsPNG = try fixtureImageData(color: .systemGreen)
+        let docsPNG = try fixtureImageData(color: .systemBlue)
+        let authPNG = try fixtureImageData(color: .systemOrange)
+
+        let store = WebsiteFaviconAssetStore(directoryURL: tempDir)
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { request in
+                (Data(), Self.response(for: request, status: 404))
+            },
+            assetStore: store
+        )
+
+        var sheetsImages: [NSImage?] = []
+        var docsImages: [NSImage?] = []
+        let consumerA = UUID()
+        let consumerB = UUID()
+        provider.subscribeSlot(slotID: sheetsSlot, homeURL: sheetsHome, consumerID: consumerA) {
+            sheetsImages.append($0)
+        }
+        provider.subscribeSlot(slotID: docsSlot, homeURL: docsHome, consumerID: consumerB) {
+            docsImages.append($0)
+        }
+
+        provider.acceptSessionRenderedIcon(
+            pngData: sheetsPNG,
+            kind: .icon,
+            resourceURL: URL(string: "https://docs.example.test/spreadsheets/favicon.png"),
+            forSlotID: sheetsSlot,
+            committedURL: sheetsHome,
+            homeURL: sheetsHome
+        )
+        provider.acceptSessionRenderedIcon(
+            pngData: docsPNG,
+            kind: .icon,
+            resourceURL: URL(string: "https://docs.example.test/document/favicon.png"),
+            forSlotID: docsSlot,
+            committedURL: docsHome,
+            homeURL: docsHome
+        )
+        provider.acceptSessionRenderedIcon(
+            pngData: authPNG,
+            kind: .icon,
+            resourceURL: URL(string: "https://accounts.google.com/favicon.png"),
+            forSlotID: sheetsSlot,
+            committedURL: authURL,
+            homeURL: sheetsHome
+        )
+
+        let latestSheets = try XCTUnwrap(sheetsImages.compactMap { $0 }.last)
+        let latestDocs = try XCTUnwrap(docsImages.compactMap { $0 }.last)
+        let latestSheetsPixels = try XCTUnwrap(WebsiteFaviconProvider.rgba8PixelBytes(of: latestSheets, aspectFit: false))
+        let latestDocsPixels = try XCTUnwrap(WebsiteFaviconProvider.rgba8PixelBytes(of: latestDocs, aspectFit: false))
+        let authImage = try XCTUnwrap(NSImage(data: authPNG))
+        let authPixels = try XCTUnwrap(WebsiteFaviconProvider.rgba8PixelBytes(of: authImage, aspectFit: false))
+        XCTAssertNotEqual(latestSheetsPixels, latestDocsPixels)
+        XCTAssertNotEqual(latestSheetsPixels, authPixels)
+
+        let reloadedProvider = WebsiteFaviconProvider(
+            dataLoader: { request in
+                (Data(), Self.response(for: request, status: 404))
+            },
+            assetStore: WebsiteFaviconAssetStore(directoryURL: tempDir)
+        )
+        var reloadedSheets: NSImage?
+        var reloadedDocs: NSImage?
+        reloadedProvider.subscribeSlot(slotID: sheetsSlot, homeURL: sheetsHome, consumerID: UUID()) {
+            reloadedSheets = $0
+        }
+        reloadedProvider.subscribeSlot(slotID: docsSlot, homeURL: docsHome, consumerID: UUID()) {
+            reloadedDocs = $0
+        }
+        let reloadedSheetsImage = try XCTUnwrap(reloadedSheets)
+        let reloadedDocsImage = try XCTUnwrap(reloadedDocs)
+        XCTAssertEqual(
+            WebsiteFaviconProvider.rgba8PixelBytes(of: reloadedSheetsImage, aspectFit: false),
+            latestSheetsPixels
+        )
+        XCTAssertEqual(
+            WebsiteFaviconProvider.rgba8PixelBytes(of: reloadedDocsImage, aspectFit: false),
+            latestDocsPixels
+        )
+        XCTAssertNotEqual(
+            WebsiteFaviconProvider.rgba8PixelBytes(of: reloadedSheetsImage, aspectFit: false),
+            authPixels
+        )
+    }
+
+    func testParseSessionFaviconExtractionResultDecodesRenderedPNGAndCandidates() throws {
+        let png = try fixtureImageData(color: .systemTeal)
+        let payload: [String: Any] = [
+            "candidates": [
+                [
+                    "href": "https://app.example.test/static/icon.svg",
+                    "kind": "icon",
+                    "sizes": "any",
+                    "type": "image/svg+xml",
+                    "mediaSpecific": false,
+                    "sourceOrder": 0,
+                ],
+                [
+                    "href": "https://app.example.test/apple-touch-icon.png",
+                    "kind": "appleTouch",
+                    "sizes": "180x180",
+                    "type": "image/png",
+                    "mediaSpecific": false,
+                    "sourceOrder": 1,
+                ],
+            ],
+            "renderedDataURL": "data:image/png;base64,\(png.base64EncodedString())",
+            "renderedKind": "icon",
+            "renderedURL": "https://app.example.test/static/icon.svg",
+        ]
+        let jsonData = try JSONSerialization.data(withJSONObject: payload)
+        let jsonString = try XCTUnwrap(String(data: jsonData, encoding: .utf8))
+
+        let parsed = WebsiteFaviconProvider.parseSessionFaviconExtractionResult(.success(jsonString))
+        XCTAssertTrue(parsed.readSucceeded)
+        XCTAssertEqual(parsed.renderedPNGData, png)
+        XCTAssertEqual(parsed.renderedKind, .icon)
+        XCTAssertEqual(parsed.renderedResourceURL, URL(string: "https://app.example.test/static/icon.svg"))
+        XCTAssertEqual(parsed.candidates.count, 2)
+        XCTAssertEqual(parsed.candidates.first?.url, URL(string: "https://app.example.test/static/icon.svg"))
     }
 
     private func storeHasRecord(_ store: WebsiteFaviconAssetStore, origin: String) -> Bool {
@@ -2637,5 +2825,245 @@ private final class FaviconFetchGate {
     func resumeNext() {
         guard !continuations.isEmpty else { return }
         continuations.removeFirst().resume()
+    }
+}
+
+extension FaviconRecoveryTests {
+    func testGitHubWWWRedirectAndRepoPageAreNotBlockedByFaviconAuthInterstitialFilter() async throws {
+        XCTAssertFalse(
+            WebsiteFaviconProvider.isAuthenticationInterstitialURL(URL(string: "https://github.com/"))
+        )
+        XCTAssertFalse(
+            WebsiteFaviconProvider.isAuthenticationInterstitialURL(URL(string: "https://www.github.com/"))
+        )
+        XCTAssertFalse(
+            WebsiteFaviconProvider.isAuthenticationInterstitialURL(URL(string: "https://github.com/Lost0rz/LibreTV"))
+        )
+        XCTAssertFalse(
+            WebsiteFaviconProvider.isAuthenticationInterstitialURL(
+                URL(string: "https://github.com/org/repo/tree/main/auth")
+            )
+        )
+        XCTAssertTrue(
+            WebsiteFaviconProvider.isAuthenticationInterstitialURL(URL(string: "https://github.com/login"))
+        )
+        XCTAssertTrue(
+            WebsiteFaviconProvider.isAuthenticationInterstitialURL(
+                URL(string: "https://github.com/login/oauth/authorize?client_id=abc&redirect_uri=https://app.test")
+            )
+        )
+        XCTAssertTrue(
+            WebsiteFaviconProvider.isAuthenticationInterstitialURL(
+                URL(string: "https://accounts.google.com/v3/signin/identifier")
+            )
+        )
+        XCTAssertTrue(
+            WebsiteFaviconProvider.isAuthenticationInterstitialURL(
+                URL(string: "https://ndcdyn.interactivebrokers.com/sso/Login")
+            )
+        )
+
+        let slotID = UUID()
+        let homeURL = URL(string: "https://www.github.com/")!
+        let bareGitHubURL = URL(string: "https://github.com/")!
+        let svgIconURL = URL(string: "https://github.githubassets.com/favicons/favicon.png")!
+        let iconData = try fixtureImageData(color: .black)
+
+        let loader = FaviconTestLoader { request, _ in
+            if request.url?.absoluteString == svgIconURL.absoluteString {
+                return (iconData, Self.response(for: request, status: 200, mimeType: "image/png"))
+            }
+            return (
+                "<link rel=\"icon\" href=\"\(svgIconURL.absoluteString)\">".data(using: .utf8)!,
+                HTTPURLResponse(
+                    url: bareGitHubURL,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "text/html"]
+                )!
+            )
+        }
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let store = WebsiteFaviconAssetStore()
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            diagnosticRecorder: diagnostics,
+            assetStore: store
+        )
+
+        var receivedImages: [NSImage?] = []
+        let loaded = expectation(description: "GitHub slot icon loads across www -> bare redirect")
+        provider.subscribeSlot(slotID: slotID, homeURL: homeURL, consumerID: UUID()) { image in
+            receivedImages.append(image)
+            if image != nil {
+                loaded.fulfill()
+            }
+        }
+        await fulfillment(of: [loaded], timeout: 2)
+
+        XCTAssertNotNil(receivedImages.last ?? nil)
+        XCTAssertFalse(
+            writer.events.contains { event in
+                guard event.event == "favicon.fetch_attempt",
+                      case let .string(stages) = event.fields["failure_stages"] else {
+                    return false
+                }
+                return stages.contains("auth_redirect")
+            }
+        )
+    }
+
+    func testSlotSubscriptionUsesSiblingWWWCacheAndSingleReloadUpdatesIconWithoutBlanking() async throws {
+        let initialData = try fixtureImageData(color: .systemIndigo)
+        let updatedData = try fixtureImageData(color: .systemGreen)
+        let iconURL = URL(string: "https://cdn-sibling.example.test/icon.png")!
+        let bareURL = URL(string: "https://sibling.example.test/")!
+        let wwwURL = URL(string: "https://www.sibling.example.test/")!
+
+        enum Mode {
+            case serveInitial
+            case serveUpdated
+            case fail
+        }
+        var mode: Mode = .serveInitial
+        let loader = FaviconTestLoader { request, _ in
+            switch mode {
+            case .serveInitial:
+                if request.url == iconURL {
+                    return (initialData, Self.response(for: request, status: 200, mimeType: "image/png"))
+                }
+                return (
+                    "<link rel=\"icon\" href=\"\(iconURL.absoluteString)\">".data(using: .utf8)!,
+                    Self.response(for: request, status: 200, mimeType: "text/html")
+                )
+            case .serveUpdated:
+                if request.url == iconURL {
+                    return (updatedData, Self.response(for: request, status: 200, mimeType: "image/png"))
+                }
+                return (
+                    "<link rel=\"icon\" href=\"\(iconURL.absoluteString)\">".data(using: .utf8)!,
+                    Self.response(for: request, status: 200, mimeType: "text/html")
+                )
+            case .fail:
+                throw URLError(.notConnectedToInternet)
+            }
+        }
+
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            retryWaiter: { _ in }
+        )
+
+        let bareSlotID = UUID()
+        let initialLoaded = expectation(description: "bare origin loads icon")
+        provider.subscribeSlot(slotID: bareSlotID, homeURL: bareURL, consumerID: UUID()) { image in
+            if image != nil {
+                initialLoaded.fulfill()
+            }
+        }
+        await fulfillment(of: [initialLoaded], timeout: 2)
+
+        // New slot targeting `www.` immediately inherits cached bare origin icon.
+        let wwwSlotID = UUID()
+        var wwwImages: [NSImage?] = []
+        let siblingLoaded = expectation(description: "www slot reuses sibling bare origin cache")
+        provider.subscribeSlot(slotID: wwwSlotID, homeURL: wwwURL, consumerID: UUID()) { image in
+            wwwImages.append(image)
+            if image != nil {
+                siblingLoaded.fulfill()
+            }
+        }
+        await fulfillment(of: [siblingLoaded], timeout: 2)
+        let firstPixels = WebsiteFaviconProvider.rgba8PixelBytes(
+            of: try XCTUnwrap(wwwImages.last ?? nil),
+            aspectFit: false
+        )
+
+        // Failed reload keeps existing slot icon without blanking to nil.
+        mode = .fail
+        provider.reloadSlotIcon(slotID: wwwSlotID, homeURL: wwwURL)
+        try await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertFalse(wwwImages.contains(where: { $0 == nil }))
+
+        // Successful reload updates the icon in a single reload pass.
+        mode = .serveUpdated
+        let reloaded = expectation(description: "single reload updates slot icon")
+        let freshConsumer = UUID()
+        var reloadedImages: [NSImage?] = []
+        provider.subscribeSlot(slotID: wwwSlotID, homeURL: wwwURL, consumerID: freshConsumer) { image in
+            reloadedImages.append(image)
+            if reloadedImages.count == 2 {
+                reloaded.fulfill()
+            }
+        }
+        provider.reloadSlotIcon(slotID: wwwSlotID, homeURL: wwwURL)
+        await fulfillment(of: [reloaded], timeout: 2)
+
+        let updatedPixels = WebsiteFaviconProvider.rgba8PixelBytes(
+            of: try XCTUnwrap(reloadedImages.last ?? nil),
+            aspectFit: false
+        )
+        XCTAssertNotEqual(firstPixels, updatedPixels)
+        XCTAssertEqual(
+            loader.requests.last?.cachePolicy,
+            .reloadIgnoringLocalCacheData
+        )
+    }
+
+    func testNativeSVGNormalizationDecodesViewBoxCurrentColorWithoutXMLNS() async throws {
+        let svg = #"<svg viewBox="0 0 16 16"><path fill="currentColor" d="M2 2h12v12H2z"/></svg>"#
+        let data = try XCTUnwrap(svg.data(using: .utf8))
+        let decoded = await WebsiteFaviconProvider.decodeOrRasterizeImage(
+            from: data,
+            url: URL(string: "https://example.com/favicon.svg")!,
+            mimeType: "image/svg+xml"
+        )
+        let image = try XCTUnwrap(decoded)
+        let pixels = try XCTUnwrap(
+            WebsiteFaviconProvider.rgba8PixelBytes(of: image, aspectFit: false)
+        )
+        XCTAssertTrue(stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] > 0 })
+    }
+
+    func testProviderLoadsMinimalCurrentColorSVGFavicon() async throws {
+        let pageURL = URL(string: "https://svg-minimal.example/app")!
+        let iconURL = URL(string: "https://svg-minimal.example/icon.svg")!
+        let svgData = try XCTUnwrap(
+            #"<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="currentColor"/></svg>"#.data(using: .utf8)
+        )
+
+        let loader = FaviconTestLoader { request, _ in
+            if request.url == iconURL {
+                return (svgData, Self.response(for: request, status: 200, mimeType: "image/svg+xml"))
+            }
+            let html = #"<link rel="icon" type="image/svg+xml" href="\#(iconURL.absoluteString)">"#
+            return (
+                try XCTUnwrap(html.data(using: .utf8)),
+                Self.response(for: request, status: 200, mimeType: "text/html")
+            )
+        }
+
+        let provider = WebsiteFaviconProvider(
+            dataLoader: { try await loader.load($0) },
+            retryWaiter: { _ in }
+        )
+
+        let loaded = expectation(description: "minimal currentColor SVG icon decoded")
+        var deliveredImage: NSImage?
+        provider.subscribeSlot(slotID: UUID(), homeURL: pageURL, consumerID: UUID()) { image in
+            if let image {
+                deliveredImage = image
+                loaded.fulfill()
+            }
+        }
+        await fulfillment(of: [loaded], timeout: 2)
+
+        let image = try XCTUnwrap(deliveredImage)
+        XCTAssertEqual(image.size, NSSize(width: 16, height: 16))
+        let pixels = try XCTUnwrap(
+            WebsiteFaviconProvider.rgba8PixelBytes(of: image, aspectFit: false)
+        )
+        XCTAssertTrue(stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] > 0 })
     }
 }

@@ -67,7 +67,7 @@ private struct RuntimePressurePolicy {
 @MainActor
 final class SlotLifecycleCoordinator {
     nonisolated static let defaultRecentStageDuration: TimeInterval = 30
-    nonisolated static let defaultLongIdleThreshold: TimeInterval = 600
+    nonisolated static let defaultLongIdleThreshold: TimeInterval = 1800
     nonisolated static let defaultHiddenActiveGraceDelay: TimeInterval = 0
     nonisolated static let defaultMediaProtectionPollDelay: TimeInterval = 10
     /// Delay between progressive pressure-reclaim steps. Each continuation
