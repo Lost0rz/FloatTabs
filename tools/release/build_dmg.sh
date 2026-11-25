@@ -9,9 +9,15 @@ DERIVED_DATA="$OUTPUT_DIR/DerivedData"
 STAGE_DIR="$OUTPUT_DIR/dmg-root"
 APP_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app"
 DSYM_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app.dSYM"
+ENTITLEMENTS_PATH="$ROOT_DIR/FloatTabs/FloatTabs.entitlements"
 SIGN_IDENTITY="${FLOATTABS_SIGN_IDENTITY:-}"
 NOTARY_PROFILE="${FLOATTABS_NOTARY_PROFILE:-}"
 REQUIRED_ARCHITECTURE="arm64"
+
+if [[ ! -f "$ENTITLEMENTS_PATH" ]]; then
+  echo "error: Entitlements file not found at $ENTITLEMENTS_PATH" >&2
+  exit 1
+fi
 
 rm -rf "$DERIVED_DATA" "$STAGE_DIR"
 mkdir -p "$OUTPUT_DIR" "$STAGE_DIR"
@@ -88,6 +94,7 @@ if [[ -n "$SIGN_IDENTITY" ]]; then
     --force \
     --deep \
     --options runtime \
+    --entitlements "$ENTITLEMENTS_PATH" \
     --timestamp \
     --sign "$SIGN_IDENTITY" \
     "$APP_PATH"
@@ -101,10 +108,12 @@ else
     --force \
     --deep \
     --options runtime \
+    --entitlements "$ENTITLEMENTS_PATH" \
     --sign - \
     "$APP_PATH"
 fi
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+codesign -d --entitlements :- "$APP_PATH"
 
 if [[ ! -d "$DSYM_PATH" ]]; then
   echo "error: Release dSYM not found at $DSYM_PATH" >&2

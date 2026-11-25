@@ -281,7 +281,7 @@ final class WebsiteCacheSizeMeasurer: @unchecked Sendable {
     /// Cancelling the caller's task stops the detached walk instead of
     /// leaving a full-directory scan running in the background.
     @MainActor
-    func estimate() async -> Int64? {
+    func measureOutcome() async -> WebsiteCacheMeasurementOutcome {
         let scope = scopeProvider()
         let fileManager = self.fileManager
         let reading = self.reading
@@ -299,12 +299,16 @@ final class WebsiteCacheSizeMeasurer: @unchecked Sendable {
                 scope: scope
             )
         }
-        let outcome = await withTaskCancellationHandler {
+        return await withTaskCancellationHandler {
             await traversal.value
         } onCancel: {
             traversal.cancel()
         }
-        switch outcome {
+    }
+
+    @MainActor
+    func estimate() async -> Int64? {
+        switch await measureOutcome() {
         case .available(let bytes):
             return bytes
         case .cancelled, .unavailable:

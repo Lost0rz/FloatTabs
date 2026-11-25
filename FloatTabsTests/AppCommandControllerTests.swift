@@ -325,4 +325,27 @@ final class FullscreenRestoreCompletionTests: XCTestCase {
             .poll(stableChecks: 0, delay: 0.05)
         )
     }
+
+    @MainActor
+    func testTabShortcutTitlesAndPresentedAddressOverlayProviderFastPath() {
+        let slotTitles = AppShortcutCatalog.slotBindings.map(\.title)
+        XCTAssertEqual(slotTitles, (1...9).map { "Select Tab \($0)" })
+
+        let navTitles = Set(AppShortcutCatalog.navigationBindings.map(\.title))
+        XCTAssertTrue(navTitles.contains("Next Tab"))
+        XCTAssertTrue(navTitles.contains("Previous Tab"))
+
+        let overlay = AddressOverlayView()
+        var providerCalls = 0
+        let controller = AppCommandController(
+            isEnabled: { true },
+            presentedAddressOverlayProvider: {
+                providerCalls += 1
+                return overlay
+            },
+            onCommand: { _ in }
+        )
+        _ = controller
+        XCTAssertEqual(providerCalls, 0)
+    }
 }

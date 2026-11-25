@@ -13,9 +13,15 @@ enum WebsiteCacheCleanupServiceError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .dataStoreUnavailable:
-            return "FloatTabs could not open the selected Browser Profile's website data store."
+            return L10n.tr(
+                "FloatTabs could not open the selected Browser Profile's website data store.",
+                "FloatTabs 无法打开所选配置文件的网站数据存储。"
+            )
         case let .removalFailed(message):
-            return "FloatTabs could not release website cache: \(message)"
+            return L10n.tr(
+                "FloatTabs could not release website cache: \(message)",
+                "FloatTabs 无法释放网站缓存：\(message)"
+            )
         }
     }
 }
@@ -73,7 +79,7 @@ final class WebsiteCacheCleanupService {
     ) {
         self.init(
             dataStoreResolver: { identity in
-                try provider.dataStore(for: identity.browserProfileID)
+                provider.dataStore(for: identity.browserProfileID)
             },
             fetchRecords: fetchRecords,
             removeData: removeData

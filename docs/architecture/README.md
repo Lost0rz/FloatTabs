@@ -54,7 +54,7 @@ critical → eligible inactive unprotected Automatic only; Keep Loaded remains p
 normal → cancel pending continuation; no mass restore
 ```
 
-macOS 14+ public inactive scheduling is a WebKit-owned mechanism, not a second app lifecycle policy writer; macOS 13 requires a supported fallback. Private SPI, root-only process attribution, guessed per-WebContent RAM, and destructive Profile reset are excluded.
+macOS 14+ public inactive scheduling is a WebKit-owned mechanism, not a second app lifecycle policy writer; FloatTabs targets macOS 14.0+ (`MACOSX_DEPLOYMENT_TARGET = 14.0`). Private SPI, root-only process attribution, guessed per-WebContent RAM, and destructive Profile reset are excluded.
 
 ## Historical and verification boundaries
 

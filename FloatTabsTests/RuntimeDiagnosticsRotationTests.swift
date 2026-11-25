@@ -249,6 +249,44 @@ final class RuntimeDiagnosticsRotationTests: XCTestCase {
         writer.requestFinalFlush(timeout: 1) { finished.fulfill() }
         wait(for: [finished], timeout: 2)
     }
+
+    func testWriterReadRecentEventsReadsChronologicalTailAcrossRotatedSegments() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-tail-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        // Create an invalid calendar segment name to verify dateFromKey rejection doesn't crash or match.
+        let invalidSegment = directory.appendingPathComponent("runtime-20260231-001.jsonl")
+        try Data("invalid\n".utf8).write(to: invalidSegment)
+
+        let writer = RuntimeDiagnosticWriter(
+            directory: directory,
+            maxSegmentBytes: 220,
+            maxSegments: 8,
+            debounceInterval: 60
+        )
+        for sequence in 1...8 {
+            writer.enqueue(RuntimeDiagnosticEvent.test(sequence: UInt64(sequence)))
+        }
+        let flushed = expectation(description: "flushed tail segments")
+        writer.requestFinalFlush(timeout: 2) { flushed.fulfill() }
+        wait(for: [flushed], timeout: 3)
+
+        // Enqueue 2 un-flushed events in memory buffer and verify tail includes both flushed + buffered.
+        writer.enqueue(RuntimeDiagnosticEvent.test(sequence: 9))
+        writer.enqueue(RuntimeDiagnosticEvent.test(sequence: 10))
+
+        let readExpectation = expectation(description: "read tail")
+        var loaded: [RuntimeDiagnosticEvent] = []
+        writer.readRecentEvents(limit: 4) { events in
+            loaded = events
+            readExpectation.fulfill()
+        }
+        wait(for: [readExpectation], timeout: 2)
+
+        XCTAssertEqual(loaded.map(\.sequence), [7, 8, 9, 10])
+    }
 }
 
 private final class LockedInteger: @unchecked Sendable {

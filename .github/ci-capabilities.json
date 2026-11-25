@@ -87,6 +87,7 @@
         "-only-testing:FloatTabsTests/ChatGPTGenerationDetectorTests",
         "-only-testing:FloatTabsTests/WebAttentionCoordinatorTests",
         "-only-testing:FloatTabsTests/WebAttentionLifecycleTests",
+        "-only-testing:FloatTabsTests/UniversalWebActivityBridgeTests",
         "test"
       ],
       "timeout_minutes": 55
@@ -150,10 +151,9 @@
         "FloatTabsTests/*BrowserProfile*.swift",
         "FloatTabsTests/AppPreferencesStoreTests.swift",
         "FloatTabsTests/FloatTabsBackupServiceTests.swift",
-        "FloatTabsTests/GroupsAndBookmarksTests.swift",
         "FloatTabsTests/ProfileRepositoryTests.swift",
         "FloatTabsTests/TabStoreTests.swift",
-        "FloatTabsTests/UnsupportedBrowserProfileTests.swift"
+        "FloatTabsTests/GroupsAndBookmarksTests.swift"
       ],
       "runner": [
         "self-hosted",
@@ -186,7 +186,7 @@
         "-only-testing:FloatTabsTests/TabStoreTests",
         "-only-testing:FloatTabsTests/WebRenderingProfileTests",
         "-only-testing:FloatTabsTests/WebAppURLTests",
-        "-only-testing:FloatTabsTests/UnsupportedBrowserProfileTests",
+        "-only-testing:FloatTabsTests/GroupsAndBookmarksTests",
         "test"
       ],
       "timeout_minutes": 55
@@ -282,8 +282,7 @@
         "FloatTabs/Web/WebViewFactory.swift",
         "FloatTabsTests/SettingsInformationArchitectureTests.swift",
         "FloatTabsTests/WebsiteLayoutGeometryRegressionTests.swift",
-        "FloatTabsTests/WebAttentionIndicatorTests.swift",
-        "FloatTabsTests/UnsupportedBrowserProfileTests.swift"
+        "FloatTabsTests/WebAttentionIndicatorTests.swift"
       ],
       "runner": [
         "self-hosted",
@@ -305,7 +304,7 @@
         "-only-testing:FloatTabsTests/SettingsInformationArchitectureTests",
         "-only-testing:FloatTabsTests/WebsiteLayoutGeometryRegressionTests",
         "-only-testing:FloatTabsTests/WebAttentionIndicatorTests",
-        "-only-testing:FloatTabsTests/UnsupportedBrowserProfileTests",
+        "-only-testing:FloatTabsTests/GroupsAndBookmarksTests",
         "test"
       ],
       "timeout_minutes": 25

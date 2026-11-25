@@ -6,8 +6,8 @@ enum MenuBarDisplayMode: String, CaseIterable, Equatable, Codable {
 
     var displayName: String {
         switch self {
-        case .iconAndName: return "Icon + Name"
-        case .iconOnly: return "Icon Only"
+        case .iconAndName: return L10n.tr("Icon + Name", "图标与名称")
+        case .iconOnly: return L10n.tr("Icon Only", "仅图标")
         }
     }
 }
@@ -19,9 +19,9 @@ enum AppAppearanceMode: String, CaseIterable, Equatable, Codable {
 
     var displayName: String {
         switch self {
-        case .system: return "System"
-        case .light: return "Light"
-        case .dark: return "Dark"
+        case .system: return L10n.tr("System", "跟随系统")
+        case .light: return L10n.tr("Light", "浅色")
+        case .dark: return L10n.tr("Dark", "深色")
         }
     }
 
@@ -51,16 +51,16 @@ enum PanelBorderTheme: String, CaseIterable, Equatable, Codable {
 
     var displayName: String {
         switch self {
-        case .rainbow: return "Rainbow"
-        case .blue: return "Blue"
-        case .purple: return "Purple"
-        case .pink: return "Pink"
-        case .red: return "Red"
-        case .orange: return "Orange"
-        case .yellow: return "Yellow"
-        case .green: return "Green"
-        case .graphite: return "Graphite"
-        case .custom: return "Custom…"
+        case .rainbow: return L10n.tr("Rainbow", "彩虹")
+        case .blue: return L10n.tr("Blue", "蓝色")
+        case .purple: return L10n.tr("Purple", "紫色")
+        case .pink: return L10n.tr("Pink", "粉色")
+        case .red: return L10n.tr("Red", "红色")
+        case .orange: return L10n.tr("Orange", "橙色")
+        case .yellow: return L10n.tr("Yellow", "黄色")
+        case .green: return L10n.tr("Green", "绿色")
+        case .graphite: return L10n.tr("Graphite", "石墨灰")
+        case .custom: return L10n.tr("Custom…", "自定义…")
         }
     }
 
@@ -85,55 +85,9 @@ enum PanelWindowSizeMode: String, CaseIterable, Equatable, Codable {
 
     var displayName: String {
         switch self {
-        case .perWebApp: return "Per Web App"
-        case .fixed: return "Fixed"
+        case .perWebApp: return L10n.tr("Per Web App", "按网页应用")
+        case .fixed: return L10n.tr("Fixed", "固定尺寸")
         }
-    }
-}
-
-enum WarmWebViewRetentionOption: Int, CaseIterable, Equatable {
-    case twoMinutes = 120
-    case fiveMinutes = 300
-    case tenMinutes = 600
-    case thirtyMinutes = 1_800
-
-    var seconds: TimeInterval { TimeInterval(rawValue) }
-
-    var displayName: String {
-        switch self {
-        case .twoMinutes: return "2 minutes"
-        case .fiveMinutes: return "5 minutes"
-        case .tenMinutes: return "10 minutes"
-        case .thirtyMinutes: return "30 minutes"
-        }
-    }
-
-    init(seconds: TimeInterval) {
-        self = Self.allCases.min {
-            abs($0.seconds - seconds) < abs($1.seconds - seconds)
-        } ?? .twoMinutes
-    }
-}
-
-enum ColdWebViewReleaseOption: Int, CaseIterable, Equatable {
-    case thirtySeconds = 30
-    case oneMinute = 60
-    case twoMinutes = 120
-
-    var seconds: TimeInterval { TimeInterval(rawValue) }
-
-    var displayName: String {
-        switch self {
-        case .thirtySeconds: return "30 seconds"
-        case .oneMinute: return "1 minute"
-        case .twoMinutes: return "2 minutes"
-        }
-    }
-
-    init(seconds: TimeInterval) {
-        self = Self.allCases.min {
-            abs($0.seconds - seconds) < abs($1.seconds - seconds)
-        } ?? .thirtySeconds
     }
 }
 
@@ -156,8 +110,8 @@ extension Notification.Name {
     static let floatTabsMenuBarDisplayModeDidChange = Notification.Name(
         "FloatTabs.menuBarDisplayModeDidChange"
     )
-    static let floatTabsSlotRetentionDidChange = Notification.Name(
-        "FloatTabs.slotRetentionDidChange"
+    static let floatTabsExternalCommandsEnabledDidChange = Notification.Name(
+        "FloatTabs.externalCommandsEnabledDidChange"
     )
     static let floatTabsRuntimeDiagnosticsModeDidChange = Notification.Name(
         "FloatTabs.runtimeDiagnosticsModeDidChange"
@@ -173,6 +127,7 @@ extension Notification.Name {
 @MainActor
 final class AppPreferencesStore {
     static let appearanceKey = "FloatTabs.appearanceMode"
+    static let appLanguageKey = "FloatTabs.appLanguage"
     static let followPreferredSizeKey = "FloatTabs.followTabPreferredSize"
     static let borderThemeKey = "FloatTabs.borderTheme"
     static let customBorderColorKey = "FloatTabs.customBorderColor"
@@ -201,14 +156,8 @@ final class AppPreferencesStore {
         "FloatTabs.websiteCache.minimumCleanupInterval"
     static let websiteCacheRecentUseProtectionKey =
         "FloatTabs.websiteCache.recentUseProtection"
-    static let warmWebViewRetentionDelayKey =
-        "FloatTabs.performance.warmWebViewRetentionDelay"
-    static let coldWebViewReleaseDelayKey =
-        "FloatTabs.performance.coldWebViewReleaseDelay"
-    // Preserve parsing defaults for legacy preference values. WP2 lifecycle
-    // policy no longer consumes either setting.
-    private static let legacyWarmWebViewRetentionDelayFallback: TimeInterval = 120
-    private static let legacyColdWebViewReleaseDelayFallback: TimeInterval = 30
+    static let externalCommandsEnabledKey =
+        "FloatTabs.externalCommandsEnabled"
     static let runtimeDiagnosticsModeKey = "FloatTabs.runtimeDiagnostics.mode"
     static let longTermPerformanceObservationEnabledKey =
         "FloatTabs.longTermPerformanceObservation.enabled"
@@ -233,6 +182,25 @@ final class AppPreferencesStore {
         set {
             defaults.set(newValue.rawValue, forKey: Self.appearanceKey)
             applyAppearance(newValue)
+        }
+    }
+
+    var appLanguage: AppLanguage {
+        get {
+            guard let raw = defaults.string(forKey: Self.appLanguageKey),
+                  let language = AppLanguage(rawValue: raw) else {
+                return .system
+            }
+            return language
+        }
+        set {
+            let previous = appLanguage
+            defaults.set(newValue.rawValue, forKey: Self.appLanguageKey)
+            guard newValue != previous else { return }
+            NotificationCenter.default.post(
+                name: .floatTabsAppLanguageDidChange,
+                object: self
+            )
         }
     }
 
@@ -615,39 +583,18 @@ final class AppPreferencesStore {
         }
     }
 
-    var warmWebViewRetentionDelay: TimeInterval {
+    var externalCommandsEnabled: Bool {
         get {
-            let raw = normalizedNonNegativeDouble(
-                forKey: Self.warmWebViewRetentionDelayKey,
-                fallback: Self.legacyWarmWebViewRetentionDelayFallback
-            )
-            return WarmWebViewRetentionOption(seconds: raw).seconds
+            guard defaults.object(forKey: Self.externalCommandsEnabledKey) != nil else {
+                return true
+            }
+            return defaults.bool(forKey: Self.externalCommandsEnabledKey)
         }
         set {
-            let normalized = WarmWebViewRetentionOption(seconds: newValue).seconds
-            guard normalized != warmWebViewRetentionDelay else { return }
-            defaults.set(normalized, forKey: Self.warmWebViewRetentionDelayKey)
+            guard newValue != externalCommandsEnabled else { return }
+            defaults.set(newValue, forKey: Self.externalCommandsEnabledKey)
             NotificationCenter.default.post(
-                name: .floatTabsSlotRetentionDidChange,
-                object: self
-            )
-        }
-    }
-
-    var coldWebViewReleaseDelay: TimeInterval {
-        get {
-            let raw = normalizedNonNegativeDouble(
-                forKey: Self.coldWebViewReleaseDelayKey,
-                fallback: Self.legacyColdWebViewReleaseDelayFallback
-            )
-            return ColdWebViewReleaseOption(seconds: raw).seconds
-        }
-        set {
-            let normalized = ColdWebViewReleaseOption(seconds: newValue).seconds
-            guard normalized != coldWebViewReleaseDelay else { return }
-            defaults.set(normalized, forKey: Self.coldWebViewReleaseDelayKey)
-            NotificationCenter.default.post(
-                name: .floatTabsSlotRetentionDidChange,
+                name: .floatTabsExternalCommandsEnabledDidChange,
                 object: self
             )
         }
@@ -699,6 +646,10 @@ final class AppPreferencesStore {
 
     func applyStoredAppearance() {
         applyAppearance(appearanceMode)
+    }
+
+    func applyStoredLanguage(postNotification: Bool = false) {
+        AppLocalization.apply(appLanguage, postNotification: postNotification)
     }
 
     private func applyAppearance(_ mode: AppAppearanceMode) {

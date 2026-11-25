@@ -68,8 +68,6 @@
 		A0000000000000000000003C /* BrowserProfileSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000003C /* BrowserProfileSwitchTests.swift */; };
 		A0000000000000000000003D /* BrowserProfileDuplicateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000003D /* BrowserProfileDuplicateTests.swift */; };
 		A0000000000000000000003E /* BrowserProfileBackupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000003E /* BrowserProfileBackupTests.swift */; };
-		A0000000000000000000003F /* UnsupportedBrowserProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000003F /* UnsupportedBrowserProfileView.swift */; };
-		A00000000000000000000040 /* UnsupportedBrowserProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000040 /* UnsupportedBrowserProfileTests.swift */; };
 		A00000000000000000000041 /* WebsiteCachePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000041 /* WebsiteCachePolicy.swift */; };
 		A00000000000000000000042 /* WebsiteCacheUsageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000042 /* WebsiteCacheUsageStore.swift */; };
 		A00000000000000000000043 /* WebsiteCacheSizeMeasurer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000043 /* WebsiteCacheSizeMeasurer.swift */; };
@@ -109,6 +107,13 @@
 		A00000000000000000000081 /* ChatGPTCompletionNotificationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000081 /* ChatGPTCompletionNotificationCoordinator.swift */; };
 		A00000000000000000000082 /* ChatGPTCompletionNotificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000082 /* ChatGPTCompletionNotificationTests.swift */; };
 		A00000000000000000000083 /* FaviconRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000083 /* FaviconRecoveryTests.swift */; };
+		A00000000000000000000084 /* TabGroupAndBookmarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000084 /* TabGroupAndBookmarks.swift */; };
+		A00000000000000000000085 /* BookmarksSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000085 /* BookmarksSettingsViewController.swift */; };
+		A00000000000000000000086 /* GroupsAndBookmarksTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000086 /* GroupsAndBookmarksTests.swift */; };
+		A00000000000000000000087 /* BookmarkHTMLCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000087 /* BookmarkHTMLCodec.swift */; };
+		A00000000000000000000088 /* AppLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000088 /* AppLocalization.swift */; };
+		A0000000000000000000008A /* UniversalWebActivityBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000008A /* UniversalWebActivityBridge.swift */; };
+		A0000000000000000000008B /* UniversalWebActivityBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000008B /* UniversalWebActivityBridgeTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -185,8 +190,6 @@
 		B0000000000000000000003C /* BrowserProfileSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserProfileSwitchTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000003D /* BrowserProfileDuplicateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserProfileDuplicateTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000003E /* BrowserProfileBackupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserProfileBackupTests.swift; sourceTree = "<group>"; };
-		B0000000000000000000003F /* UnsupportedBrowserProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnsupportedBrowserProfileView.swift; sourceTree = "<group>"; };
-		B00000000000000000000040 /* UnsupportedBrowserProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnsupportedBrowserProfileTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000041 /* WebsiteCachePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebsiteCachePolicy.swift; sourceTree = "<group>"; };
 		B00000000000000000000042 /* WebsiteCacheUsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebsiteCacheUsageStore.swift; sourceTree = "<group>"; };
 		B00000000000000000000043 /* WebsiteCacheSizeMeasurer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebsiteCacheSizeMeasurer.swift; sourceTree = "<group>"; };
@@ -226,6 +229,14 @@
 		B00000000000000000000081 /* ChatGPTCompletionNotificationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTCompletionNotificationCoordinator.swift; sourceTree = "<group>"; };
 		B00000000000000000000082 /* ChatGPTCompletionNotificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTCompletionNotificationTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000083 /* FaviconRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaviconRecoveryTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000084 /* TabGroupAndBookmarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabGroupAndBookmarks.swift; sourceTree = "<group>"; };
+		B00000000000000000000085 /* BookmarksSettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarksSettingsViewController.swift; sourceTree = "<group>"; };
+		B00000000000000000000086 /* GroupsAndBookmarksTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupsAndBookmarksTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000087 /* BookmarkHTMLCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkHTMLCodec.swift; sourceTree = "<group>"; };
+		B00000000000000000000088 /* AppLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLocalization.swift; sourceTree = "<group>"; };
+		B00000000000000000000089 /* FloatTabs.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FloatTabs.entitlements; sourceTree = "<group>"; };
+		B0000000000000000000008A /* UniversalWebActivityBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UniversalWebActivityBridge.swift; sourceTree = "<group>"; };
+		B0000000000000000000008B /* UniversalWebActivityBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UniversalWebActivityBridgeTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -259,6 +270,7 @@
 		H00000000000000000000002 /* FloatTabs */ = {
 			isa = PBXGroup;
 			children = (
+				B00000000000000000000089 /* FloatTabs.entitlements */,
 				H00000000000000000000003 /* App */,
 				H00000000000000000000010 /* Diagnostics */,
 				H00000000000000000000004 /* Panel */,
@@ -339,6 +351,7 @@
 				B00000000000000000000036 /* BrowserProfile.swift */,
 				B00000000000000000000011 /* WebRenderingProfile.swift */,
 				B00000000000000000000012 /* WebAppProfile.swift */,
+				B00000000000000000000084 /* TabGroupAndBookmarks.swift */,
 				B00000000000000000000013 /* TabStore.swift */,
 			);
 			path = Tabs;
@@ -348,6 +361,7 @@
 			isa = PBXGroup;
 			children = (
 				B00000000000000000000014 /* ProfileRepository.swift */,
+				B00000000000000000000087 /* BookmarkHTMLCodec.swift */,
 				B00000000000000000000023 /* AppPreferencesStore.swift */,
 				B00000000000000000000026 /* FloatTabsBackupService.swift */,
 				B00000000000000000000063 /* UnreadResponseStore.swift */,
@@ -389,6 +403,7 @@
 				B0000000000000000000004C /* WebFocusRouter.swift */,
 				B00000000000000000000050 /* ChatGPTResponseBridge.swift */,
 				B00000000000000000000051 /* ChatGPTResponseExtraction.swift */,
+				B0000000000000000000008A /* UniversalWebActivityBridge.swift */,
 			);
 			path = Web;
 			sourceTree = "<group>";
@@ -398,9 +413,10 @@
 			children = (
 				B00000000000000000000017 /* ExternalTabRail.swift */,
 				B00000000000000000000018 /* WebAppEditorController.swift */,
+				B00000000000000000000088 /* AppLocalization.swift */,
 				B00000000000000000000019 /* EmptyWebAppView.swift */,
-				B0000000000000000000003F /* UnsupportedBrowserProfileView.swift */,
 				B00000000000000000000024 /* GlobalSettingsController.swift */,
+				B00000000000000000000085 /* BookmarksSettingsViewController.swift */,
 				B00000000000000000000078 /* SettingsInformationArchitecture.swift */,
 				B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */,
 			);
@@ -419,7 +435,6 @@
 			isa = PBXGroup;
 			children = (
 				B00000000000000000000083 /* FaviconRecoveryTests.swift */,
-				B00000000000000000000040 /* UnsupportedBrowserProfileTests.swift */,
 				B00000000000000000000046 /* WebsiteCacheCleanupTests.swift */,
 				B0000000000000000000003B /* BrowserProfileAddTests.swift */,
 				B0000000000000000000003C /* BrowserProfileSwitchTests.swift */,
@@ -456,6 +471,8 @@
 				B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */,
 				B00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift */,
 				B00000000000000000000082 /* ChatGPTCompletionNotificationTests.swift */,
+				B00000000000000000000086 /* GroupsAndBookmarksTests.swift */,
+				B0000000000000000000008B /* UniversalWebActivityBridgeTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -602,6 +619,7 @@
 				A00000000000000000000076 /* RuntimeDiagnosticExporter.swift in Sources */,
 				A00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift in Sources */,
 				A00000000000000000000078 /* SettingsInformationArchitecture.swift in Sources */,
+				A00000000000000000000085 /* BookmarksSettingsViewController.swift in Sources */,
 				A00000000000000000000080 /* LongTermPerformanceObservationCoordinator.swift in Sources */,
 				A00000000000000000000003 /* AppCoordinator.swift in Sources */,
 				A00000000000000000000060 /* AttentionSoundAssetStore.swift in Sources */,
@@ -615,7 +633,8 @@
 				A00000000000000000000002 /* AppDelegate.swift in Sources */,
 				A0000000000000000000000F /* AppCommandController.swift in Sources */,
 				A00000000000000000000018 /* EmptyWebAppView.swift in Sources */,
-				A0000000000000000000003F /* UnsupportedBrowserProfileView.swift in Sources */,
+				A00000000000000000000088 /* AppLocalization.swift in Sources */,
+				A0000000000000000000008A /* UniversalWebActivityBridge.swift in Sources */,
 				A00000000000000000000016 /* ExternalTabRail.swift in Sources */,
 				A00000000000000000000001 /* FloatTabsApp.swift in Sources */,
 				A00000000000000000000004 /* FloatingPanel.swift in Sources */,
@@ -623,12 +642,14 @@
 				A00000000000000000000008 /* GlobalHotkeyController.swift in Sources */,
 				A00000000000000000000005 /* PanelController.swift in Sources */,
 				A00000000000000000000013 /* ProfileRepository.swift in Sources */,
+				A00000000000000000000087 /* BookmarkHTMLCodec.swift in Sources */,
 				A00000000000000000000006 /* ScreenPositioning.swift in Sources */,
 				A00000000000000000000015 /* SlotNavigationObserver.swift in Sources */,
 				A0000000000000000000001E /* WebNavigationCoordinator.swift in Sources */,
 				A0000000000000000000001F /* PopupCoordinator.swift in Sources */,
 				A00000000000000000000007 /* StatusItemController.swift in Sources */,
 				A00000000000000000000012 /* TabStore.swift in Sources */,
+				A00000000000000000000084 /* TabGroupAndBookmarks.swift in Sources */,
 				A00000000000000000000011 /* WebAppProfile.swift in Sources */,
 				A00000000000000000000017 /* WebAppEditorController.swift in Sources */,
 				A00000000000000000000010 /* WebRenderingProfile.swift in Sources */,
@@ -688,7 +709,6 @@
 				A0000000000000000000003C /* BrowserProfileSwitchTests.swift in Sources */,
 				A0000000000000000000003D /* BrowserProfileDuplicateTests.swift in Sources */,
 				A0000000000000000000003E /* BrowserProfileBackupTests.swift in Sources */,
-				A00000000000000000000040 /* UnsupportedBrowserProfileTests.swift in Sources */,
 				A00000000000000000000046 /* WebsiteCacheCleanupTests.swift in Sources */,
 				A0000000000000000000004D /* WebFocusAdapterTests.swift in Sources */,
 				A00000000000000000000058 /* ChatGPTResponseBridgeTests.swift in Sources */,
@@ -701,6 +721,8 @@
 				A00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift in Sources */,
 				A00000000000000000000079 /* SettingsInformationArchitectureTests.swift in Sources */,
 				A00000000000000000000082 /* ChatGPTCompletionNotificationTests.swift in Sources */,
+				A00000000000000000000086 /* GroupsAndBookmarksTests.swift in Sources */,
+				A0000000000000000000008B /* UniversalWebActivityBridgeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -725,7 +747,7 @@
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_OPTIMIZATION_LEVEL = 0;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
@@ -743,7 +765,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_C_LANGUAGE_STANDARD = gnu17;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_STRICT_CONCURRENCY = complete;
@@ -754,8 +776,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = FloatTabs/FloatTabs.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 26;
+				CURRENT_PROJECT_VERSION = 32;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(DERIVED_FILE_DIR)/FloatTabsGeneratedInfo.plist";
@@ -765,7 +788,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.5.8;
+				MARKETING_VERSION = 0.5.14;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lost0rz.FloatTabs;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -777,8 +800,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = FloatTabs/FloatTabs.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 26;
+				CURRENT_PROJECT_VERSION = 32;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(DERIVED_FILE_DIR)/FloatTabsGeneratedInfo.plist";
@@ -788,7 +812,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.5.8;
+				MARKETING_VERSION = 0.5.14;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lost0rz.FloatTabs;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

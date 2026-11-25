@@ -28,8 +28,11 @@ struct PanelMetrics {
     static let interactionBorderLineWidth: CGFloat = 3.75
     static let interactionBorderOutset: CGFloat = 0.5
 
-    /// Bottom-right remains the only resize affordance.
+    /// Bottom-left and bottom-right resize handles keep a 40 pt acquisition
+    /// square; top-left and top-right use a slightly trimmer 28 pt corner
+    /// target so they stay clear of website header actions.
     static let resizeHandleSize: CGFloat = 40
+    static let topCornerResizeHandleSize: CGFloat = 28
     static let resizeHandleInset: CGFloat = 0
     static let resizeHandleVisualInset: CGFloat = 7
 
@@ -74,12 +77,16 @@ struct PanelMetrics {
 
 enum PanelMovementGeometry {
     /// Returns four edge bands around `edgeFrame`, clipped to `clippingBounds`.
-    /// The Web source uses an inner-only band and can reserve its resize corner.
+    /// The Web source uses an inner-only band and excludes each corner owned
+    /// by a corner resize/fold handle.
     static func edgeBands(
         around edgeFrame: NSRect,
         outerDepth: CGFloat,
         innerDepth: CGFloat,
         clippingBounds: NSRect,
+        topLeftExclusion: CGFloat = 0,
+        topRightExclusion: CGFloat = 0,
+        bottomLeftExclusion: CGFloat = 0,
         bottomRightExclusion: CGFloat = 0
     ) -> [NSRect] {
         guard edgeFrame.width > 0, edgeFrame.height > 0 else { return [] }
@@ -89,38 +96,46 @@ enum PanelMovementGeometry {
         let thickness = outer + inner
         guard thickness > 0 else { return [] }
 
-        let requestedExclusion = max(bottomRightExclusion, 0)
-        let horizontalExclusion = min(requestedExclusion, edgeFrame.width)
-        let verticalExclusion = min(requestedExclusion, edgeFrame.height)
-        let horizontalWidth = max(
-            edgeFrame.width + 2 * outer - horizontalExclusion,
-            0
-        )
-        let verticalHeight = max(edgeFrame.height - verticalExclusion, 0)
+        let topLeftX = min(max(topLeftExclusion, 0), edgeFrame.width + outer)
+        let topRightX = min(max(topRightExclusion, 0), edgeFrame.width + outer)
+        let bottomLeftX = min(max(bottomLeftExclusion, 0), edgeFrame.width + outer)
+        let bottomRightX = min(max(bottomRightExclusion, 0), edgeFrame.width + outer)
+
+        let topLeftY = min(max(topLeftExclusion, 0), edgeFrame.height)
+        let topRightY = min(max(topRightExclusion, 0), edgeFrame.height)
+        let bottomLeftY = min(max(bottomLeftExclusion, 0), edgeFrame.height)
+        let bottomRightY = min(max(bottomRightExclusion, 0), edgeFrame.height)
+
+        let fullSpanWidth = edgeFrame.width + 2 * outer
+        let topWidth = max(fullSpanWidth - topLeftX - topRightX, 0)
+        let bottomWidth = max(fullSpanWidth - bottomLeftX - bottomRightX, 0)
+        let leftHeight = max(edgeFrame.height - bottomLeftY - topLeftY, 0)
+        let rightHeight = max(edgeFrame.height - bottomRightY - topRightY, 0)
+
         let candidates = [
             NSRect(
-                x: edgeFrame.minX - outer,
+                x: edgeFrame.minX - outer + topLeftX,
                 y: edgeFrame.maxY - inner,
-                width: edgeFrame.width + 2 * outer,
+                width: topWidth,
                 height: thickness
             ),
             NSRect(
-                x: edgeFrame.minX - outer,
+                x: edgeFrame.minX - outer + bottomLeftX,
                 y: edgeFrame.minY - outer,
-                width: horizontalWidth,
+                width: bottomWidth,
                 height: thickness
             ),
             NSRect(
                 x: edgeFrame.minX - outer,
-                y: edgeFrame.minY,
+                y: edgeFrame.minY + bottomLeftY,
                 width: thickness,
-                height: edgeFrame.height
+                height: leftHeight
             ),
             NSRect(
                 x: edgeFrame.maxX - inner,
-                y: edgeFrame.minY + verticalExclusion,
+                y: edgeFrame.minY + bottomRightY,
                 width: thickness,
-                height: verticalHeight
+                height: rightHeight
             ),
         ]
 

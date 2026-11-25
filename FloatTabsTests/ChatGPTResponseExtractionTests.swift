@@ -449,4 +449,61 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         )
     }
 
+    func testWheelListenerUsesPassiveCoalescingAndLongConversationUsesBoundedLayoutChecks() async throws {
+        let source = ChatGPTResponseExtraction.scriptSource
+        XCTAssertTrue(source.contains("{ capture: true, passive: true }"))
+        XCTAssertTrue(source.contains("WHEEL_SCROLL_COALESCE_MS"))
+
+        let page = ChatGPTResponsePageHarness()
+        let turnsHTML = (0..<200).map { index in
+            """
+            <article data-testid="conversation-turn-\(index)" data-turn="assistant">
+              <div data-message-author-role="assistant" data-message-id="msg-\(index)">
+                <p>Assistant paragraph \(index)</p>
+                <div role="toolbar"><button id="btn-\(index)" aria-label="Copy">Copy</button></div>
+              </div>
+            </article>
+            """
+        }.joined(separator: "\n")
+        page.load(turnsHTML)
+        let ready = await page.waitForDocumentReady()
+        XCTAssertTrue(ready)
+
+        let snapshot = await page.snapshotStatus()
+        XCTAssertEqual(snapshot?.responseIdentity?.rawValue, "message:msg-199")
+
+        let metricsReady = await page.evaluatePageWorldReturningBool("""
+        (() => {
+          window.__rectReads = 0;
+          const orig = Element.prototype.getClientRects;
+          Element.prototype.getClientRects = function() {
+            window.__rectReads += 1;
+            return orig.apply(this, arguments);
+          };
+          return true;
+        })()
+        """)
+        XCTAssertTrue(metricsReady)
+
+        // Dispatching pointer classification in the named world verifies
+        // reverse/ancestor lookup avoids scanning all 200 turns.
+        let latestPointerClass = await page.classifyTrustedAssistantPointerTarget(
+            selector: "[data-message-id='msg-199'] p"
+        )
+        XCTAssertEqual(latestPointerClass, "assistantPointer")
+
+        // On non-conversation pages (e.g., Codex view with hundreds of UI buttons),
+        // snapshot lookup must return nil without scanning buttons for layout.
+        let codexPage = ChatGPTResponsePageHarness()
+        let codexButtons = (0..<250).map { index in
+            "<button aria-label=\"Task \(index)\">Task \(index)</button>"
+        }.joined(separator: "")
+        codexPage.load("<main>\(codexButtons)</main>")
+        let codexReady = await codexPage.waitForDocumentReady()
+        XCTAssertTrue(codexReady)
+        let codexSnapshot = await codexPage.snapshotStatus()
+        XCTAssertNil(codexSnapshot?.responseIdentity)
+        XCTAssertEqual(codexSnapshot?.generating, false)
+    }
+
 }

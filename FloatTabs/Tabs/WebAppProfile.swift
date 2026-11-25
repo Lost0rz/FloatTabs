@@ -7,20 +7,29 @@ enum SlotResidencyPolicy: String, Codable, CaseIterable, Equatable {
 
     var displayName: String {
         switch self {
-        case .hot: return "Hot"
-        case .warm: return "Warm"
-        case .cold: return "Cold"
+        case .hot: return L10n.tr("Hot", "热驻留")
+        case .warm: return L10n.tr("Warm", "温驻留")
+        case .cold: return L10n.tr("Cold", "冷释放")
         }
     }
 
     var detailText: String {
         switch self {
         case .hot:
-            return "Keep the live WebView attached. Cache is not automatically released; manual Release Cache remains available."
+            return L10n.tr(
+                "Keep the live WebView attached. Cache is not automatically released; manual Release Cache remains available.",
+                "保持实时 WebView 常驻，不会自动清理缓存；仍可随时手动释放缓存。"
+            )
         case .warm:
-            return "Keep recent inactive WebViews; runtime release follows the Warm limit, and cache follows the Website Storage retention setting."
+            return L10n.tr(
+                "Keep recent inactive WebViews; runtime release follows the Warm limit, and cache follows the Website Storage retention setting.",
+                "保留近期使用的非活动 WebView；运行时释放遵循上限策略，缓存遵循网站存储保留设置。"
+            )
         case .cold:
-            return "Release 30 seconds after leaving the Slot; once detached, its safe website cache is released promptly."
+            return L10n.tr(
+                "Release 30 seconds after leaving the Slot; once detached, its safe website cache is released promptly.",
+                "离开标签页 30 秒后释放运行时；分离后及时清理可重下载缓存。"
+            )
         }
     }
 
@@ -48,17 +57,23 @@ enum SlotRuntimeRetentionPreference: String, Codable, CaseIterable, Equatable {
 
     var displayName: String {
         switch self {
-        case .automatic: return "Automatic"
-        case .keepLoaded: return "Keep Loaded"
+        case .automatic: return L10n.tr("Automatic", "自动管理")
+        case .keepLoaded: return L10n.tr("Keep Loaded", "保持常驻")
         }
     }
 
     var detailText: String {
         switch self {
         case .automatic:
-            return "Manage this Runtime automatically. Inactive Runtime may be reclaimed and restored on demand."
+            return L10n.tr(
+                "Manage this Runtime automatically. Inactive Runtime may be reclaimed and restored on demand.",
+                "自动管理当前标签运行时；长时间未使用的页面会在需要时自动回收并按需恢复。"
+            )
         case .keepLoaded:
-            return "Prefer to keep an already loaded inactive Runtime during normal operation. Critical memory pressure may still reclaim it."
+            return L10n.tr(
+                "Prefer to keep an already loaded inactive Runtime during normal operation. Critical memory pressure may still reclaim it.",
+                "正常情况下尽量保持已加载的后台运行时常驻；系统内存严重不足时仍可能回收。"
+            )
         }
     }
 
@@ -80,8 +95,8 @@ enum BackgroundMediaPolicy: String, Codable, CaseIterable, Equatable {
 
     var displayName: String {
         switch self {
-        case .pauseWhenInactive: return "Pause When Inactive"
-        case .allowBackgroundAudio: return "Allow Background Audio"
+        case .pauseWhenInactive: return L10n.tr("Pause When Inactive", "后台自动暂停")
+        case .allowBackgroundAudio: return L10n.tr("Allow Background Audio", "允许后台音频")
         }
     }
 }
@@ -91,6 +106,8 @@ struct WebAppProfile: Codable, Identifiable, Equatable {
     /// `nil` is the virtual Default Profile; a value must resolve to a custom
     /// BrowserProfile in the persisted state.
     var browserProfileID: UUID?
+    /// `nil` belongs to the built-in Default Group; a UUID binds the tab to a custom `WebAppGroup`.
+    var groupID: UUID?
     var order: Int
     var name: String
     var homeURL: URL
@@ -117,6 +134,7 @@ struct WebAppProfile: Codable, Identifiable, Equatable {
     init(
         id: UUID = UUID(),
         browserProfileID: UUID? = nil,
+        groupID: UUID? = nil,
         order: Int,
         name: String,
         homeURL: URL,
@@ -131,6 +149,7 @@ struct WebAppProfile: Codable, Identifiable, Equatable {
     ) {
         self.id = id
         self.browserProfileID = browserProfileID
+        self.groupID = groupID
         self.order = order
         self.name = name
         self.homeURL = homeURL
@@ -150,6 +169,7 @@ extension WebAppProfile {
     private enum CodingKeys: String, CodingKey {
         case id
         case browserProfileID
+        case groupID
         case order
         case name
         case homeURL
@@ -167,6 +187,7 @@ extension WebAppProfile {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         browserProfileID = try container.decodeIfPresent(UUID.self, forKey: .browserProfileID)
+        groupID = try container.decodeIfPresent(UUID.self, forKey: .groupID)
         order = try container.decode(Int.self, forKey: .order)
         name = try container.decode(String.self, forKey: .name)
         homeURL = try container.decode(URL.self, forKey: .homeURL)
@@ -203,6 +224,7 @@ extension WebAppProfile {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encodeIfPresent(browserProfileID, forKey: .browserProfileID)
+        try container.encodeIfPresent(groupID, forKey: .groupID)
         try container.encode(order, forKey: .order)
         try container.encode(name, forKey: .name)
         try container.encode(homeURL, forKey: .homeURL)

@@ -26,14 +26,26 @@ enum BrowserVersionResolver {
     private static let fallbackEdge = "150.0.0.0"
 
     @MainActor
+    private static var cachedSafariVersion: String?
+    @MainActor
     private static var cachedWebKitVersion: String?
+    @MainActor
+    private static var cachedChromeVersion: String?
+    @MainActor
+    private static var cachedEdgeVersion: String?
 
+    @MainActor
     static func safariVersion() -> String {
+        if let cachedSafariVersion {
+            return cachedSafariVersion
+        }
         let paths = [
             "/Applications/Safari.app",
             "/System/Applications/Safari.app",
         ]
-        return normalizedSafariVersion(applicationVersion(paths: paths) ?? fallbackSafari)
+        let resolved = normalizedSafariVersion(applicationVersion(paths: paths) ?? fallbackSafari)
+        cachedSafariVersion = resolved
+        return resolved
     }
 
     /// Mirrors DuckDuckGo macOS: ask the system WKWebView for its native UA and
@@ -60,22 +72,34 @@ enum BrowserVersionResolver {
         return version
     }
 
+    @MainActor
     static func chromeVersion() -> String {
+        if let cachedChromeVersion {
+            return cachedChromeVersion
+        }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let paths = [
             "/Applications/Google Chrome.app",
             "\(home)/Applications/Google Chrome.app",
         ]
-        return normalizedChromiumVersion(applicationVersion(paths: paths) ?? fallbackChrome)
+        let resolved = normalizedChromiumVersion(applicationVersion(paths: paths) ?? fallbackChrome)
+        cachedChromeVersion = resolved
+        return resolved
     }
 
+    @MainActor
     static func edgeVersion() -> String {
+        if let cachedEdgeVersion {
+            return cachedEdgeVersion
+        }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let paths = [
             "/Applications/Microsoft Edge.app",
             "\(home)/Applications/Microsoft Edge.app",
         ]
-        return normalizedChromiumVersion(applicationVersion(paths: paths) ?? fallbackEdge)
+        let resolved = normalizedChromiumVersion(applicationVersion(paths: paths) ?? fallbackEdge)
+        cachedEdgeVersion = resolved
+        return resolved
     }
 
     static func normalizedSafariVersion(_ version: String) -> String {
@@ -326,32 +350,27 @@ enum UserAgentProvider {
 }
 
 /// Website Mode owns the responsive layout class while Window Size remains the
-/// real visible FloatTabs viewport. Desktop maps visible widths into deliberate
-/// experience classes so Small/Medium/Large/Wide do not merely show the same
-/// 1280px page at four scales. Mobile remains native 1:1. The AppKit logical
-/// host performs the uniform coordinate mapping; pageZoom remains user Zoom.
+/// real visible FloatTabs viewport. Desktop adapts smoothly to the visible
+/// window width: widths at or above 1024pt render natively 1:1, while narrower
+/// windows use a bounded 0.75 minimum scale curve clamped to [600, 1024] CSS
+/// points so text remains legible and backing-store pixel overdraw stays low.
+/// Mobile remains native 1:1. The AppKit logical host performs the uniform
+/// coordinate mapping; pageZoom remains user Zoom.
 enum WebsiteLayoutViewport {
-    static let compactVisibleMaximum: CGFloat = 520
-    static let balancedVisibleMaximum: CGFloat = 720
-    static let standardVisibleMaximum: CGFloat = 960
-
-    static let compactCSSWidth: CGFloat = 720
-    static let balancedCSSWidth: CGFloat = 1024
-    static let standardCSSWidth: CGFloat = 1280
-    static let expandedCSSWidth: CGFloat = 1440
+    static let minimumDesktopCSSWidth: CGFloat = 600
+    static let nativeDesktopVisibleMinimum: CGFloat = 1024
+    static let comfortableDesktopMinimumScale: CGFloat = 0.75
 
     static func desktopCSSWidth(forVisibleWidth visibleWidth: CGFloat) -> CGFloat {
         guard visibleWidth > 0 else { return visibleWidth }
-        switch visibleWidth {
-        case ...compactVisibleMaximum:
-            return compactCSSWidth
-        case ...balancedVisibleMaximum:
-            return balancedCSSWidth
-        case ...standardVisibleMaximum:
-            return standardCSSWidth
-        default:
-            return max(expandedCSSWidth, visibleWidth)
+        if visibleWidth >= nativeDesktopVisibleMinimum {
+            return visibleWidth
         }
+        let scaledWidth = (visibleWidth / comfortableDesktopMinimumScale).rounded(.up)
+        return min(
+            max(scaledWidth, minimumDesktopCSSWidth),
+            nativeDesktopVisibleMinimum
+        )
     }
 
     static func targetCSSWidth(
@@ -405,7 +424,7 @@ enum WebsiteLayoutViewport {
 
         // Keep the derived logical frame on integral points. WKWebView aligns
         // its backing stores and tile grids to device pixels, so a fractional
-        // logical dimension (e.g. 820 × 1024/600 = 1399.47) leaves every tile
+        // logical dimension (e.g. 820 × 800/600 = 1093.33) leaves every tile
         // row on a fractional physical pixel under the host's uniform mapping.
         // Rounding up never under-covers the visible surface; the clipped
         // overshoot stays below one visible point.
@@ -527,12 +546,10 @@ enum WebViewFactory {
             webView.pageZoom = rendering.zoom
         }
 
-        if let customUserAgent = UserAgentProvider.customUserAgent(
+        webView.customUserAgent = UserAgentProvider.customUserAgent(
             for: rendering,
             versions: versions
-        ) {
-            webView.customUserAgent = customUserAgent
-        }
+        )
     }
 
     /// AppKit scrollers stay visually disabled even while the document scrolls.
@@ -594,6 +611,7 @@ final class FloatTabsWebView: WKWebView {
     private(set) var websiteMode: WebsiteMode = .desktop
     private(set) var userPageZoom: CGFloat = 1
     private(set) var websiteLayoutScale: CGFloat = 1
+    var willOpenContextMenuHandler: ((NSMenu, NSEvent) -> Void)?
 
     override init(frame frameRect: NSRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frameRect, configuration: configuration)
@@ -603,6 +621,11 @@ final class FloatTabsWebView: WKWebView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        willOpenContextMenuHandler?(menu, event)
+        super.willOpenMenu(menu, with: event)
     }
 
     func setRendering(

@@ -786,35 +786,6 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(created.fields["custom_user_agent_present"], .bool(true))
     }
 
-    func testWebRuntimeCreationRecordsSanitizedFailureWithoutCreatedEvent() {
-        let writer = RuntimeDiagnosticInMemoryWriter()
-        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
-        let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { false }
-        )
-        let pool = WebViewPool(
-            onURLChange: { _, _ in },
-            initialLoad: { _, _ in },
-            browserProfileDataStoreProvider: provider,
-            diagnostics: diagnostics
-        )
-        let profile = makeProfile(
-            name: "DiagnosticCreateFailure",
-            browserProfileID: UUID()
-        )
-
-        XCTAssertThrowsError(try pool.webView(for: profile))
-
-        let events = writer.events
-        XCTAssertEqual(events.map(\.event), [
-            "web_runtime.create.begin",
-            "web_runtime.create.failed"
-        ])
-        XCTAssertNil(events.last?.fields["errorDescription"])
-        XCTAssertEqual(events.last?.fields["error_category"], .string("runtime"))
-        XCTAssertEqual(events.last?.fields["error_code"], .integer(0))
-    }
-
     func testDifferentSlotIDsReceiveDifferentWebViews() throws {
         let pool = makePool()
         let first = makeProfile(name: "A")
@@ -908,7 +879,6 @@ final class WebViewPoolTests: XCTestCase {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { id in
                 XCTAssertEqual(id, sharedProfileID)
                 return sharedStore
@@ -1007,7 +977,6 @@ final class WebViewPoolTests: XCTestCase {
         var loadedCount = 0
         var restored = false
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { _ in customStore }
         )
         let pool = WebViewPool(
@@ -1058,7 +1027,6 @@ final class WebViewPoolTests: XCTestCase {
         var restoredStates: [NSObject] = []
         var loadedCount = 0
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { _ in sharedStore }
         )
         let pool = WebViewPool(
@@ -1146,7 +1114,6 @@ final class WebViewPoolTests: XCTestCase {
         let customStore = WKWebsiteDataStore.nonPersistent()
         var resolvedCustomIDs: [UUID] = []
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             defaultStoreResolver: { defaultStore },
             customStoreResolver: { id in
                 resolvedCustomIDs.append(id)
@@ -1179,7 +1146,6 @@ final class WebViewPoolTests: XCTestCase {
         let customStore = WKWebsiteDataStore.nonPersistent()
         var resolverCalls = 0
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { id in
                 XCTAssertEqual(id, customID)
                 resolverCalls += 1
@@ -1206,7 +1172,6 @@ final class WebViewPoolTests: XCTestCase {
         let customStore = WKWebsiteDataStore.nonPersistent()
         var resolvedIDs: [UUID] = []
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { id in
                 resolvedIDs.append(id)
                 return customStore
@@ -1236,7 +1201,6 @@ final class WebViewPoolTests: XCTestCase {
         let customStore = WKWebsiteDataStore.nonPersistent()
         var loadedRequests: [URLRequest] = []
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { _ in customStore }
         )
         let pool = WebViewPool(
@@ -1264,7 +1228,6 @@ final class WebViewPoolTests: XCTestCase {
     func testSuccessfulBrowserProfileRebuildDoesNotChurnResidentSet() throws {
         let customID = UUID()
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { _ in WKWebsiteDataStore.nonPersistent() }
         )
         let pool = WebViewPool(
@@ -1287,7 +1250,6 @@ final class WebViewPoolTests: XCTestCase {
     func testReleasingSlotRemovesBrowserProfileIdentityDiagnostic() throws {
         let customID = UUID()
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { _ in WKWebsiteDataStore.nonPersistent() }
         )
         let pool = WebViewPool(
@@ -1370,7 +1332,6 @@ final class WebViewPoolTests: XCTestCase {
         let customStore = WKWebsiteDataStore.nonPersistent()
         var resolverCalls = 0
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { id in
                 XCTAssertEqual(id, customID)
                 resolverCalls += 1
@@ -1401,7 +1362,6 @@ final class WebViewPoolTests: XCTestCase {
         var resolverCalls = 0
         var loadedRequests: [URLRequest] = []
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { _ in
                 resolverCalls += 1
                 return WKWebsiteDataStore.nonPersistent()
@@ -1432,7 +1392,6 @@ final class WebViewPoolTests: XCTestCase {
         let firstStore = WKWebsiteDataStore.nonPersistent()
         let secondStore = WKWebsiteDataStore.nonPersistent()
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { id in
                 id == firstID ? firstStore : secondStore
             }
@@ -1461,7 +1420,6 @@ final class WebViewPoolTests: XCTestCase {
         let customStore = WKWebsiteDataStore.nonPersistent()
         var resolverCalls = 0
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { _ in
                 resolverCalls += 1
                 return customStore
@@ -1485,54 +1443,10 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(pool.browserProfileIdentity(for: profile.id), .custom(customID))
     }
 
-    func testInitialCustomProfileResolutionFailureDoesNotCreateRuntimeOrLoad() throws {
-        let customID = UUID()
-        var defaultResolverCalls = 0
-        var customResolverCalls = 0
-        var loadCount = 0
-        var residentChangeCount = 0
-        let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { false },
-            defaultStoreResolver: {
-                defaultResolverCalls += 1
-                return WKWebsiteDataStore.nonPersistent()
-            },
-            customStoreResolver: { _ in
-                customResolverCalls += 1
-                return WKWebsiteDataStore.nonPersistent()
-            }
-        )
-        let pool = WebViewPool(
-            onURLChange: { _, _ in },
-            initialLoad: { _, _ in loadCount += 1 },
-            browserProfileDataStoreProvider: provider
-        )
-        pool.onResidentSetChange = { residentChangeCount += 1 }
-        let profile = makeProfile(name: "UnsupportedInitial", browserProfileID: customID)
-
-        do {
-            _ = try pool.webView(for: profile)
-            XCTFail("Unsupported custom Profile resolution must fail")
-        } catch {
-            XCTAssertEqual(
-                error as? BrowserProfileDataStoreProviderError,
-                .customProfilesUnsupported
-            )
-        }
-
-        XCTAssertEqual(defaultResolverCalls, 0)
-        XCTAssertEqual(customResolverCalls, 0)
-        XCTAssertEqual(loadCount, 0)
-        XCTAssertEqual(residentChangeCount, 0)
-        XCTAssertEqual(pool.count, 0)
-        XCTAssertNil(pool.browserProfileIdentity(for: profile.id))
-    }
-
     func testFirstLoadSeesSuppliedStoreAndRecordedBrowserProfileIdentity() throws {
         let customID = UUID()
         let customStore = WKWebsiteDataStore.nonPersistent()
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             customStoreResolver: { id in
                 XCTAssertEqual(id, customID)
                 return customStore
@@ -1555,45 +1469,6 @@ final class WebViewPoolTests: XCTestCase {
 
         XCTAssertTrue(observedStore === customStore)
         XCTAssertEqual(observedIdentity, .custom(customID))
-    }
-
-    func testBrowserProfileRebuildResolutionFailureRemovesOldRuntimeAndReportsResidency() throws {
-        let customID = UUID()
-        var customProfilesSupported = true
-        var loadedRequests: [URLRequest] = []
-        var snapshots: [Set<UUID>] = []
-        let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { customProfilesSupported },
-            defaultStoreResolver: { WKWebsiteDataStore.nonPersistent() },
-            customStoreResolver: { _ in WKWebsiteDataStore.nonPersistent() }
-        )
-        let pool = WebViewPool(
-            onURLChange: { _, _ in },
-            initialLoad: { _, request in loadedRequests.append(request) },
-            browserProfileDataStoreProvider: provider
-        )
-        pool.onResidentSetChange = { snapshots.append(pool.residentSlotIDs) }
-        var profile = makeProfile(name: "UnsupportedRebuild")
-
-        _ = try pool.webView(for: profile)
-        customProfilesSupported = false
-        profile.browserProfileID = customID
-
-        do {
-            _ = try pool.webView(for: profile)
-            XCTFail("Unsupported custom Profile rebuild must fail")
-        } catch {
-            XCTAssertEqual(
-                error as? BrowserProfileDataStoreProviderError,
-                .customProfilesUnsupported
-            )
-        }
-
-        XCTAssertEqual(snapshots, [[profile.id], []])
-        XCTAssertTrue(pool.residentSlotIDs.isEmpty)
-        XCTAssertEqual(pool.count, 0)
-        XCTAssertEqual(loadedRequests.count, 1)
-        XCTAssertNil(pool.browserProfileIdentity(for: profile.id))
     }
 
     func testRebuildNavigationURLPrefersInitialRequestBeforeRedirectedURL() throws {
@@ -2017,7 +1892,7 @@ final class WebViewPoolTests: XCTestCase {
 
     func testResourceLifecycleDefaultsMatchAutomaticContract() throws {
         XCTAssertEqual(SlotLifecycleCoordinator.defaultRecentStageDuration, 30)
-        XCTAssertEqual(SlotLifecycleCoordinator.defaultLongIdleThreshold, 600)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultLongIdleThreshold, 1800)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay, 0)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultPressureStepDelay, 0.5)
     }
@@ -3281,6 +3156,554 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(failureEvents.count, 1)
     }
 
+    func testRequestPreservingReferrerFollowsStrictOriginWhenCrossOrigin() throws {
+        let sourceURL = URL(string: "https://user:pass@chatgpt.com:443/c/conv-1?tab=main#top")!
+        let sameOriginTarget = URL(string: "https://chatgpt.com/codex/tasks")!
+        let crossOriginTarget = URL(string: "https://github.com/openai/codex")!
+        let downgradeTarget = URL(string: "http://insecure.example.com/page")!
+
+        let sameOriginRequest = WebNavigationCoordinator.requestPreservingReferrer(
+            URLRequest(url: sameOriginTarget),
+            sourceURL: sourceURL
+        )
+        XCTAssertEqual(
+            sameOriginRequest.value(forHTTPHeaderField: "Referer"),
+            "https://chatgpt.com:443/c/conv-1?tab=main"
+        )
+
+        let crossOriginRequest = WebNavigationCoordinator.requestPreservingReferrer(
+            URLRequest(url: crossOriginTarget),
+            sourceURL: sourceURL
+        )
+        XCTAssertEqual(
+            crossOriginRequest.value(forHTTPHeaderField: "Referer"),
+            "https://chatgpt.com:443/"
+        )
+
+        let downgradeRequest = WebNavigationCoordinator.requestPreservingReferrer(
+            URLRequest(url: downgradeTarget),
+            sourceURL: sourceURL
+        )
+        XCTAssertNil(downgradeRequest.value(forHTTPHeaderField: "Referer"))
+
+        var prePopulated = URLRequest(url: crossOriginTarget)
+        prePopulated.setValue("https://custom.origin/", forHTTPHeaderField: "Referer")
+        let untouched = WebNavigationCoordinator.requestPreservingReferrer(
+            prePopulated,
+            sourceURL: sourceURL
+        )
+        XCTAssertEqual(untouched.value(forHTTPHeaderField: "Referer"), "https://custom.origin/")
+    }
+
+    func testAuthenticationURLClassifierCoversGitHubAppInstallAndCustomDomainOAuthQuery() throws {
+        XCTAssertTrue(
+            PopupCoordinator.isAuthenticationURL(
+                URL(string: "https://github.com/apps/chatgpt-codex-connector/installations/new")
+            )
+        )
+        XCTAssertTrue(
+            PopupCoordinator.isAuthenticationURL(
+                URL(string: "https://sso.enterprise.example/oauth2/authorize?client_id=abc&redirect_uri=https://app.example/cb")
+            )
+        )
+        XCTAssertTrue(
+            PopupCoordinator.isAuthenticationURL(
+                URL(string: "https://idp.company.com/connect?client_id=xyz&response_type=code")
+            )
+        )
+        XCTAssertTrue(
+            PopupCoordinator.isAuthenticationURL(
+                URL(string: "https://accounts.example.com/start")
+            )
+        )
+        XCTAssertFalse(
+            PopupCoordinator.isAuthenticationURL(
+                URL(string: "https://chatgpt.com/codex/tasks/task_123")
+            )
+        )
+        XCTAssertFalse(
+            PopupCoordinator.isAuthenticationURL(
+                URL(string: "https://v.qq.com/x/cover/abc/video.html")
+            )
+        )
+        XCTAssertEqual(
+            PopupCoordinator.disposition(
+                navigationType: .other,
+                sourceURL: URL(string: "https://chatgpt.com/"),
+                targetURL: URL(string: "blob:https://chatgpt.com/1234-5678")
+            ),
+            .currentSlot
+        )
+        XCTAssertEqual(
+            PopupCoordinator.disposition(
+                navigationType: .other,
+                sourceURL: URL(string: "https://chatgpt.com/"),
+                targetURL: URL(string: "javascript:void(0)")
+            ),
+            .currentSlot
+        )
+        XCTAssertEqual(
+            PopupCoordinator.disposition(
+                navigationType: .other,
+                sourceURL: URL(string: "https://chatgpt.com/c/123"),
+                targetURL: URL(string: "")
+            ),
+            .currentSlot
+        )
+        XCTAssertEqual(
+            PopupCoordinator.disposition(
+                navigationType: .other,
+                sourceURL: URL(string: "https://auth.openai.com/authorize"),
+                targetURL: URL(string: "")
+            ),
+            .popup
+        )
+        if let emptyBridgedURL = NSURL(string: "") as URL? {
+            XCTAssertEqual(
+                PopupCoordinator.disposition(
+                    navigationType: .other,
+                    sourceURL: URL(string: "https://chatgpt.com/c/123"),
+                    targetURL: emptyBridgedURL
+                ),
+                .currentSlot
+            )
+            XCTAssertEqual(
+                PopupCoordinator.disposition(
+                    navigationType: .other,
+                    sourceURL: URL(string: "https://auth.openai.com/authorize"),
+                    targetURL: emptyBridgedURL
+                ),
+                .popup
+            )
+        }
+    }
+
+    func testDeferredBlankPopupPromotesForAuthAndRoutesOrdinaryURLToParent() async throws {
+        func makeHostedParent(
+            interceptingRequestsAfterLoad: Bool = true
+        ) async throws -> (
+            parent: FloatTabsWebView,
+            window: NSWindow,
+            hostDelegate: RecordingTestNavigationDelegate,
+            coordinator: PopupCoordinator
+        ) {
+            let configuration = WKWebViewConfiguration()
+            configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+            let parent = FloatTabsWebView(
+                frame: CGRect(x: 0, y: 0, width: 600, height: 600),
+                configuration: configuration
+            )
+            let window = NSWindow(
+                contentRect: CGRect(x: 0, y: 0, width: 600, height: 600),
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            window.isReleasedWhenClosed = false
+            window.contentView = parent
+            window.orderFrontRegardless()
+
+            let hostDelegate = RecordingTestNavigationDelegate()
+            hostDelegate.cancelRemoteLoads = !interceptingRequestsAfterLoad
+            hostDelegate.allowInitialLoad = true
+            parent.navigationDelegate = hostDelegate
+
+            let coordinator = PopupCoordinator(
+                parentWebView: parent,
+                openExternal: { _ in },
+                deferredPopupTimeout: 5.0
+            )
+            parent.uiDelegate = coordinator
+
+            parent.loadHTMLString(
+                "<html><body>host</body></html>",
+                baseURL: URL(string: "https://chatgpt.com/c/long-thread")!
+            )
+            for _ in 0..<50 where !hostDelegate.didFinishInitialLoad {
+                try await Task.sleep(nanoseconds: 25_000_000)
+            }
+            hostDelegate.allowInitialLoad = false
+            hostDelegate.cancelRemoteLoads = true
+            return (parent, window, hostDelegate, coordinator)
+        }
+
+        func closeHost(
+            _ host: (
+                parent: FloatTabsWebView,
+                window: NSWindow,
+                hostDelegate: RecordingTestNavigationDelegate,
+                coordinator: PopupCoordinator
+            )
+        ) {
+            host.parent.stopLoading()
+            host.parent.navigationDelegate = nil
+            host.parent.uiDelegate = nil
+            host.coordinator.closeAll()
+            host.window.contentView = nil
+            host.window.orderOut(nil)
+            host.window.close()
+        }
+
+        // Case 1: Deferred about:blank navigating to an OAuth endpoint promotes to a floating popup panel.
+        do {
+            let authHost = try await makeHostedParent()
+            defer { closeHost(authHost) }
+
+            let authPopupOpened = try await evaluateBool(
+                """
+                (() => {
+                  window.__authWin = window.open('about:blank', '_blank');
+                  return Boolean(window.__authWin);
+                })()
+                """,
+                in: authHost.parent
+            )
+            XCTAssertTrue(authPopupOpened)
+            XCTAssertEqual(authHost.coordinator.debugDeferredBlankPopupCount, 1)
+            XCTAssertEqual(authHost.coordinator.userFloatingWindowCount, 0)
+
+            _ = try await evaluateBool(
+                """
+                (() => {
+                  window.__authWin.location.href = 'https://auth.example.com/authorize?client_id=1&redirect_uri=https://chatgpt.com/cb';
+                  return true;
+                })()
+                """,
+                in: authHost.parent
+            )
+            for _ in 0..<40 where authHost.coordinator.userFloatingWindowCount == 0 {
+                try await Task.sleep(nanoseconds: 25_000_000)
+            }
+            XCTAssertEqual(authHost.coordinator.userFloatingWindowCount, 1)
+            XCTAssertEqual(authHost.coordinator.debugDeferredBlankPopupCount, 0)
+        }
+
+        // Case 2: Deferred empty window.open('', '_blank') navigating to an ordinary Codex URL
+        // routes back to the parent WebView with Referer preserved and drops the temporary child.
+        do {
+            let slotHost = try await makeHostedParent()
+            defer { closeHost(slotHost) }
+
+            let slotPopupOpened = try await evaluateBool(
+                """
+                (() => {
+                  window.__codexWin = window.open('', '_blank');
+                  return Boolean(window.__codexWin);
+                })()
+                """,
+                in: slotHost.parent
+            )
+            XCTAssertTrue(slotPopupOpened)
+            XCTAssertEqual(slotHost.coordinator.debugDeferredBlankPopupCount, 1)
+
+            _ = try await evaluateBool(
+                """
+                (() => {
+                  window.__codexWin.location.href = 'https://chatgpt.com/codex/tasks/run_1';
+                  return true;
+                })()
+                """,
+                in: slotHost.parent
+            )
+            for _ in 0..<40 where !slotHost.hostDelegate.requestedURLs.contains(where: {
+                $0.absoluteString == "https://chatgpt.com/codex/tasks/run_1"
+            }) {
+                try await Task.sleep(nanoseconds: 25_000_000)
+            }
+            XCTAssertTrue(
+                slotHost.hostDelegate.requestedURLs.contains {
+                    $0.absoluteString == "https://chatgpt.com/codex/tasks/run_1"
+                }
+            )
+            let matchingRequest = try XCTUnwrap(
+                slotHost.hostDelegate.requests.last {
+                    $0.url?.absoluteString == "https://chatgpt.com/codex/tasks/run_1"
+                }
+            )
+            XCTAssertEqual(
+                matchingRequest.value(forHTTPHeaderField: "Referer"),
+                "https://chatgpt.com/c/long-thread"
+            )
+            XCTAssertEqual(slotHost.coordinator.debugDeferredBlankPopupCount, 0)
+            XCTAssertEqual(slotHost.coordinator.userFloatingWindowCount, 0)
+        }
+    }
+
+    func testSlotNavigationInteractiveReadinessFiresOnceBeforeStalledDidFinish() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = WebViewFactory.makeWebView()
+        let slotID = UUID()
+        var interactiveEvents: [(UUID, URL?, UInt64)] = []
+        var interactiveReady = true
+
+        let observer = SlotNavigationObserver(
+            slotID: slotID,
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            onNavigationInteractiveReady: { id, url, generation in
+                interactiveEvents.append((id, url, generation))
+            },
+            diagnostics: diagnostics,
+            postCommitInteractiveGraceDelay: 0.02,
+            postCommitInteractiveFallbackDelay: 0.2,
+            interactiveReadinessEvaluator: { _ in interactiveReady }
+        )
+
+        webView.navigationDelegate = nil
+        let nav1 = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>loading</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: nav1)
+        observer.webView(webView, didCommit: nav1)
+
+        for _ in 0..<40 where interactiveEvents.isEmpty {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+        XCTAssertEqual(interactiveEvents.count, 1)
+        XCTAssertEqual(interactiveEvents.first?.0, slotID)
+        XCTAssertEqual(interactiveEvents.first?.2, 1)
+        XCTAssertTrue(
+            writer.events.contains {
+                $0.event == "navigation.interactive_ready"
+                    && $0.fields["readiness_trigger"] == .string("dom_interactive")
+            }
+        )
+
+        observer.webView(webView, didFinish: nav1)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(interactiveEvents.count, 1)
+
+        interactiveReady = false
+        let nav2 = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>fallback</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: nav2)
+        observer.webView(webView, didCommit: nav2)
+        for _ in 0..<40 where interactiveEvents.count < 2 {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+        XCTAssertEqual(interactiveEvents.count, 2)
+        XCTAssertEqual(interactiveEvents.last?.2, 2)
+        XCTAssertTrue(
+            writer.events.contains {
+                $0.event == "navigation.interactive_ready"
+                    && $0.fields["readiness_trigger"] == .string("post_commit_fallback")
+            }
+        )
+        observer.invalidate()
+    }
+
+    func testMobileChatGPTSlotPreservesDesktopSafariIdentityAcrossInSlotAuthRedirect() throws {
+        let mobileAuto = WebRenderingProfile.canonicalDefault.settingWebsiteMode(.mobile)
+        let chatHome = URL(string: "https://chatgpt.com/")!
+        let authRedirect = URL(string: "https://auth.openai.com/authorize?client_id=1&redirect_uri=https://chatgpt.com/cb")!
+        let otherMobileHome = URL(string: "https://example.com/")!
+
+        XCTAssertEqual(
+            SiteCompatibilityPolicy.runtimeRendering(
+                for: mobileAuto,
+                navigationURL: authRedirect,
+                slotHomeURL: chatHome
+            ),
+            mobileAuto.settingBrowserIdentity(.macosSafari)
+        )
+        XCTAssertEqual(
+            SiteCompatibilityPolicy.runtimeRendering(
+                for: mobileAuto,
+                navigationURL: authRedirect,
+                slotHomeURL: otherMobileHome
+            ),
+            mobileAuto
+        )
+    }
+
+    func testExplicitUserFloatingWindowPreservesCustomNonDefaultDataStore() throws {
+        let customStore = WKWebsiteDataStore.nonPersistent()
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = customStore
+        let source = FloatTabsWebView(frame: .zero, configuration: configuration)
+        source.customUserAgent = "FloatTabs-CustomStore-Test/1.0"
+        let coordinator = PopupCoordinator(parentWebView: source)
+        let url = URL(string: "https://example.invalid/custom-profile-floating")!
+
+        let floating = try XCTUnwrap(
+            coordinator.openUserFloatingWindow(url, from: source)
+        )
+
+        XCTAssertTrue(floating.configuration.websiteDataStore === customStore)
+        XCTAssertFalse(floating.configuration.websiteDataStore === WKWebsiteDataStore.default())
+        XCTAssertEqual(floating.customUserAgent, source.customUserAgent)
+        coordinator.closeAll()
+    }
+
+    func testPopupCoordinatorHandlesHeadlessJavaScriptDialogsAndMediaPermissions() async throws {
+        let webView = WebViewFactory.makeWebView()
+        var recordedOrigins: [String] = []
+        let headlessCoordinator = PopupCoordinator(
+            parentWebView: webView,
+            dialogPresenter: { request, window in
+                XCTAssertNil(window)
+                switch request {
+                case let .alert(origin, _, completion):
+                    recordedOrigins.append("alert:\(origin)")
+                    completion()
+                case let .confirm(origin, _, completion):
+                    recordedOrigins.append("confirm:\(origin)")
+                    completion(false)
+                case let .prompt(origin, _, _, completion):
+                    recordedOrigins.append("prompt:\(origin)")
+                    completion(nil)
+                }
+            }
+        )
+        webView.uiDelegate = headlessCoordinator
+
+        let html = """
+        <html><body><script>
+        window.__confirmVal = window.confirm("Continue?");
+        window.__promptVal = window.prompt("Enter name", "Ada");
+        window.alert("Hello");
+        window.__dialogsDone = true;
+        </script></body></html>
+        """
+        webView.loadHTMLString(html, baseURL: URL(string: "https://dialog.example.test/")!)
+        var done = false
+        for _ in 0..<40 where !done {
+            done = (try? await evaluateBool("Boolean(window.__dialogsDone)", in: webView)) ?? false
+            if !done {
+                try await Task.sleep(nanoseconds: 25_000_000)
+            }
+        }
+        XCTAssertTrue(done)
+        XCTAssertEqual(recordedOrigins, [
+            "confirm:dialog.example.test",
+            "prompt:dialog.example.test",
+            "alert:dialog.example.test",
+        ])
+        let confirmWasTrue = try await evaluateBool("window.__confirmVal === true", in: webView)
+        let promptWasNull = try await evaluateBool("window.__promptVal === null", in: webView)
+        XCTAssertFalse(confirmWasTrue)
+        XCTAssertTrue(promptWasNull)
+        headlessCoordinator.closeAll()
+
+        var promptCount = 0
+        let mediaCoordinator = PopupCoordinator(
+            parentWebView: webView,
+            mediaPermissionPresenter: { _, _, _, decision in
+                promptCount += 1
+                decision(.grant)
+            }
+        )
+        var decisions: [WKPermissionDecision] = []
+        mediaCoordinator.evaluateMediaCapturePermission(
+            scheme: "http",
+            host: "insecure.example.com",
+            port: 80,
+            type: .microphone,
+            hostWindow: nil
+        ) { decisions.append($0) }
+        mediaCoordinator.evaluateMediaCapturePermission(
+            scheme: "https",
+            host: "meet.example.com",
+            port: 443,
+            type: .cameraAndMicrophone,
+            hostWindow: nil
+        ) { decisions.append($0) }
+        mediaCoordinator.evaluateMediaCapturePermission(
+            scheme: "https",
+            host: "meet.example.com",
+            port: 443,
+            type: .cameraAndMicrophone,
+            hostWindow: nil
+        ) { decisions.append($0) }
+        mediaCoordinator.evaluateMediaCapturePermission(
+            scheme: "http",
+            host: "localhost",
+            port: 3000,
+            type: .microphone,
+            hostWindow: nil
+        ) { decisions.append($0) }
+
+        XCTAssertEqual(decisions, [.deny, .grant, .grant, .grant])
+        XCTAssertEqual(promptCount, 2)
+        mediaCoordinator.closeAll()
+
+        let defaultMediaCoordinator = PopupCoordinator(parentWebView: webView)
+        var defaultDecision: WKPermissionDecision?
+        defaultMediaCoordinator.evaluateMediaCapturePermission(
+            scheme: "https",
+            host: "meet.example.com",
+            port: 443,
+            type: .microphone,
+            hostWindow: nil
+        ) { defaultDecision = $0 }
+        XCTAssertEqual(defaultDecision, .deny)
+
+        defaultMediaCoordinator.closeAll()
+    }
+
+    func testLinkContextMenuCoordinatorPassiveScriptAndNativeMenuAugmentation() async throws {
+        let webView = WebViewFactory.makeWebView()
+        let coordinator = LinkContextMenuCoordinator(
+            webView: webView,
+            openFloating: { _, _ in },
+            openExternal: { _ in }
+        )
+        let script = LinkContextMenuCoordinator.userScript()
+        XCTAssertFalse(script.source.contains("preventDefault"))
+
+        webView.loadHTMLString("<html><body><a href='https://developer.apple.com'>Docs</a></body></html>", baseURL: URL(string: "https://example.test/"))
+        for _ in 0..<20 where webView.url == nil {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+        _ = try? await webView.evaluateJavaScript(
+            "window.webkit.messageHandlers.floatTabsLinkContext.postMessage('https://developer.apple.com/documentation')"
+        )
+
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 0
+        ))
+        let nativeMenu = NSMenu()
+        nativeMenu.addItem(NSMenuItem(title: "Look Up", action: nil, keyEquivalent: ""))
+        nativeMenu.addItem(NSMenuItem(title: "Copy", action: nil, keyEquivalent: ""))
+        webView.willOpenMenu(nativeMenu, with: event)
+
+        let titles = nativeMenu.items.filter { !$0.isSeparatorItem }.map(\.title)
+        XCTAssertEqual(
+            titles,
+            ["Open in Floating Window", "Open in Default Browser", "Look Up", "Copy"]
+        )
+
+        let plainMenu = NSMenu()
+        plainMenu.addItem(NSMenuItem(title: "Reload Page", action: nil, keyEquivalent: ""))
+        webView.willOpenMenu(plainMenu, with: event)
+        XCTAssertEqual(plainMenu.items.map(\.title), ["Reload Page"])
+
+        coordinator.invalidate()
+    }
+
+    private func evaluateBool(_ script: String, in webView: WKWebView) async throws -> Bool {
+        try await withCheckedThrowingContinuation { continuation in
+            webView.evaluateJavaScript(script) { value, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: value as? Bool ?? false)
+                }
+            }
+        }
+    }
+
     private static func pageAppPayload(token: String) -> [String: Any] {
         [
             "version": 1,
@@ -3318,5 +3741,38 @@ final class WebViewPoolTests: XCTestCase {
             homeURL: homeURL ?? URL(string: "https://example.com/\(name)")!,
             homeURLSchemeWasInferred: homeURLSchemeWasInferred
         )
+    }
+}
+
+@MainActor
+private final class RecordingTestNavigationDelegate: NSObject, WKNavigationDelegate {
+    var requestedURLs: [URL] = []
+    var requests: [URLRequest] = []
+    var allowInitialLoad = true
+    var cancelRemoteLoads = true
+    var didFinishInitialLoad = false
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+    ) {
+        if allowInitialLoad && !didFinishInitialLoad {
+            decisionHandler(.allow)
+            return
+        }
+        if navigationAction.targetFrame == nil && navigationAction.navigationType != .linkActivated {
+            decisionHandler(.allow)
+            return
+        }
+        if let url = navigationAction.request.url {
+            requestedURLs.append(url)
+        }
+        requests.append(navigationAction.request)
+        decisionHandler(cancelRemoteLoads ? .cancel : .allow)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        didFinishInitialLoad = true
     }
 }

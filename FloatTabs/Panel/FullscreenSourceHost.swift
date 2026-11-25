@@ -60,16 +60,38 @@ private final class FullscreenSourceRootView: NSView {
     init(
         container: WebPanelContainerView,
         railFoldControl: RailFoldControl,
+        topLeftResizeHandle: PanelResizeHandleView,
+        topRightResizeHandle: PanelResizeHandleView,
         resizeHandle: PanelResizeHandleView,
         resizeReadout: ResizeReadoutView,
-        shellWindow: NSWindow
+        shellWindow: NSWindow,
+        onResizeEnded: @escaping () -> Void
     ) {
         super.init(frame: .zero)
 
         let edgeDragView = WebSourceEdgeDragView(targetWindow: shellWindow)
+        topLeftResizeHandle.resizeTargetWindow = shellWindow
+        topRightResizeHandle.resizeTargetWindow = shellWindow
         resizeHandle.resizeTargetWindow = shellWindow
+        railFoldControl.resizeTargetWindow = shellWindow
+        railFoldControl.onViewportSizeChange = { [weak resizeReadout] viewportSize in
+            resizeReadout?.update(viewportSize: viewportSize)
+            resizeReadout?.isHidden = false
+        }
+        railFoldControl.onResizeEnded = { [weak resizeReadout] in
+            resizeReadout?.isHidden = true
+            onResizeEnded()
+        }
 
-        for view in [container, edgeDragView, railFoldControl, resizeHandle, resizeReadout] {
+        for view in [
+            container,
+            edgeDragView,
+            topLeftResizeHandle,
+            topRightResizeHandle,
+            railFoldControl,
+            resizeHandle,
+            resizeReadout,
+        ] {
             view.removeFromSuperview()
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -86,8 +108,26 @@ private final class FullscreenSourceRootView: NSView {
             edgeDragView.topAnchor.constraint(equalTo: topAnchor),
             edgeDragView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            // Mirror the bottom-right resize affordance: the rail fold is
-            // acquired entirely inside the page's bottom-left corner.
+            topLeftResizeHandle.leadingAnchor.constraint(equalTo: leadingAnchor),
+            topLeftResizeHandle.topAnchor.constraint(equalTo: topAnchor),
+            topLeftResizeHandle.widthAnchor.constraint(
+                equalToConstant: PanelMetrics.topCornerResizeHandleSize
+            ),
+            topLeftResizeHandle.heightAnchor.constraint(
+                equalToConstant: PanelMetrics.topCornerResizeHandleSize
+            ),
+
+            topRightResizeHandle.trailingAnchor.constraint(equalTo: trailingAnchor),
+            topRightResizeHandle.topAnchor.constraint(equalTo: topAnchor),
+            topRightResizeHandle.widthAnchor.constraint(
+                equalToConstant: PanelMetrics.topCornerResizeHandleSize
+            ),
+            topRightResizeHandle.heightAnchor.constraint(
+                equalToConstant: PanelMetrics.topCornerResizeHandleSize
+            ),
+
+            // Mirror the bottom-right resize affordance: click folds the rail;
+            // drag resizes the window from the bottom-left page corner.
             railFoldControl.leadingAnchor.constraint(equalTo: leadingAnchor),
             railFoldControl.bottomAnchor.constraint(equalTo: bottomAnchor),
             railFoldControl.widthAnchor.constraint(
@@ -181,6 +221,9 @@ final class WebSourceEdgeDragView: NSView {
             outerDepth: 0,
             innerDepth: PanelMetrics.innerMovementOverlap,
             clippingBounds: bounds,
+            topLeftExclusion: PanelMetrics.topCornerResizeHandleSize,
+            topRightExclusion: PanelMetrics.topCornerResizeHandleSize,
+            bottomLeftExclusion: PanelMetrics.resizeHandleSize,
             bottomRightExclusion: PanelMetrics.resizeHandleSize
         )
     }
@@ -326,6 +369,7 @@ final class FullscreenSourceHostController {
     var onSessionLockChange: ((Bool) -> Void)?
     var onSessionStateChange: ((FullscreenSourceSessionState) -> Void)?
     var onSourceRebuildRequired: (() -> Void)?
+    var onResizeEnded: (() -> Void)?
 
     var isSessionLocked: Bool {
         sessionState.locksSourceHost
@@ -358,6 +402,8 @@ final class FullscreenSourceHostController {
 
     init(
         container: WebPanelContainerView,
+        topLeftResizeHandle: PanelResizeHandleView = PanelResizeHandleView(corner: .topLeft),
+        topRightResizeHandle: PanelResizeHandleView = PanelResizeHandleView(corner: .topRight),
         resizeHandle: PanelResizeHandleView,
         resizeReadout: ResizeReadoutView,
         shellWindow: NSWindow,
@@ -372,9 +418,14 @@ final class FullscreenSourceHostController {
         window.contentView = FullscreenSourceRootView(
             container: container,
             railFoldControl: railFoldControl,
+            topLeftResizeHandle: topLeftResizeHandle,
+            topRightResizeHandle: topRightResizeHandle,
             resizeHandle: resizeHandle,
             resizeReadout: resizeReadout,
-            shellWindow: shellWindow
+            shellWindow: shellWindow,
+            onResizeEnded: { [weak self] in
+                self?.onResizeEnded?()
+            }
         )
         attachSourceWindowToShell()
     }
@@ -520,7 +571,29 @@ final class FullscreenSourceHostController {
         window.alphaValue = 1
         window.ignoresMouseEvents = false
         window.collectionBehavior = Self.sourceWindowCollectionBehavior
+        window.setAccessibilityDocument(nil)
         window.orderOut(nil)
+    }
+
+    static func privacySafeOriginString(for url: URL?) -> String? {
+        guard let url,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = components.host?.lowercased(),
+              !host.isEmpty else {
+            return nil
+        }
+        var origin = URLComponents()
+        origin.scheme = scheme
+        origin.host = host
+        origin.port = components.port
+        origin.path = "/"
+        return origin.url?.absoluteString
+    }
+
+    func updateAccessibilityDocumentOrigin(for url: URL?) {
+        window.setAccessibilityDocument(Self.privacySafeOriginString(for: url))
     }
 
     func requestFullscreenExit() {

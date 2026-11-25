@@ -53,15 +53,30 @@ enum WebFocusAdapterError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .inputUnavailable:
-            return "No usable input element was found."
+            return L10n.tr(
+                "No usable input element was found.",
+                "未找到可用的输入元素。"
+            )
         case .pageUnavailable:
-            return "No usable page content element was found."
+            return L10n.tr(
+                "No usable page content element was found.",
+                "未找到可用的页面内容元素。"
+            )
         case let .unsupportedAction(action):
-            return "The adapter does not support \(action)."
+            return L10n.tr(
+                "The adapter does not support \(action).",
+                "适配器不支持 \(action)。"
+            )
         case let .javascriptFailed(message):
-            return "Focus script failed: \(message)"
+            return L10n.tr(
+                "Focus script failed: \(message)",
+                "焦点脚本执行失败：\(message)"
+            )
         case .noWebView:
-            return "No active WebView is available."
+            return L10n.tr(
+                "No active WebView is available.",
+                "当前没有可用的 WebView。"
+            )
         }
     }
 }
@@ -169,6 +184,24 @@ enum WebFocusDOM {
             || main.contains(element);
     }
 
+    function boundedInputText(element) {
+        if (!element) return '';
+        if (typeof document.createTreeWalker === 'function' && typeof NodeFilter !== 'undefined') {
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+            let collected = '';
+            let node = walker.nextNode();
+            while (node && collected.length < 256) {
+                const value = node.nodeValue || '';
+                if (value) {
+                    collected += value.slice(0, 256 - collected.length);
+                }
+                node = walker.nextNode();
+            }
+            return collected;
+        }
+        return (element.textContent || '').slice(0, 256);
+    }
+
     function inputContext(element) {
         return [
             element.getAttribute('aria-label') || '',
@@ -176,7 +209,7 @@ enum WebFocusDOM {
             element.getAttribute('name') || '',
             element.getAttribute('id') || '',
             element.getAttribute('type') || '',
-            element.textContent || ''
+            boundedInputText(element)
         ].join(' ').toLowerCase();
     }
 

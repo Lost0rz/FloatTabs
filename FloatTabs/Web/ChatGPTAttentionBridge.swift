@@ -1000,7 +1000,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             }
         """
         let benchmarkMutationObserverCallback = """
-          () => {
+          (mutations) => {
+            if (!mutationsMayAffectStopState(mutations)) { return; }
             if (benchmarkMeasurementEnabled) {
               incrementBenchmarkCounter("mutation_callback_batch_count");
             }
@@ -1328,6 +1329,31 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               lastCheck = Date.now();
               evaluate();
             }, wait);
+          };
+
+          const STOP_MUTATION_RELEVANT_SELECTOR =
+            'button,[role="button"],[data-testid*="stop"]';
+          const mutationsMayAffectStopState = (mutations) => {
+            if (!Array.isArray(mutations) || mutations.length === 0) { return true; }
+            for (let i = 0; i < mutations.length; i += 1) {
+              const record = mutations[i];
+              if (!record || record.type !== "attributes") { return true; }
+              const attr = record.attributeName;
+              if (attr !== "class" && attr !== "style") { return true; }
+              const target = record.target;
+              if (!target
+                  || typeof target.matches !== "function"
+                  || typeof target.querySelector !== "function") {
+                return true;
+              }
+              if (target.matches(STOP_MUTATION_RELEVANT_SELECTOR)
+                  || (typeof target.closest === "function"
+                      && target.closest(STOP_MUTATION_RELEVANT_SELECTOR))
+                  || target.querySelector(STOP_MUTATION_RELEVANT_SELECTOR)) {
+                return true;
+              }
+            }
+            return false;
           };
 
           const startObserving = () => {

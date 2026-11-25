@@ -83,8 +83,7 @@ final class BrowserProfileAddTests: XCTestCase {
         let company = makeBrowserProfile(name: "Company")
         let personal = makeBrowserProfile(name: "Personal")
         let options = WebAppEditorController.browserProfileOptions(
-            browserProfiles: [company, personal],
-            customProfilesSupported: true
+            browserProfiles: [company, personal]
         )
 
         XCTAssertEqual(options.map(\.name), ["Default", "Company", "Personal"])
@@ -103,7 +102,6 @@ final class BrowserProfileAddTests: XCTestCase {
     func testAddOptionsUseRenamedDefaultLabelButKeepNilIdentity() throws {
         let options = WebAppEditorController.browserProfileOptions(
             browserProfiles: [],
-            customProfilesSupported: true,
             defaultProfileName: "Jack"
         )
 
@@ -119,17 +117,6 @@ final class BrowserProfileAddTests: XCTestCase {
             browserProfileID: defaultOption.id
         )
         XCTAssertNil(value.browserProfileID)
-    }
-
-    func testUnsupportedCustomOptionsCannotBeSelectedAsEnabledAdd() throws {
-        let company = makeBrowserProfile(name: "Company")
-        let options = WebAppEditorController.browserProfileOptions(
-            browserProfiles: [company],
-            customProfilesSupported: false
-        )
-
-        XCTAssertTrue(try XCTUnwrap(options.first(where: { $0.id == nil })).isEnabled)
-        XCTAssertFalse(try XCTUnwrap(options.first(where: { $0.id == company.id })).isEnabled)
     }
 
     func testCustomAddOnChangeCreatesFirstWebViewWithCustomStoreBeforeLoad() throws {
@@ -148,7 +135,6 @@ final class BrowserProfileAddTests: XCTestCase {
         var resolvedCustomIDs: [UUID] = []
         var loadedRequests: [URLRequest] = []
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { true },
             defaultStoreResolver: {
                 defaultResolverCalls += 1
                 return WKWebsiteDataStore.nonPersistent()

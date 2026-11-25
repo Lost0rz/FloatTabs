@@ -46,10 +46,10 @@ Automatic Slots use an in-memory, token-bounded inactivity plan with these initi
 | Stage | Inactive age | Normal-pressure behavior |
 | --- | --- | --- |
 | RECENT | less than 30s | Keep resident; anti-thrash protection |
-| IDLE | at least 30s and less than 600s | Keep resident |
-| LONG_IDLE | at least 600s | May hibernate if still inactive and unprotected |
+| IDLE | at least 30s and less than 1800s | Keep resident |
+| LONG_IDLE | at least 1800s | May hibernate if still inactive and unprotected |
 
-600s / 10 minutes is an initial tunable implementation default, not a permanent product invariant. Tests must inject time rather than wait in real time.
+1800s / 30 minutes is an initial tunable implementation default, not a permanent product invariant. Tests must inject time rather than wait in real time.
 
 ### Plan and timer ownership
 
@@ -60,7 +60,7 @@ inactive
 → create a new lifecycle plan token
 → RECENT
 → exact-token 30s boundary → IDLE
-→ exact-token 600s boundary → LONG_IDLE / normal reclaim eligibility
+→ exact-token 1800s boundary → LONG_IDLE / normal reclaim eligibility
 ~~~
 
 The inactivity plan and timers are generation/token bounded. Reactivation, visibility/current ownership, Slot removal, or an identity-invalidating lifecycle change cancels the old plan. Every callback must validate the exact current token and current facts before changing stage or reclaiming. A stale callback is a no-op.

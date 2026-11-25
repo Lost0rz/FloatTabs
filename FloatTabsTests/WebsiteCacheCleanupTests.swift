@@ -665,13 +665,9 @@ final class WebsiteCacheCleanupTests: XCTestCase, @unchecked Sendable {
 
     func testPerformanceSettingsDoesNotProjectLegacyResidencyTimingControls() {
         let preferences = AppPreferencesStore(defaults: defaults)
-        preferences.warmWebViewRetentionDelay = 600
-        preferences.coldWebViewReleaseDelay = 120
         let controller = PerformanceSettingsViewController(preferencesStore: preferences)
         controller.loadView()
 
-        XCTAssertEqual(preferences.warmWebViewRetentionDelay, 600)
-        XCTAssertEqual(preferences.coldWebViewReleaseDelay, 120)
         XCTAssertEqual(controller.displayedWebsiteCacheUsage, "Unavailable")
     }
 
@@ -2461,7 +2457,73 @@ final class WebsiteCacheCleanupTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    func testManualReleaseMeasuresOnlyOnceAfterCleaningMultipleProfilesAndEmitsDiagnostics() async throws {
+        let preferences = AppPreferencesStore(defaults: defaults)
+        let usage = WebsiteCacheUsageStore(defaults: defaults)
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let cleaned = IdentityBox()
+        let estimateValues = EstimateBox([4_000, 1_200, 999])
+        let measureCounter = EstimateBox([nil])
+        _ = measureCounter
+        let callCounter = ProtectedCounter()
+        let coordinator = WebsiteCacheCleanupCoordinator(
+            preferencesStore: preferences,
+            usageStore: usage,
+            service: makeService(cleaned: cleaned),
+            sizeMeasurer: WebsiteCacheSizeMeasurer(estimate: {
+                callCounter.increment()
+                return estimateValues.next()
+            }),
+            profilesProvider: {
+                [
+                    WebsiteCacheProfileSnapshot(identity: .default, lastUsedAt: .distantPast, useCount: 1, isActive: false),
+                    WebsiteCacheProfileSnapshot(identity: .custom(UUID()), lastUsedAt: .distantPast, useCount: 1, isActive: false),
+                    WebsiteCacheProfileSnapshot(identity: .custom(UUID()), lastUsedAt: .distantPast, useCount: 1, isActive: false)
+                ]
+            },
+            activeIdentityProvider: { nil },
+            panelVisibilityProvider: { false },
+            prepareRuntime: { _, _ in },
+            restoreRuntime: {},
+            diagnostics: diagnostics
+        )
+
+        let result = try await coordinator.runManualRelease(now: Date(timeIntervalSince1970: 100))
+
+        // Only 1 measurement before loop and 1 measurement after all 3 cleanups complete (not 1 + 3).
+        XCTAssertEqual(callCounter.value, 2)
+        XCTAssertEqual(cleaned.values.count, 3)
+        XCTAssertEqual(result.estimatedBytesBefore, 4_000)
+        XCTAssertEqual(result.estimatedBytesAfter, 1_200)
+        XCTAssertEqual(result.releasedBytes, 2_800)
+
+        let cleanupEvent = try XCTUnwrap(
+            writer.events.last { $0.event == "storage.cache_cleanup.completed" }
+        )
+        XCTAssertEqual(cleanupEvent.fields["mode"], .string("manual"))
+        XCTAssertEqual(cleanupEvent.fields["cleaned_profile_count"], .integer(3))
+        XCTAssertEqual(cleanupEvent.fields["released_bytes"], .integer(2_800))
+    }
+
     private enum TestError: Error {
         case injected
+    }
+
+    private final class ProtectedCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+
+        var value: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return count
+        }
+
+        func increment() {
+            lock.lock()
+            count += 1
+            lock.unlock()
+        }
     }
 }

@@ -635,6 +635,104 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         )
     }
 
+    func testPreferencesRoundTripAttentionStylePaletteAndLegacyDefaults() throws {
+        let updated = FloatTabsBackupPreferences(
+            appearanceMode: .dark,
+            followPreferredSize: true,
+            attentionStyle: .orbit,
+            attentionPalette: .violet
+        )
+        let data = try JSONEncoder().encode(updated)
+        let decoded = try JSONDecoder().decode(FloatTabsBackupPreferences.self, from: data)
+        XCTAssertEqual(decoded.attentionStyle, .orbit)
+        XCTAssertEqual(decoded.attentionPalette, .violet)
+        XCTAssertEqual(decoded.resolvedAttentionStyle, .orbit)
+        XCTAssertEqual(decoded.resolvedAttentionPalette, .violet)
+
+        let legacyJSON = Data(#"{"appearanceMode":"system","followPreferredSize":true}"#.utf8)
+        let legacyDecoded = try JSONDecoder().decode(FloatTabsBackupPreferences.self, from: legacyJSON)
+        XCTAssertNil(legacyDecoded.attentionStyle)
+        XCTAssertNil(legacyDecoded.attentionPalette)
+        XCTAssertEqual(legacyDecoded.resolvedAttentionStyle, .dot)
+        XCTAssertEqual(legacyDecoded.resolvedAttentionPalette, .red)
+        XCTAssertNil(legacyDecoded.appLanguage)
+        XCTAssertEqual(legacyDecoded.resolvedAppLanguage, .system)
+
+        let withLanguage = FloatTabsBackupPreferences(
+            appearanceMode: .system,
+            appLanguage: .simplifiedChinese,
+            followPreferredSize: true
+        )
+        let languageData = try JSONEncoder().encode(withLanguage)
+        let decodedLanguage = try JSONDecoder().decode(FloatTabsBackupPreferences.self, from: languageData)
+        XCTAssertEqual(decodedLanguage.appLanguage, .simplifiedChinese)
+        XCTAssertEqual(decodedLanguage.resolvedAppLanguage, .simplifiedChinese)
+        XCTAssertNil(decodedLanguage.externalCommandsEnabled)
+        XCTAssertTrue(decodedLanguage.resolvedExternalCommandsEnabled)
+    }
+
+    func testBackupDocumentRoundTripsNamedShortcutsCachePolicyAndExternalCommandsFlag() throws {
+        let customPolicy = WebsiteCachePolicy(
+            automaticCleanupEnabled: false,
+            retentionDays: 14,
+            maximumEstimatedBytes: 1_073_741_824,
+            targetEstimatedBytes: 536_870_912,
+            minimumCleanupInterval: 43_200,
+            recentUseProtection: 7_200
+        )
+        let shortcuts = [
+            FloatTabsNamedBackupShortcut(
+                name: "toggleFloatTabs",
+                shortcut: FloatTabsBackupShortcut(carbonKeyCode: 49, carbonModifiers: 256)
+            ),
+            FloatTabsNamedBackupShortcut(
+                name: "selectSlot1",
+                shortcut: FloatTabsBackupShortcut(carbonKeyCode: 18, carbonModifiers: 256)
+            ),
+            FloatTabsNamedBackupShortcut(
+                name: "reload",
+                shortcut: nil
+            ),
+        ]
+        let original = FloatTabsBackupDocument(
+            schemaVersion: FloatTabsBackupDocument.currentSchemaVersion,
+            createdAt: Date(timeIntervalSince1970: 500),
+            sourceAppVersion: "0.5.14",
+            sourceBuild: "32",
+            webAppState: StoredWebAppState(
+                version: StoredWebAppState.currentVersion,
+                browserProfiles: [],
+                profiles: [
+                    WebAppProfile(
+                        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000AA")!,
+                        order: 0,
+                        name: "Test",
+                        homeURL: URL(string: "https://example.com")!
+                    ),
+                ],
+                lastActiveTabID: nil
+            ),
+            globalPreferences: FloatTabsBackupPreferences(
+                appearanceMode: .dark,
+                appLanguage: .simplifiedChinese,
+                followPreferredSize: false,
+                externalCommandsEnabled: false
+            ),
+            globalShowHideShortcut: FloatTabsBackupShortcut(carbonKeyCode: 49, carbonModifiers: 256),
+            appShortcuts: shortcuts,
+            websiteCachePolicy: customPolicy
+        )
+
+        let service = FloatTabsBackupService()
+        let encoded = try service.encode(original)
+        let decoded = try service.decode(encoded)
+
+        XCTAssertEqual(decoded.globalPreferences.externalCommandsEnabled, false)
+        XCTAssertFalse(decoded.globalPreferences.resolvedExternalCommandsEnabled)
+        XCTAssertEqual(decoded.appShortcuts, shortcuts)
+        XCTAssertEqual(decoded.websiteCachePolicy, customPolicy)
+    }
+
     private func encode(_ document: FloatTabsBackupDocument) throws -> Data {
         try FloatTabsBackupService().encode(document)
     }

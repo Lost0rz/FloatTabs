@@ -11,5 +11,18 @@
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
 		<true/>
 	</dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+	</array>
+	<key>CFBundleAllowMixedLocalizations</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>FloatTabs allows websites you authorize to use the microphone for voice input and audio calls.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>FloatTabs allows websites you authorize to use the camera for video calls and media capture.</string>
 </dict>
 </plist>

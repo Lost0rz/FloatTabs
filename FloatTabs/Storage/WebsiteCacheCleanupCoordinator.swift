@@ -74,15 +74,30 @@ enum WebsiteCacheManagementError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .unavailable:
-            return "Website cache management is unavailable."
+            return L10n.tr(
+                "Website cache management is unavailable.",
+                "网站缓存管理当前不可用。"
+            )
         case .operationAlreadyRunning:
-            return "Another cache operation is already in progress."
+            return L10n.tr(
+                "Another cache operation is already in progress.",
+                "另一项缓存清理操作正在进行中。"
+            )
         case .applicationTerminating:
-            return "FloatTabs is closing and cannot start a cache operation."
+            return L10n.tr(
+                "FloatTabs is closing and cannot start a cache operation.",
+                "FloatTabs 正在退出，无法启动缓存操作。"
+            )
         case .activeProfileProtected:
-            return "The active page is still in use. Hide FloatTabs and try again."
+            return L10n.tr(
+                "The active page is still in use. Hide FloatTabs and try again.",
+                "当前页面仍在使用中，请先隐藏 FloatTabs 后再试。"
+            )
         case .runtimeStillInUse:
-            return "FloatTabs could not release the active page runtime safely."
+            return L10n.tr(
+                "FloatTabs could not release the active page runtime safely.",
+                "FloatTabs 无法安全释放当前页面的运行时。"
+            )
         }
     }
 }
@@ -248,6 +263,7 @@ final class WebsiteCacheCleanupCoordinator {
     private let panelVisibilityProvider: PanelVisibilityProvider
     private let prepareRuntime: RuntimePreparation
     private let restoreRuntime: RuntimeRestore
+    private let diagnostics: any RuntimeDiagnosticRecording
 
     private(set) var isOperationInProgress = false
     private(set) var measurementState: WebsiteCacheMeasurementState = .calculating
@@ -266,7 +282,8 @@ final class WebsiteCacheCleanupCoordinator {
         activeIdentityProvider: @escaping ActiveIdentityProvider,
         panelVisibilityProvider: @escaping PanelVisibilityProvider,
         prepareRuntime: @escaping RuntimePreparation,
-        restoreRuntime: @escaping RuntimeRestore
+        restoreRuntime: @escaping RuntimeRestore,
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
     ) {
         self.preferencesStore = preferencesStore
         self.usageStore = usageStore
@@ -277,6 +294,7 @@ final class WebsiteCacheCleanupCoordinator {
         self.panelVisibilityProvider = panelVisibilityProvider
         self.prepareRuntime = prepareRuntime
         self.restoreRuntime = restoreRuntime
+        self.diagnostics = diagnostics
     }
 
     var client: WebsiteCacheManagementClient {
@@ -348,8 +366,40 @@ final class WebsiteCacheCleanupCoordinator {
     func refreshMeasurement() async -> WebsiteCacheMeasurementState {
         beginMeasurement()
         let generation = measurementGeneration
-        let measuredBytes = await sizeMeasurer.estimate()
-        let localResult = measuredBytes.map(WebsiteCacheMeasurementState.available) ?? .unavailable
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        let outcome = await sizeMeasurer.measureOutcome()
+        let durationMilliseconds = Self.boundedMilliseconds(
+            ProcessInfo.processInfo.systemUptime - startedAt
+        )
+        let localResult: WebsiteCacheMeasurementState
+        switch outcome {
+        case .available(let bytes):
+            localResult = .available(bytes)
+            diagnostics.record(
+                event: "storage.cache_measurement",
+                level: .debug,
+                subsystem: "storage",
+                fields: [
+                    "outcome": .string("available"),
+                    "estimated_bytes": .integer(bytes),
+                    "duration_ms": .integer(durationMilliseconds)
+                ]
+            )
+        case .unavailable(let failure):
+            localResult = .unavailable
+            diagnostics.record(
+                event: "storage.cache_measurement",
+                level: .notice,
+                subsystem: "storage",
+                fields: [
+                    "outcome": .string("unavailable"),
+                    "failure_reason": .string(Self.failureDiagnosticName(failure)),
+                    "duration_ms": .integer(durationMilliseconds)
+                ]
+            )
+        case .cancelled:
+            localResult = .unavailable
+        }
         if generation == measurementGeneration {
             measurementState = localResult
         }
@@ -446,6 +496,7 @@ final class WebsiteCacheCleanupCoordinator {
             drainPendingColdCleanupIfPossible()
         }
 
+        let runStartedAt = ProcessInfo.processInfo.systemUptime
         let policy = rawPolicy.normalized()
         let before = (await refreshMeasurement()).estimatedBytes
         let capacityTriggered = policy.shouldTriggerCapacity(estimatedBytes: before)
@@ -471,11 +522,12 @@ final class WebsiteCacheCleanupCoordinator {
         var cleanedRecords = 0
         var skippedActive = 0
         var after = before
+        var needsPostLoopMeasurement = false
         var releasedActiveRuntime = false
         var successfullyCleanedIdentities: [BrowserProfileIdentity] = []
 
         do {
-            for candidate in candidates {
+            for (index, candidate) in candidates.enumerated() {
                 if (mode == .automatic || isColdRun(mode)),
                    candidate.isActive,
                    panelVisibilityProvider() {
@@ -503,15 +555,44 @@ final class WebsiteCacheCleanupCoordinator {
                 cleanedProfiles += 1
                 cleanedRecords += cleanup.recordCount
                 successfullyCleanedIdentities.append(candidate.identity)
-                after = (await refreshMeasurement()).estimatedBytes
 
-                guard mode == .automatic, capacityTriggered else { continue }
-                if policy.hasReachedTarget(estimatedBytes: after) || after == nil {
-                    break
+                let shouldCheckCapacityEarlyStop = mode == .automatic
+                    && capacityTriggered
+                    && index + 1 < candidates.count
+                if shouldCheckCapacityEarlyStop {
+                    after = (await refreshMeasurement()).estimatedBytes
+                    needsPostLoopMeasurement = false
+                    if policy.hasReachedTarget(estimatedBytes: after) || after == nil {
+                        break
+                    }
+                } else {
+                    needsPostLoopMeasurement = true
                 }
+            }
+
+            if cleanedProfiles > 0 && needsPostLoopMeasurement {
+                after = (await refreshMeasurement()).estimatedBytes
             }
         } catch {
             if releasedActiveRuntime && !isColdRun(mode) { restoreRuntime() }
+            if !(error is CancellationError) {
+                var failureFields: [String: RuntimeDiagnosticValue] = [
+                    "mode": .string(Self.diagnosticModeName(mode)),
+                    "cleaned_profile_count": .integer(Int64(cleanedProfiles)),
+                    "duration_ms": .integer(
+                        Self.boundedMilliseconds(ProcessInfo.processInfo.systemUptime - runStartedAt)
+                    )
+                ]
+                failureFields.merge(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) {
+                    current, _ in current
+                }
+                diagnostics.record(
+                    event: "storage.cache_cleanup.failed",
+                    level: .warning,
+                    subsystem: "storage",
+                    fields: failureFields
+                )
+            }
             throw error
         }
 
@@ -529,7 +610,7 @@ final class WebsiteCacheCleanupCoordinator {
             }
             usageStore.markRunSucceeded(at: completedAt)
         }
-        return WebsiteCacheCleanupResult(
+        let result = WebsiteCacheCleanupResult(
             estimatedBytesBefore: before,
             estimatedBytesAfter: after,
             cleanedProfileCount: cleanedProfiles,
@@ -537,6 +618,57 @@ final class WebsiteCacheCleanupCoordinator {
             skippedActiveProfileCount: skippedActive,
             completedAt: completedAt
         )
+        diagnostics.record(
+            event: "storage.cache_cleanup.completed",
+            level: (cleanedProfiles > 0 || mode != .automatic) ? .notice : .debug,
+            subsystem: "storage",
+            fields: [
+                "mode": .string(Self.diagnosticModeName(mode)),
+                "capacity_triggered": .bool(capacityTriggered),
+                "bytes_before": before.map(RuntimeDiagnosticValue.integer) ?? .null,
+                "bytes_after": after.map(RuntimeDiagnosticValue.integer) ?? .null,
+                "released_bytes": result.releasedBytes.map(RuntimeDiagnosticValue.integer) ?? .null,
+                "candidate_profile_count": .integer(Int64(candidates.count)),
+                "cleaned_profile_count": .integer(Int64(cleanedProfiles)),
+                "cleaned_record_count": .integer(Int64(cleanedRecords)),
+                "skipped_active_profile_count": .integer(Int64(skippedActive)),
+                "duration_ms": .integer(
+                    Self.boundedMilliseconds(ProcessInfo.processInfo.systemUptime - runStartedAt)
+                )
+            ]
+        )
+        return result
+    }
+
+    private static func diagnosticModeName(_ mode: RunMode) -> String {
+        switch mode {
+        case .automatic:
+            return "automatic"
+        case .manual:
+            return "manual"
+        case .cold:
+            return "cold"
+        }
+    }
+
+    private static func failureDiagnosticName(_ failure: WebsiteCacheMeasurementFailure) -> String {
+        switch failure {
+        case .transientMutation:
+            return "transient_mutation"
+        case .unsafePath:
+            return "unsafe_path"
+        case .permissionDenied:
+            return "permission_denied"
+        case .unsupportedLayout:
+            return "unsupported_layout"
+        case .ioFailure:
+            return "io_failure"
+        }
+    }
+
+    private static func boundedMilliseconds(_ elapsedSeconds: TimeInterval) -> Int64 {
+        let clamped = min(max(elapsedSeconds.isFinite ? elapsedSeconds : 0, 0) * 1_000, 3_600_000)
+        return Int64(clamped.rounded())
     }
 
     private func sortedCandidates(

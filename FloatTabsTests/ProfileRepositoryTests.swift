@@ -285,6 +285,212 @@ final class ProfileRepositoryTests: XCTestCase {
         }
     }
 
+    func testBookmarksPersistSeparatelyFromCoreProfilesAndMigrateLegacyInlineBookmarks() throws {
+        try withRepository { repository, fileURL in
+            let bookmarksURL = repository.bookmarksFileURL
+            let legacyJSON = """
+            {
+              "version": 2,
+              "browserProfiles": [],
+              "defaultBrowserProfilePresentation": {
+                "name": "Default",
+                "color": { "preset": "graphite" }
+              },
+              "profiles": [
+                {
+                  "id": "\(UUID().uuidString)",
+                  "order": 0,
+                  "name": "GitHub",
+                  "homeURL": "https://github.com",
+                  "currentURL": "https://github.com",
+                  "homeURLSchemeWasInferred": false,
+                  "renderingProfile": {
+                    "websiteMode": "desktop",
+                    "browserIdentity": "automatic",
+                    "sizePreset": "medium",
+                    "orientation": "portrait",
+                    "viewportWidth": 600,
+                    "viewportHeight": 820,
+                    "zoom": 1.0
+                  },
+                  "runtimeRetentionPreference": "automatic",
+                  "backgroundMediaPolicy": "pauseWhenInactive",
+                  "createdAt": "2026-08-08T00:00:00Z",
+                  "lastUsedAt": "2026-08-08T00:00:01Z"
+                }
+              ],
+              "bookmarkFolders": [
+                {
+                  "id": "11111111-1111-1111-1111-111111111111",
+                  "order": 0,
+                  "name": "Dev",
+                  "createdAt": "2026-08-08T00:00:00Z"
+                }
+              ],
+              "bookmarks": [
+                {
+                  "id": "22222222-2222-2222-2222-222222222222",
+                  "folderID": "11111111-1111-1111-1111-111111111111",
+                  "order": 0,
+                  "title": "Swift",
+                  "url": "https://swift.org",
+                  "createdAt": "2026-08-08T00:00:00Z",
+                  "updatedAt": "2026-08-08T00:00:00Z"
+                }
+              ]
+            }
+            """
+            try Data(legacyJSON.utf8).write(to: fileURL, options: [.atomic])
+            XCTAssertFalse(FileManager.default.fileExists(atPath: bookmarksURL.path))
+
+            let migrated = try repository.load()
+            XCTAssertEqual(migrated.bookmarkFolders.map(\.name), ["Dev"])
+            XCTAssertEqual(migrated.bookmarks.map(\.title), ["Swift"])
+            XCTAssertTrue(FileManager.default.fileExists(atPath: bookmarksURL.path))
+
+            let coreData = try Data(contentsOf: fileURL)
+            let coreObject = try XCTUnwrap(JSONSerialization.jsonObject(with: coreData) as? [String: Any])
+            XCTAssertNil(coreObject["bookmarks"])
+            XCTAssertNil(coreObject["bookmarkFolders"])
+
+            let bookmarksDataBefore = try Data(contentsOf: bookmarksURL)
+            let store = TabStore(repository: repository)
+            let slotID = try XCTUnwrap(store.profiles.first?.id)
+            store.updateCurrentURL(id: slotID, url: URL(string: "https://github.com/trending")!)
+            _ = store.select(id: slotID)
+
+            let bookmarksDataAfter = try Data(contentsOf: bookmarksURL)
+            XCTAssertEqual(bookmarksDataBefore, bookmarksDataAfter)
+
+            let reloaded = try ProfileRepository(fileURL: fileURL).load()
+            XCTAssertEqual(reloaded.bookmarks.map(\.title), ["Swift"])
+            XCTAssertEqual(
+                reloaded.profiles.first?.currentURL,
+                URL(string: "https://github.com/trending")!
+            )
+        }
+    }
+
+    func testDebouncedRuntimePersistenceCoalescesAndFlushesOnDemand() throws {
+        let repository = FailingProfileRepository()
+        let store = TabStore(
+            repository: repository,
+            runtimePersistenceDebounceInterval: 0.25
+        )
+        let profile = try XCTUnwrap(store.add(name: "Docs", homeURL: URL(string: "https://example.com")!))
+        let initialSaves = repository.saveAttempts
+
+        store.updateCurrentURL(id: profile.id, url: URL(string: "https://example.com/1")!)
+        store.updateCurrentURL(id: profile.id, url: URL(string: "https://example.com/2")!)
+        store.updateCurrentURL(id: profile.id, url: URL(string: "https://example.com/3")!)
+        XCTAssertEqual(repository.saveAttempts, initialSaves)
+
+        store.flushPendingRuntimePersistence()
+        XCTAssertEqual(repository.saveAttempts, initialSaves + 1)
+        XCTAssertEqual(
+            repository.state.profiles.first?.currentURL,
+            URL(string: "https://example.com/3")!
+        )
+    }
+
+    func testCorruptBookmarksSidecarPreservesOriginalFileOnCoreSaveUntilExplicitRecovery() throws {
+        try withRepository { repository, fileURL in
+            let profile = WebAppProfile(
+                order: 0,
+                name: "Docs",
+                homeURL: URL(string: "https://example.com")!
+            )
+            let bookmark = BookmarkItem(
+                title: "Saved Page",
+                url: URL(string: "https://example.com/saved")!
+            )
+            let initialState = StoredWebAppState(
+                version: StoredWebAppState.currentVersion,
+                profiles: [profile],
+                lastActiveTabID: profile.id,
+                bookmarks: [bookmark]
+            )
+            try repository.save(initialState)
+
+            let corruptBytes = Data("{ corrupt-bookmarks-json".utf8)
+            try corruptBytes.write(to: repository.bookmarksFileURL, options: [.atomic])
+
+            let loaded = try repository.load()
+            XCTAssertTrue(repository.bookmarksRecoveryRequired)
+            let archiveURL = try XCTUnwrap(repository.bookmarksRecoveryArchiveURL)
+            XCTAssertEqual(try Data(contentsOf: archiveURL), corruptBytes)
+            XCTAssertTrue(loaded.bookmarks.isEmpty)
+            XCTAssertEqual(loaded.profiles.map(\.id), [profile.id])
+            XCTAssertFalse(
+                AppCoordinator.shouldWriteAutomaticVersionSnapshot(
+                    startupRecoveryRequired: repository.startupRecoveryRequired,
+                    bookmarksRecoveryRequired: repository.bookmarksRecoveryRequired,
+                    preserveExistingAutomaticBackupAfterEmptyStartupRecovery: false,
+                    webAppState: loaded
+                )
+            )
+
+            // Saving core tab state with empty bookmarks must preserve unreadable Bookmarks.json.
+            var updatedCoreState = loaded
+            updatedCoreState.profiles[0].currentURL = URL(string: "https://example.com/next")!
+            try repository.save(updatedCoreState)
+            XCTAssertEqual(try Data(contentsOf: repository.bookmarksFileURL), corruptBytes)
+            XCTAssertTrue(repository.bookmarksRecoveryRequired)
+            XCTAssertEqual(try ProfileRepository(fileURL: fileURL).load().profiles[0].currentURL, URL(string: "https://example.com/next")!)
+
+            // Writing new bookmarks before explicit recovery must be rejected cleanly.
+            var attemptedBookmarkWrite = updatedCoreState
+            attemptedBookmarkWrite.bookmarks = [bookmark]
+            XCTAssertThrowsError(try repository.save(attemptedBookmarkWrite)) { error in
+                XCTAssertEqual(error as? ProfileRepositoryError, .bookmarksRecoveryRequired)
+            }
+            XCTAssertEqual(try Data(contentsOf: repository.bookmarksFileURL), corruptBytes)
+
+            // Explicit empty acceptance clears the lock and writes valid empty Bookmarks.json.
+            try repository.acceptEmptyBookmarksAfterRecovery()
+            XCTAssertFalse(repository.bookmarksRecoveryRequired)
+            let reloaded = try repository.load()
+            XCTAssertTrue(reloaded.bookmarks.isEmpty)
+        }
+    }
+
+    func testCorruptCoreStoreEmptyRecoveryPreservesHealthyBookmarksSidecar() throws {
+        try withRepository { repository, fileURL in
+            let profile = WebAppProfile(
+                order: 0,
+                name: "Docs",
+                homeURL: URL(string: "https://example.com")!
+            )
+            let bookmark = BookmarkItem(
+                title: "Kept Bookmark",
+                url: URL(string: "https://example.com/kept")!
+            )
+            let initialState = StoredWebAppState(
+                version: StoredWebAppState.currentVersion,
+                profiles: [profile],
+                lastActiveTabID: profile.id,
+                bookmarks: [bookmark]
+            )
+            try repository.save(initialState)
+
+            let corruptBytes = Data("{ corrupt-core-json".utf8)
+            try corruptBytes.write(to: fileURL, options: [.atomic])
+
+            XCTAssertThrowsError(try repository.load())
+            XCTAssertTrue(repository.startupRecoveryRequired)
+
+            _ = try repository.preserveUnreadableStoreForRecovery()
+            try repository.performStartupRecoveryReplacement {
+                let emptyState = repository.emptyCoreStatePreservingSidecarBookmarks()
+                try repository.save(emptyState)
+            }
+
+            let reloaded = try ProfileRepository(fileURL: fileURL).load()
+            XCTAssertTrue(reloaded.profiles.isEmpty)
+            XCTAssertEqual(reloaded.bookmarks.map(\.title), ["Kept Bookmark"])
+        }
+    }
+
     private func withRepository(
         _ body: (ProfileRepository, URL) throws -> Void
     ) throws {
@@ -435,4 +641,5 @@ final class TabStorePersistenceFailureTests: XCTestCase {
         XCTAssertEqual(after.residencyPolicy, before.residencyPolicy)
         XCTAssertEqual(after.backgroundMediaPolicy, before.backgroundMediaPolicy)
     }
+
 }

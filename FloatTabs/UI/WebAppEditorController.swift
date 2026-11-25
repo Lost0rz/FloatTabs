@@ -5,10 +5,10 @@ struct WebAppEditorBrowserProfileOption: Equatable {
     let name: String
     let isEnabled: Bool
 
-    static func defaultProfile(name: String = "Default") -> WebAppEditorBrowserProfileOption {
+    static func defaultProfile(name: String = L10n.tr("Default", "默认")) -> WebAppEditorBrowserProfileOption {
         WebAppEditorBrowserProfileOption(
             id: nil,
-            name: name,
+            name: L10n.defaultDisplayName(name),
             isEnabled: true
         )
     }
@@ -20,19 +20,22 @@ struct WebAppEditorValue {
     var homeURLSchemeWasInferred: Bool
     var renderingProfile: WebRenderingProfile
     var browserProfileID: UUID?
+    var runtimeRetentionPreference: SlotRuntimeRetentionPreference
 
     init(
         name: String,
         url: URL,
         homeURLSchemeWasInferred: Bool,
         renderingProfile: WebRenderingProfile,
-        browserProfileID: UUID? = nil
+        browserProfileID: UUID? = nil,
+        runtimeRetentionPreference: SlotRuntimeRetentionPreference = .automatic
     ) {
         self.name = name
         self.url = url
         self.homeURLSchemeWasInferred = homeURLSchemeWasInferred
         self.renderingProfile = renderingProfile
         self.browserProfileID = browserProfileID
+        self.runtimeRetentionPreference = runtimeRetentionPreference
     }
 }
 
@@ -73,17 +76,21 @@ final class WebAppEditorPresentationCompletionGate {
 enum WebAppEditorController {
     static func browserProfileOptions(
         browserProfiles: [BrowserProfile],
-        customProfilesSupported: Bool,
-        defaultProfileName: String = "Default"
+        defaultProfileName: String = "Default",
+        includesDefaultProfile: Bool = true
     ) -> [WebAppEditorBrowserProfileOption] {
-        [WebAppEditorBrowserProfileOption.defaultProfile(name: defaultProfileName)]
-            + browserProfiles.map {
-                WebAppEditorBrowserProfileOption(
-                    id: $0.id,
-                    name: $0.name,
-                    isEnabled: customProfilesSupported
-                )
-            }
+        var options: [WebAppEditorBrowserProfileOption] = []
+        if includesDefaultProfile || browserProfiles.isEmpty {
+            options.append(WebAppEditorBrowserProfileOption.defaultProfile(name: defaultProfileName))
+        }
+        options.append(contentsOf: browserProfiles.map {
+            WebAppEditorBrowserProfileOption(
+                id: $0.id,
+                name: $0.name,
+                isEnabled: true
+            )
+        })
+        return options
     }
 
     static func makeValue(
@@ -91,41 +98,52 @@ enum WebAppEditorController {
         url: URL,
         homeURLSchemeWasInferred: Bool,
         renderingProfile: WebRenderingProfile,
-        browserProfileID: UUID?
+        browserProfileID: UUID?,
+        runtimeRetentionPreference: SlotRuntimeRetentionPreference = .automatic
     ) -> WebAppEditorValue {
         WebAppEditorValue(
             name: name,
             url: url,
             homeURLSchemeWasInferred: homeURLSchemeWasInferred,
             renderingProfile: renderingProfile,
-            browserProfileID: browserProfileID
+            browserProfileID: browserProfileID,
+            runtimeRetentionPreference: runtimeRetentionPreference
         )
     }
 
     static func presentAdd(
         browserProfiles: [BrowserProfile] = [],
         defaultProfileName: String = "Default",
-        customProfilesSupported: Bool = true,
+        includesDefaultProfile: Bool = true,
+        initialBrowserProfileID: UUID? = nil,
         allowsWindowSizeEditing: Bool = true,
+        bookmarkFolders: [BookmarkFolder] = [],
+        bookmarks: [BookmarkItem] = [],
+        onManageBookmarks: (() -> Void)? = nil,
         attachedTo window: NSWindow,
         completion: @escaping (WebAppEditorValue?) -> Void
     ) {
         presentEditor(
-            title: "Add Web App",
-            actionTitle: "Add Web App",
+            title: L10n.tr("Add Web App", "添加网页应用"),
+            actionTitle: L10n.tr("Add Web App", "添加网页应用"),
             initialName: "",
             initialURL: "",
             initialURLSchemeWasInferred: false,
             initialRendering: .canonicalDefault,
+            initialRetention: .automatic,
             showsPrimaryRenderingControls: true,
             allowsWindowSizeEditing: allowsWindowSizeEditing,
+            allowsBrowserProfileEditing: true,
             nameIsOptional: true,
             browserProfileOptions: browserProfileOptions(
                 browserProfiles: browserProfiles,
-                customProfilesSupported: customProfilesSupported,
-                defaultProfileName: defaultProfileName
+                defaultProfileName: defaultProfileName,
+                includesDefaultProfile: includesDefaultProfile
             ),
-            initialBrowserProfileID: nil,
+            initialBrowserProfileID: initialBrowserProfileID,
+            bookmarkFolders: bookmarkFolders,
+            bookmarks: bookmarks,
+            onManageBookmarks: onManageBookmarks,
             attachedTo: window,
             completion: completion
         )
@@ -138,13 +156,16 @@ enum WebAppEditorController {
         completion: @escaping (String?) -> Void
     ) {
         let alert = NSAlert()
-        alert.messageText = "Create Web App from Current Page"
-        alert.informativeText = "Creates a new Web App using this page as its Home URL and copies the current Web App's rendering and resource settings."
-        alert.addButton(withTitle: "Create Web App")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.tr("Create Web App from Current Page", "从当前页面创建网页应用")
+        alert.informativeText = L10n.tr(
+            "Creates a new Web App using this page as its Home URL and copies the current Web App's rendering and resource settings.",
+            "将当前页面设为主页创建新的网页应用，并复制当前应用的渲染与资源设置。"
+        )
+        alert.addButton(withTitle: L10n.tr("Create Web App", "创建网页应用"))
+        alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
 
         let nameField = NSTextField(string: "")
-        nameField.placeholderString = "Optional · defaults to site host"
+        nameField.placeholderString = L10n.tr("Optional · defaults to site host", "可选 · 默认使用网站域名")
         nameField.widthAnchor.constraint(equalToConstant: 400).isActive = true
 
         let urlField = NSTextField(labelWithString: currentURL.absoluteString)
@@ -155,15 +176,18 @@ enum WebAppEditorController {
         urlField.widthAnchor.constraint(equalToConstant: 400).isActive = true
 
         let inherited = NSTextField(
-            labelWithString: "Settings copied from \(sourceProfile.name)"
+            labelWithString: L10n.tr(
+                "Settings copied from \(sourceProfile.name)",
+                "已从“\(sourceProfile.name)”复制设置"
+            )
         )
         inherited.font = .systemFont(ofSize: 11, weight: .regular)
         inherited.textColor = .secondaryLabelColor
 
         let stack = NSStackView(views: [
-            makeLabel("Name (Optional)"),
+            makeLabel(L10n.tr("Name (Optional)", "名称（可选）")),
             nameField,
-            makeLabel("Current Page URL"),
+            makeLabel(L10n.tr("Current Page URL", "当前页面网址")),
             urlField,
             inherited,
         ])
@@ -187,21 +211,31 @@ enum WebAppEditorController {
 
     static func presentEdit(
         profile: WebAppProfile,
+        browserProfiles: [BrowserProfile] = [],
+        defaultProfileName: String = "Default",
+        includesDefaultProfile: Bool = true,
+        allowsBrowserProfileEditing: Bool = true,
         allowsWindowSizeEditing: Bool = true,
         attachedTo window: NSWindow,
         completion: @escaping (WebAppEditorValue?) -> Void
     ) {
         presentEditor(
-            title: "Edit Web App",
-            actionTitle: "Save",
+            title: L10n.tr("Edit Web App", "编辑网页应用"),
+            actionTitle: L10n.tr("Save", "保存"),
             initialName: profile.name,
             initialURL: profile.homeURL.absoluteString,
             initialURLSchemeWasInferred: profile.homeURLSchemeWasInferred,
             initialRendering: profile.renderingProfile,
-            showsPrimaryRenderingControls: false,
+            initialRetention: profile.runtimeRetentionPreference,
+            showsPrimaryRenderingControls: true,
             allowsWindowSizeEditing: allowsWindowSizeEditing,
+            allowsBrowserProfileEditing: allowsBrowserProfileEditing,
             nameIsOptional: false,
-            browserProfileOptions: nil,
+            browserProfileOptions: browserProfileOptions(
+                browserProfiles: browserProfiles,
+                defaultProfileName: defaultProfileName,
+                includesDefaultProfile: includesDefaultProfile
+            ),
             initialBrowserProfileID: profile.browserProfileID,
             attachedTo: window,
             completion: completion
@@ -215,10 +249,13 @@ enum WebAppEditorController {
     ) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Remove \(profile.name)?"
-        alert.informativeText = "The Web App slot will be removed. Shared WebKit website data, cookies, and sessions will not be cleared."
-        alert.addButton(withTitle: "Remove Web App")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.tr("Remove \(profile.name)?", "移除“\(profile.name)”？")
+        alert.informativeText = L10n.tr(
+            "The Web App slot will be removed. Shared WebKit website data, cookies, and sessions will not be cleared.",
+            "将从列表中移除此网页应用。共享的网站数据、Cookie 与登录会话不会被清除。"
+        )
+        alert.addButton(withTitle: L10n.tr("Remove Web App", "移除网页应用"))
+        alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
         alert.buttons.first?.hasDestructiveAction = true
         alert.beginSheetModal(for: window) { response in
             completion(response == .alertFirstButtonReturn)
@@ -232,30 +269,40 @@ enum WebAppEditorController {
         initialURL: String,
         initialURLSchemeWasInferred: Bool,
         initialRendering: WebRenderingProfile,
+        initialRetention: SlotRuntimeRetentionPreference,
         showsPrimaryRenderingControls: Bool,
         allowsWindowSizeEditing: Bool,
+        allowsBrowserProfileEditing: Bool,
         nameIsOptional: Bool,
         browserProfileOptions: [WebAppEditorBrowserProfileOption]?,
         initialBrowserProfileID: UUID?,
+        bookmarkFolders: [BookmarkFolder] = [],
+        bookmarks: [BookmarkItem] = [],
+        onManageBookmarks: (() -> Void)? = nil,
         attachedTo window: NSWindow,
         completion: @escaping (WebAppEditorValue?) -> Void
     ) {
         let alert = NSAlert()
         alert.messageText = title
         alert.addButton(withTitle: actionTitle)
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
 
         let nameField = NSTextField(string: initialName)
         nameField.placeholderString = nameIsOptional
-            ? "Optional · defaults to site host"
-            : "Name"
+            ? L10n.tr("Optional · defaults to site host", "可选 · 默认使用网站域名")
+            : L10n.tr("Name", "名称")
         let urlField = NSTextField(string: initialURL)
         urlField.placeholderString = "https://example.com"
 
-        let nameLabel = makeLabel(nameIsOptional ? "Name (Optional)" : "Name")
-        let urlLabel = makeLabel("URL")
+        let nameLabel = makeLabel(
+            nameIsOptional
+                ? L10n.tr("Name (Optional)", "名称（可选）")
+                : L10n.tr("Name", "名称")
+        )
+        let urlLabel = makeLabel(L10n.tr("URL", "网址"))
         let renderingForm = RenderingForm(
             initial: initialRendering,
+            initialRetention: initialRetention,
             showsPrimaryRenderingControls: showsPrimaryRenderingControls,
             allowsWindowSizeEditing: allowsWindowSizeEditing
         )
@@ -274,13 +321,20 @@ enum WebAppEditorController {
                 } else {
                     item.representedObject = NSNull()
                 }
-                item.isEnabled = option.isEnabled
+                item.isEnabled = option.isEnabled || option.id == initialBrowserProfileID
             }
             picker.widthAnchor.constraint(equalToConstant: 400).isActive = true
             let selectedIndex = options.firstIndex(where: {
                 $0.id == initialBrowserProfileID
             }) ?? 0
             picker.selectItem(at: selectedIndex)
+            picker.isEnabled = allowsBrowserProfileEditing
+            picker.toolTip = allowsBrowserProfileEditing
+                ? nil
+                : L10n.tr(
+                    "Profile cannot be changed during fullscreen presentation.",
+                    "全屏演示期间无法更改配置文件。"
+                )
             profilePicker = picker
         } else {
             profilePicker = nil
@@ -293,10 +347,52 @@ enum WebAppEditorController {
             urlField,
         ]
         if let profilePicker {
-            editorViews.append(makeLabel("Profile"))
+            editorViews.append(makeLabel(L10n.tr("Profile", "配置文件")))
             editorViews.append(profilePicker)
         }
         editorViews.append(renderingForm.view)
+
+        var bookmarkPicker: AddWebAppBookmarkPickerView?
+        if !bookmarks.isEmpty || !bookmarkFolders.isEmpty || onManageBookmarks != nil {
+            let separator = NSBox()
+            separator.boxType = .separator
+            separator.widthAnchor.constraint(equalToConstant: 400).isActive = true
+            editorViews.append(separator)
+
+            let picker = AddWebAppBookmarkPickerView(
+                folders: bookmarkFolders,
+                bookmarks: bookmarks,
+                onSelectBookmark: { bookmark in
+                    nameField.stringValue = bookmark.title
+                    urlField.stringValue = bookmark.url.absoluteString
+                    if let mode = bookmark.preferredWebsiteMode {
+                        renderingForm.setWebsiteMode(mode)
+                    }
+                    if let profilePicker,
+                       let targetProfileID = bookmark.browserProfileID,
+                       let index = profilePicker.itemArray.firstIndex(where: {
+                           ($0.representedObject as? String) == targetProfileID.uuidString
+                               && $0.isEnabled
+                       }) {
+                        profilePicker.selectItem(at: index)
+                    }
+                    nameField.window?.makeFirstResponder(nameField)
+                },
+                onManageBookmarks: {
+                    if let sheetWindow = alert.window.sheetParent {
+                        sheetWindow.endSheet(alert.window, returnCode: .cancel)
+                    } else {
+                        alert.buttons.dropFirst().first?.performClick(nil)
+                    }
+                    DispatchQueue.main.async {
+                        onManageBookmarks?()
+                    }
+                }
+            )
+            picker.widthAnchor.constraint(equalToConstant: 400).isActive = true
+            editorViews.append(picker)
+            bookmarkPicker = picker
+        }
 
         let stack = NSStackView(views: editorViews)
         stack.orientation = .vertical
@@ -307,6 +403,7 @@ enum WebAppEditorController {
         nameField.widthAnchor.constraint(equalToConstant: 400).isActive = true
         urlField.widthAnchor.constraint(equalToConstant: 400).isActive = true
         renderingForm.view.widthAnchor.constraint(equalToConstant: 400).isActive = true
+        bookmarkPicker?.layoutSubtreeIfNeeded()
 
         // NSAlert sizes its accessory from the view frame. Using the actual
         // fitting height keeps Add/Edit compact when their visible fields differ.
@@ -326,7 +423,7 @@ enum WebAppEditorController {
             let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             let rawURL = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let normalized = WebAppURL.normalizedEntry(from: rawURL),
-                  let rendering = renderingForm.value(),
+                  let (rendering, retention) = renderingForm.valueWithRetention(),
                   nameIsOptional || !name.isEmpty else {
                 completionGate.validationWarningDidBegin()
                 presentValidationError(
@@ -362,7 +459,8 @@ enum WebAppEditorController {
                     url: normalized.url,
                     homeURLSchemeWasInferred: schemeWasInferred,
                     renderingProfile: rendering,
-                    browserProfileID: selectedProfileID
+                    browserProfileID: selectedProfileID,
+                    runtimeRetentionPreference: retention
                 )
             )
         }
@@ -388,11 +486,17 @@ enum WebAppEditorController {
     ) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Enter a valid Web App"
+        alert.messageText = L10n.tr("Enter a valid Web App", "请输入有效的网页应用信息")
         alert.informativeText = nameIsOptional
-            ? "URL must be http/https, Custom Window Size must be at least 320 × 400, and a Custom User Agent cannot be empty."
-            : "Name is required, URL must be http/https, Custom Window Size must be at least 320 × 400, and a Custom User Agent cannot be empty."
-        alert.addButton(withTitle: "OK")
+            ? L10n.tr(
+                "URL must be http/https, Custom Window Size must be at least 320 × 400, and a Custom User Agent cannot be empty.",
+                "网址必须为 http 或 https，自定义窗口尺寸至少为 320 × 400，且自定义 User Agent 不能为空。"
+            )
+            : L10n.tr(
+                "Name is required, URL must be http/https, Custom Window Size must be at least 320 × 400, and a Custom User Agent cannot be empty.",
+                "名称不能为空，网址必须为 http 或 https，自定义窗口尺寸至少为 320 × 400，且自定义 User Agent 不能为空。"
+            )
+        alert.addButton(withTitle: L10n.tr("OK", "好"))
         alert.beginSheetModal(for: window) { _ in
             completion()
         }
@@ -401,9 +505,12 @@ enum WebAppEditorController {
     private static func presentRenderingValidationError(attachedTo window: NSWindow) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Check rendering settings"
-        alert.informativeText = "Custom Window Size must be at least 320 × 400 and a Custom User Agent cannot be empty."
-        alert.addButton(withTitle: "OK")
+        alert.messageText = L10n.tr("Check rendering settings", "请检查渲染设置")
+        alert.informativeText = L10n.tr(
+            "Custom Window Size must be at least 320 × 400 and a Custom User Agent cannot be empty.",
+            "自定义窗口尺寸至少为 320 × 400，且自定义 User Agent 不能为空。"
+        )
+        alert.addButton(withTitle: L10n.tr("OK", "好"))
         alert.beginSheetModal(for: window)
     }
 }
@@ -419,7 +526,8 @@ private final class RenderingForm: NSObject {
     private let widthField = NSTextField()
     private let heightField = NSTextField()
     private let zoomPopup = NSPopUpButton()
-    private let advancedButton = NSButton(title: "Advanced…", target: nil, action: nil)
+    private let retentionPopup = NSPopUpButton()
+    private let advancedButton = NSButton(title: L10n.tr("Advanced…", "高级设置…"), target: nil, action: nil)
 
     private let identityPopup = NSPopUpButton()
     private let devicePopup = NSPopUpButton()
@@ -431,6 +539,7 @@ private final class RenderingForm: NSObject {
 
     init(
         initial: WebRenderingProfile,
+        initialRetention: SlotRuntimeRetentionPreference = .automatic,
         showsPrimaryRenderingControls: Bool = true,
         allowsWindowSizeEditing: Bool = true
     ) {
@@ -450,8 +559,8 @@ private final class RenderingForm: NSObject {
 
         widthField.stringValue = String(format: "%.0f", Double(rendering.viewportWidth))
         heightField.stringValue = String(format: "%.0f", Double(rendering.viewportHeight))
-        widthField.placeholderString = "Width"
-        heightField.placeholderString = "Height"
+        widthField.placeholderString = L10n.tr("Width", "宽度")
+        heightField.placeholderString = L10n.tr("Height", "高度")
 
         zoomPopup.addItems(withTitles: ZoomSteps.values.map(ZoomSteps.percentageText))
         let normalizedZoom = ZoomSteps.nearest(to: rendering.zoom)
@@ -459,12 +568,19 @@ private final class RenderingForm: NSObject {
             zoomPopup.selectItem(at: index)
         }
 
+        retentionPopup.addItems(
+            withTitles: SlotRuntimeRetentionPreference.allCases.map(\.displayName)
+        )
+        if let index = SlotRuntimeRetentionPreference.allCases.firstIndex(of: initialRetention) {
+            retentionPopup.selectItem(at: index)
+        }
+
         identityPopup.addItems(withTitles: BrowserIdentity.allCases.map(\.displayName))
         if let index = BrowserIdentity.allCases.firstIndex(of: rendering.browserIdentity) {
             identityPopup.selectItem(at: index)
         }
 
-        devicePopup.addItem(withTitle: "None")
+        devicePopup.addItem(withTitle: L10n.tr("None", "无"))
         devicePopup.addItems(withTitles: DevicePresetCatalog.all.map(\.menuTitle))
         if let deviceID = rendering.devicePresetID,
            let index = DevicePresetCatalog.all.firstIndex(where: { $0.id == deviceID }) {
@@ -504,28 +620,33 @@ private final class RenderingForm: NSObject {
 
         let primaryViews: [NSView] = showsPrimaryRenderingControls
             ? ([
-                Self.label("Website Mode"),
+                Self.label(L10n.tr("Website Mode", "网站模式")),
                 modePopup,
             ] + (allowsWindowSizeEditing
-                ? [Self.label("Window Size"), sizeRow]
-                : [Self.secondaryLabel("Window Size is fixed globally. Existing per-App sizes are preserved.")]
+                ? [Self.label(L10n.tr("Window Size", "窗口尺寸")), sizeRow]
+                : [Self.secondaryLabel(L10n.tr(
+                    "Window Size is fixed globally. Existing per-App sizes are preserved.",
+                    "当前已开启全局固定窗口尺寸，各网页应用的原有尺寸配置已保留。"
+                ))]
             ) + [
-                Self.label("Zoom"),
+                Self.label(L10n.tr("Zoom", "页面缩放")),
                 zoomPopup,
+                Self.label(L10n.tr("Runtime Retention", "运行时驻留")),
+                retentionPopup,
                 advancedButton,
             ])
             : [
-                Self.label("Browser Identity"),
+                Self.label(L10n.tr("Browser Identity", "浏览器标识")),
                 identityPopup,
-                Self.label("Device Preset"),
+                Self.label(L10n.tr("Device Preset", "设备预设")),
                 devicePopup,
-                Self.label("Orientation"),
+                Self.label(L10n.tr("Orientation", "屏幕方向")),
                 orientationPopup,
-                Self.label("Custom User Agent"),
+                Self.label(L10n.tr("Custom User Agent", "自定义 User Agent")),
                 customUAField,
-                Self.label("Effective Engine"),
+                Self.label(L10n.tr("Effective Engine", "渲染引擎")),
                 engineValue,
-                Self.label("Effective User Agent"),
+                Self.label(L10n.tr("Effective User Agent", "生效 User Agent")),
                 effectiveUAField,
             ]
         view = NSStackView(views: primaryViews)
@@ -535,6 +656,7 @@ private final class RenderingForm: NSObject {
         modePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 190).isActive = true
         sizePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 190).isActive = true
         zoomPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
+        retentionPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 190).isActive = true
         advancedButton.bezelStyle = .rounded
 
         super.init()
@@ -561,7 +683,10 @@ private final class RenderingForm: NSObject {
         orientationPopup.isEnabled = allowsWindowSizeEditing
         devicePopup.toolTip = allowsWindowSizeEditing
             ? nil
-            : "Device preset is preserved while global Fixed window sizing is active."
+            : L10n.tr(
+                "Device preset is preserved while global Fixed window sizing is active.",
+                "全局固定窗口尺寸开启期间会保留设备预设。"
+            )
         orientationPopup.toolTip = devicePopup.toolTip
 
         if showsPrimaryRenderingControls {
@@ -574,15 +699,21 @@ private final class RenderingForm: NSObject {
     }
 
     func value() -> WebRenderingProfile? {
+        valueWithRetention()?.0
+    }
+
+    func valueWithRetention() -> (WebRenderingProfile, SlotRuntimeRetentionPreference)? {
         let modeIndex = modePopup.indexOfSelectedItem
         let sizeIndex = sizePopup.indexOfSelectedItem
         let zoomIndex = zoomPopup.indexOfSelectedItem
+        let retentionIndex = retentionPopup.indexOfSelectedItem
         let identityIndex = identityPopup.indexOfSelectedItem
         let orientationIndex = orientationPopup.indexOfSelectedItem
 
         guard WebsiteMode.allCases.indices.contains(modeIndex),
               SimpleViewportPreset.allCases.indices.contains(sizeIndex),
               ZoomSteps.values.indices.contains(zoomIndex),
+              SlotRuntimeRetentionPreference.allCases.indices.contains(retentionIndex),
               BrowserIdentity.allCases.indices.contains(identityIndex),
               DeviceOrientation.allCases.indices.contains(orientationIndex) else {
             return nil
@@ -590,6 +721,7 @@ private final class RenderingForm: NSObject {
 
         let mode = WebsiteMode.allCases[modeIndex]
         let selectedPreset = SimpleViewportPreset.allCases[sizeIndex]
+        let retention = SlotRuntimeRetentionPreference.allCases[retentionIndex]
         let identity = BrowserIdentity.allCases[identityIndex]
         let selectedOrientation = DeviceOrientation.allCases[orientationIndex]
 
@@ -635,7 +767,7 @@ private final class RenderingForm: NSObject {
             deviceID = nil
         }
 
-        return WebRenderingProfile(
+        let rendering = WebRenderingProfile(
             websiteMode: mode,
             browserIdentity: identity,
             customUserAgent: customUA,
@@ -646,21 +778,22 @@ private final class RenderingForm: NSObject {
             viewportHeight: size.height,
             zoom: ZoomSteps.values[zoomIndex]
         ).normalized()
+        return (rendering, retention)
     }
 
     private func configureAdvancedPopover() {
         let advancedStack = NSStackView(views: [
-            Self.label("Browser Identity"),
+            Self.label(L10n.tr("Browser Identity", "浏览器标识")),
             identityPopup,
-            Self.label("Device Preset"),
+            Self.label(L10n.tr("Device Preset", "设备预设")),
             devicePopup,
-            Self.label("Orientation"),
+            Self.label(L10n.tr("Orientation", "屏幕方向")),
             orientationPopup,
-            Self.label("Custom User Agent"),
+            Self.label(L10n.tr("Custom User Agent", "自定义 User Agent")),
             customUAField,
-            Self.label("Effective Engine"),
+            Self.label(L10n.tr("Effective Engine", "渲染引擎")),
             engineValue,
-            Self.label("Effective User Agent"),
+            Self.label(L10n.tr("Effective User Agent", "生效 User Agent")),
             effectiveUAField,
         ])
         advancedStack.orientation = .vertical
@@ -683,6 +816,14 @@ private final class RenderingForm: NSObject {
         advancedPopover.contentViewController = controller
         advancedPopover.contentSize = NSSize(width: 390, height: 350)
         advancedPopover.behavior = .transient
+    }
+
+    func setWebsiteMode(_ mode: WebsiteMode) {
+        guard let index = WebsiteMode.allCases.firstIndex(of: mode) else { return }
+        modePopup.selectItem(at: index)
+        updateAutomaticIdentityTitle()
+        updateCustomUAEditability()
+        updateEffectiveUAPreview()
     }
 
     @objc private func toggleAdvanced(_ sender: NSButton) {
@@ -805,7 +946,7 @@ private final class RenderingForm: NSObject {
             return
         }
         let resolved = mode == .desktop ? "macOS Safari" : "iPhone Safari"
-        item.title = "Automatic · \(resolved)"
+        item.title = L10n.tr("Automatic · \(resolved)", "自动 · \(resolved)")
     }
 
     private func updateCustomFieldEditability() {
@@ -828,7 +969,7 @@ private final class RenderingForm: NSObject {
     private func updateEffectiveUAPreview() {
         guard let mode = selectedWebsiteMode(),
               let identity = selectedBrowserIdentity() else {
-            effectiveUAField.stringValue = "Unavailable"
+            effectiveUAField.stringValue = L10n.tr("Unavailable", "不可用")
             return
         }
 
@@ -856,5 +997,525 @@ private final class RenderingForm: NSObject {
         label.maximumNumberOfLines = 0
         label.widthAnchor.constraint(lessThanOrEqualToConstant: 360).isActive = true
         return label
+    }
+}
+
+struct BookmarkBarSection: Equatable {
+    let title: String
+    let folderID: UUID?
+    let directBookmarks: [BookmarkItem]
+    let childFolders: [BookmarkFolder]
+
+    var isEmpty: Bool {
+        directBookmarks.isEmpty && childFolders.isEmpty
+    }
+}
+
+@MainActor
+enum WebAppEditorBookmarkMenuBuilder {
+    static func rootSections(
+        folders: [BookmarkFolder],
+        bookmarks: [BookmarkItem]
+    ) -> [BookmarkBarSection] {
+        let validFolderIDs = Set(folders.map(\.id))
+        let rootFolders = folders
+            .filter { folder in
+                guard let parentID = folder.parentFolderID else { return true }
+                return !validFolderIDs.contains(parentID)
+            }
+            .sorted {
+                if $0.order != $1.order { return $0.order < $1.order }
+                return $0.createdAt < $1.createdAt
+            }
+
+        let sortedBookmarks = bookmarks.sorted {
+            if $0.order != $1.order { return $0.order < $1.order }
+            return $0.createdAt < $1.createdAt
+        }
+        let uncategorizedBookmarks = sortedBookmarks.filter { item in
+            guard let folderID = item.folderID else { return true }
+            return !validFolderIDs.contains(folderID)
+        }
+
+        var sections: [BookmarkBarSection] = []
+        if !uncategorizedBookmarks.isEmpty {
+            sections.append(
+                BookmarkBarSection(
+                    title: L10n.tr("General", "通用"),
+                    folderID: nil,
+                    directBookmarks: uncategorizedBookmarks,
+                    childFolders: []
+                )
+            )
+        }
+
+        for folder in rootFolders {
+            let children = childFolders(of: folder.id, in: folders)
+            let direct = sortedBookmarks.filter { $0.folderID == folder.id }
+            sections.append(
+                BookmarkBarSection(
+                    title: folder.name,
+                    folderID: folder.id,
+                    directBookmarks: direct,
+                    childFolders: children
+                )
+            )
+        }
+
+        return sections
+    }
+
+    static func makeCascadingMenu(
+        for folderID: UUID?,
+        title: String,
+        folders: [BookmarkFolder],
+        bookmarks: [BookmarkItem],
+        onSelectBookmark: @escaping (BookmarkItem) -> Void
+    ) -> NSMenu {
+        var visited = Set<UUID>()
+        if let folderID {
+            visited.insert(folderID)
+        }
+        return buildMenu(
+            folderID: folderID,
+            title: title,
+            folders: folders,
+            bookmarks: bookmarks,
+            visitedFolderIDs: &visited,
+            onSelectBookmark: onSelectBookmark
+        )
+    }
+
+    private static func buildMenu(
+        folderID: UUID?,
+        title: String,
+        folders: [BookmarkFolder],
+        bookmarks: [BookmarkItem],
+        visitedFolderIDs: inout Set<UUID>,
+        onSelectBookmark: @escaping (BookmarkItem) -> Void
+    ) -> NSMenu {
+        let menu = NSMenu(title: title)
+        let validFolderIDs = Set(folders.map(\.id))
+
+        let subfolders = folderID.map { childFolders(of: $0, in: folders) } ?? []
+        let directBookmarks = bookmarks
+            .filter { item in
+                if let folderID {
+                    return item.folderID == folderID
+                }
+                guard let itemFolderID = item.folderID else { return true }
+                return !validFolderIDs.contains(itemFolderID)
+            }
+            .sorted {
+                if $0.order != $1.order { return $0.order < $1.order }
+                return $0.createdAt < $1.createdAt
+            }
+
+        for child in subfolders {
+            guard !visitedFolderIDs.contains(child.id) else { continue }
+            visitedFolderIDs.insert(child.id)
+            let submenu = buildMenu(
+                folderID: child.id,
+                title: child.name,
+                folders: folders,
+                bookmarks: bookmarks,
+                visitedFolderIDs: &visitedFolderIDs,
+                onSelectBookmark: onSelectBookmark
+            )
+            let item = NSMenuItem(title: child.name, action: nil, keyEquivalent: "")
+            item.image = NSImage(
+                systemSymbolName: "folder",
+                accessibilityDescription: nil
+            )
+            item.submenu = submenu
+            menu.addItem(item)
+        }
+
+        if !subfolders.isEmpty && !directBookmarks.isEmpty {
+            menu.addItem(.separator())
+        }
+
+        for bookmark in directBookmarks {
+            let host = bookmark.url.host ?? bookmark.url.absoluteString
+            let item = NSMenuItem(
+                title: "\(bookmark.title) — \(host)",
+                action: #selector(BookmarkMenuActionDispatcher.selectBookmark(_:)),
+                keyEquivalent: ""
+            )
+            item.image = NSImage(
+                systemSymbolName: "bookmark",
+                accessibilityDescription: nil
+            )
+            item.toolTip = bookmark.url.absoluteString
+            item.target = BookmarkMenuActionDispatcher.shared
+            item.representedObject = BookmarkMenuSelectionPayload(
+                bookmark: bookmark,
+                onSelect: onSelectBookmark
+            )
+            menu.addItem(item)
+        }
+
+        if menu.items.isEmpty {
+            let emptyItem = NSMenuItem(
+                title: L10n.tr("(Empty Folder)", "（空文件夹）"),
+                action: nil,
+                keyEquivalent: ""
+            )
+            emptyItem.isEnabled = false
+            menu.addItem(emptyItem)
+        }
+
+        return menu
+    }
+
+    private static func childFolders(
+        of parentID: UUID,
+        in folders: [BookmarkFolder]
+    ) -> [BookmarkFolder] {
+        folders
+            .filter { $0.parentFolderID == parentID }
+            .sorted {
+                if $0.order != $1.order { return $0.order < $1.order }
+                return $0.createdAt < $1.createdAt
+            }
+    }
+}
+
+@MainActor
+private final class BookmarkMenuSelectionPayload: NSObject {
+    let bookmark: BookmarkItem
+    let onSelect: (BookmarkItem) -> Void
+
+    init(bookmark: BookmarkItem, onSelect: @escaping (BookmarkItem) -> Void) {
+        self.bookmark = bookmark
+        self.onSelect = onSelect
+    }
+}
+
+@MainActor
+private final class BookmarkMenuActionDispatcher: NSObject {
+    static let shared = BookmarkMenuActionDispatcher()
+
+    @objc func selectBookmark(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? BookmarkMenuSelectionPayload else {
+            return
+        }
+        payload.onSelect(payload.bookmark)
+    }
+}
+
+@MainActor
+private final class AddWebAppBookmarkPickerView: NSView {
+    private let folders: [BookmarkFolder]
+    private let bookmarks: [BookmarkItem]
+    private let onSelectBookmark: (BookmarkItem) -> Void
+    private let onManageBookmarks: () -> Void
+    private var openMenus: [NSMenu] = []
+
+    init(
+        folders: [BookmarkFolder],
+        bookmarks: [BookmarkItem],
+        onSelectBookmark: @escaping (BookmarkItem) -> Void,
+        onManageBookmarks: @escaping () -> Void
+    ) {
+        self.folders = folders
+        self.bookmarks = bookmarks
+        self.onSelectBookmark = onSelectBookmark
+        self.onManageBookmarks = onManageBookmarks
+        super.init(frame: .zero)
+
+        let titleLabel = NSTextField(labelWithString: L10n.tr("Bookmarks", "书签"))
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+
+        let hintLabel = NSTextField(
+            labelWithString: L10n.tr(
+                "Hover folder to browse · Click to fill",
+                "悬停展开文件夹 · 点击自动填入"
+            )
+        )
+        hintLabel.font = .systemFont(ofSize: 10.5)
+        hintLabel.textColor = .secondaryLabelColor
+
+        let manageButton = NSButton(
+            title: L10n.tr("Manage…", "管理…"),
+            target: self,
+            action: #selector(manageClicked)
+        )
+        manageButton.bezelStyle = .rounded
+        manageButton.controlSize = .small
+        manageButton.keyEquivalent = ""
+
+        let header = NSStackView(views: [titleLabel, hintLabel, NSView(), manageButton])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 6
+
+        let container = NSStackView(views: [header])
+        container.orientation = .vertical
+        container.alignment = .leading
+        container.spacing = 6
+        container.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(container)
+
+        let sections = WebAppEditorBookmarkMenuBuilder.rootSections(
+            folders: folders,
+            bookmarks: bookmarks
+        )
+
+        if sections.isEmpty {
+            let emptyLabel = NSTextField(
+                wrappingLabelWithString: L10n.tr(
+                    "No saved bookmarks yet. Right-click a tab or click Manage… to organize bookmarks.",
+                    "暂无保存的书签。右键任意标签页或点击“管理…”即可添加与整理。"
+                )
+            )
+            emptyLabel.font = .systemFont(ofSize: 11)
+            emptyLabel.textColor = .secondaryLabelColor
+            container.addArrangedSubview(emptyLabel)
+            emptyLabel.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+        } else {
+            let barRowsStack = NSStackView()
+            barRowsStack.orientation = .vertical
+            barRowsStack.alignment = .leading
+            barRowsStack.spacing = 5
+            barRowsStack.translatesAutoresizingMaskIntoConstraints = false
+
+            let maxBarWidth: CGFloat = 388
+            var currentRow = makeFolderRowStack()
+            var currentRowWidth: CGFloat = 0
+
+            for section in sections {
+                let button = BookmarkFolderTriggerButton(
+                    section: section,
+                    buildMenu: { [weak self] targetSection in
+                        guard let self else { return NSMenu(title: targetSection.title) }
+                        let menu = WebAppEditorBookmarkMenuBuilder.makeCascadingMenu(
+                            for: targetSection.folderID,
+                            title: targetSection.title,
+                            folders: self.folders,
+                            bookmarks: self.bookmarks,
+                            onSelectBookmark: self.onSelectBookmark
+                        )
+                        self.openMenus = [menu]
+                        return menu
+                    }
+                )
+                let buttonWidth = max(button.fittingSize.width, 64)
+                if currentRowWidth > 0 && currentRowWidth + 6 + buttonWidth > maxBarWidth {
+                    barRowsStack.addArrangedSubview(currentRow)
+                    currentRow = makeFolderRowStack()
+                    currentRowWidth = 0
+                }
+                currentRow.addArrangedSubview(button)
+                currentRowWidth += (currentRowWidth > 0 ? 6 : 0) + buttonWidth
+            }
+            if !currentRow.arrangedSubviews.isEmpty {
+                barRowsStack.addArrangedSubview(currentRow)
+            }
+
+            let barSurface = NSView()
+            barSurface.wantsLayer = true
+            barSurface.layer?.cornerRadius = 7
+            barSurface.layer?.backgroundColor = NSColor.controlBackgroundColor
+                .withAlphaComponent(0.55)
+                .cgColor
+            barSurface.layer?.borderColor = NSColor.separatorColor
+                .withAlphaComponent(0.35)
+                .cgColor
+            barSurface.layer?.borderWidth = 1
+            barSurface.translatesAutoresizingMaskIntoConstraints = false
+            barSurface.addSubview(barRowsStack)
+
+            NSLayoutConstraint.activate([
+                barRowsStack.leadingAnchor.constraint(equalTo: barSurface.leadingAnchor, constant: 6),
+                barRowsStack.trailingAnchor.constraint(lessThanOrEqualTo: barSurface.trailingAnchor, constant: -6),
+                barRowsStack.topAnchor.constraint(equalTo: barSurface.topAnchor, constant: 6),
+                barRowsStack.bottomAnchor.constraint(equalTo: barSurface.bottomAnchor, constant: -6),
+            ])
+
+            container.addArrangedSubview(barSurface)
+            barSurface.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+        }
+
+        NSLayoutConstraint.activate([
+            container.leadingAnchor.constraint(equalTo: leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: trailingAnchor),
+            container.topAnchor.constraint(equalTo: topAnchor),
+            container.bottomAnchor.constraint(equalTo: bottomAnchor),
+            header.widthAnchor.constraint(equalTo: container.widthAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func makeFolderRowStack() -> NSStackView {
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
+        return stack
+    }
+
+    @objc private func manageClicked() {
+        onManageBookmarks()
+    }
+}
+
+@MainActor
+private final class BookmarkFolderTriggerButton: NSView, NSMenuDelegate {
+    private let section: BookmarkBarSection
+    private let buildMenu: (BookmarkBarSection) -> NSMenu
+    private let titleLabel = NSTextField(labelWithString: "")
+    private var trackingAreaReference: NSTrackingArea?
+    private var hoverWorkItem: DispatchWorkItem?
+    private var isHovered = false
+    private var suppressNextHoverOpenUntilExit = false
+
+    init(
+        section: BookmarkBarSection,
+        buildMenu: @escaping (BookmarkBarSection) -> NSMenu
+    ) {
+        self.section = section
+        self.buildMenu = buildMenu
+        super.init(frame: .zero)
+
+        wantsLayer = true
+        layer?.cornerRadius = 5
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let iconName = section.folderID == nil ? "tray.full" : "folder"
+        let iconView = NSImageView()
+        if let symbol = NSImage(
+            systemSymbolName: iconName,
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 10.5, weight: .medium)
+        ) {
+            iconView.image = symbol
+        }
+        iconView.contentTintColor = .secondaryLabelColor
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.stringValue = section.title
+        titleLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+
+        let chevron = NSImageView()
+        if let symbol = NSImage(
+            systemSymbolName: "chevron.right",
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 8.5, weight: .semibold)
+        ) {
+            chevron.image = symbol
+        }
+        chevron.contentTintColor = .tertiaryLabelColor
+
+        let row = NSStackView(views: [iconView, titleLabel, chevron])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 4
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
+            row.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            widthAnchor.constraint(lessThanOrEqualToConstant: 180),
+        ])
+
+        setAccessibilityRole(.menuButton)
+        setAccessibilityLabel(section.title)
+        applyAppearance()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingAreaReference = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        applyAppearance()
+        guard !suppressNextHoverOpenUntilExit else { return }
+        scheduleHoverMenuOpen()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        suppressNextHoverOpenUntilExit = false
+        hoverWorkItem?.cancel()
+        hoverWorkItem = nil
+        applyAppearance()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        hoverWorkItem?.cancel()
+        hoverWorkItem = nil
+        let local = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(local) else { return }
+        openCascadingMenu()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        suppressNextHoverOpenUntilExit = true
+        isHovered = false
+        applyAppearance()
+    }
+
+    private func scheduleHoverMenuOpen() {
+        hoverWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.isHovered, self.window != nil else { return }
+            self.openCascadingMenu()
+        }
+        hoverWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14, execute: work)
+    }
+
+    private func openCascadingMenu() {
+        guard window != nil else { return }
+        let menu = buildMenu(section)
+        menu.delegate = self
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: -2),
+            in: self
+        )
+    }
+
+    private func applyAppearance() {
+        layer?.backgroundColor = (
+            isHovered
+                ? NSColor.controlAccentColor.withAlphaComponent(0.14)
+                : NSColor.controlBackgroundColor.withAlphaComponent(0.92)
+        ).cgColor
+        layer?.borderColor = (
+            isHovered
+                ? NSColor.controlAccentColor.withAlphaComponent(0.45)
+                : NSColor.separatorColor.withAlphaComponent(0.35)
+        ).cgColor
+        layer?.borderWidth = 1
     }
 }

@@ -76,6 +76,14 @@ struct ManualFaviconReloadIntent: Equatable {
         return true
     }
 
+    func matchesCapturedGeneration(
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        navigationGeneration: UInt64
+    ) -> Bool {
+        runtimeIdentity == self.runtimeIdentity
+            && phase == .awaitingFinish(navigationGeneration)
+    }
+
     func matchesNavigationFailure(
         runtimeIdentity: WebRuntimeDiagnosticIdentity,
         navigationGeneration: UInt64?
@@ -450,6 +458,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var restoredFrame: NSRect?
     private var preferredPanelSize: NSSize?
     private var hasPositionedPanel = false
+    private var isCommittingManualResize = false
     private var lastSynchronizedActiveID: UUID?
     private var lastSynchronizedActiveProfile: WebAppProfile?
     private let preferencesStore: AppPreferencesStore
@@ -488,6 +497,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         let generation: UInt64
         let slotID: UUID
         let surface: RuntimePresentationSurface
+        let startedAtUptime: TimeInterval
+        let hadResidentWebViewAtStart: Bool
         var didRecordRestoringSurfaceWindowVisibility = false
     }
     private enum RuntimePresentationSurface: Equatable {
@@ -527,6 +538,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var runtimeReadinessBySlot: [UUID: RuntimeReadinessRecord] = [:]
     private var faviconDOMReadBySlot: [UUID: FaviconDOMReadRecord] = [:]
     private var manualFaviconReloadIntentsBySlot: [UUID: ManualFaviconReloadIntent] = [:]
+    private var delayedFaviconRecheckTasks: [UUID: Task<Void, Never>] = [:]
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
     private var debugInteractionSurfaceFactOverrides: [UUID: Bool] = [:]
@@ -790,41 +802,48 @@ final class PanelController: NSObject, NSWindowDelegate {
         tabStore.activeProfile?.name
     }
 
-    var isShowingUnsupportedBrowserProfile: Bool {
-        if sourceHostController.isSessionLocked {
-            return sourceHostController.companionContainer.isShowingUnsupportedBrowserProfile
-        }
-        return rootView.webPanelContainerView.isShowingUnsupportedBrowserProfile
-    }
-
-    var displayedUnsupportedBrowserProfileName: String? {
-        if sourceHostController.isSessionLocked {
-            return sourceHostController.companionContainer.displayedUnsupportedBrowserProfileName
-        }
-        return rootView.webPanelContainerView.displayedUnsupportedBrowserProfileName
-    }
-
-    static func unsupportedBrowserProfileName(
-        for profile: WebAppProfile,
-        error: Error,
-        browserProfiles: [BrowserProfile]
-    ) -> String? {
-        guard profile.browserProfileID != nil,
-              let providerError = error as? BrowserProfileDataStoreProviderError,
-              providerError == .customProfilesUnsupported else {
-            return nil
-        }
-
-        guard let browserProfileID = profile.browserProfileID else {
-            return nil
-        }
-        return browserProfiles.first(where: { $0.id == browserProfileID })?.name
-            ?? "Selected Profile"
-    }
-
     var selectedSlotFaviconURL: URL? {
         guard let activeProfile = tabStore.activeProfile else { return nil }
         return faviconURL(for: activeProfile)
+    }
+
+    var presentedAddressOverlay: AddressOverlayView? {
+        addressOverlayView.isPresented ? addressOverlayView : nil
+    }
+
+    var statusItemMenuSnapshot: StatusItemMenuSnapshot {
+        let unreadIDs = unreadResponseCoordinator.unreadSlotIDs
+        let activeID = tabStore.activeTabID
+        let showGroupPrefix = !tabStore.groups.isEmpty
+        let groupNamesByID = showGroupPrefix
+            ? Dictionary(uniqueKeysWithValues: tabStore.groupMenuOptions.map { ($0.id, L10n.defaultDisplayName($0.name)) })
+            : [:]
+        let entries = tabStore.orderedProfiles.map { profile in
+            let title: String
+            if showGroupPrefix,
+               let groupName = groupNamesByID[profile.groupID] {
+                title = "\(groupName) · \(profile.name)"
+            } else {
+                title = profile.name
+            }
+            return StatusItemSlotMenuEntry(
+                id: profile.id,
+                title: title,
+                isSelected: profile.id == activeID,
+                isUnread: unreadIDs.contains(profile.id)
+            )
+        }
+        return StatusItemMenuSnapshot(slots: entries, isPinned: isPinned)
+    }
+
+    @discardableResult
+    func selectAndPresentSlotFromMenuBar(_ slotID: UUID) -> Bool {
+        let trace = diagnostics.beginTrace(root: "menubar.select_slot")
+        guard selectSlotFromExplicitUserAction(slotID, trace: trace) else {
+            return false
+        }
+        presentFloatTabs(trace: trace)
+        return true
     }
 
     var unreadResponseCount: Int {
@@ -840,6 +859,18 @@ final class PanelController: NSObject, NSWindowDelegate {
                 trigger: "manual_stuck_tab_snapshot",
                 startedAtUptime: ProcessInfo.processInfo.systemUptime
             )
+        )
+    }
+
+    func diagnosticsLiveStatusSnapshot(
+        sessionSummary: RuntimeDiagnosticsSessionSummary
+    ) -> RuntimeDiagnosticsLiveStatusSnapshot {
+        RuntimeDiagnosticsLiveStatusSnapshot(
+            diagnosticsSummary: sessionSummary,
+            residentSlotCount: webViewPool.count,
+            totalSlotCount: tabStore.profiles.count,
+            activeSlotName: tabStore.activeProfile?.name,
+            hostResidentSizeBytes: SlotNavigationObserver.currentProcessResidentSizeBytes()
         )
     }
 
@@ -1303,7 +1334,34 @@ final class PanelController: NSObject, NSWindowDelegate {
     var onAttentionPresentationChange: ((Int, Bool) -> Void)?
     var onChatGPTGenerationCompleted: ((UUID) -> Void)?
     var onChatGPTUnreadCompletionMarked: ((UUID, String?, String?) -> Void)?
+    var onUniversalNotificationRequested: ((UUID, String?, String?, String?) -> Void)?
+    var onUnreadSlotAcknowledged: ((UUID) -> Void)?
     var onOpenGlobalSettings: (() -> Void)?
+    var onOpenBookmarksSettings: (() -> Void)?
+    var onTabStoreDidChange: (() -> Void)?
+    var emptyStateAddWebAppHandlerForTesting: (() -> Void)?
+
+    var isEmptyStateActionVisibleForTesting: Bool {
+        rootView.webPanelContainerView.currentWebView == nil
+    }
+
+    func debugTriggerEmptyStateAddWebApp(in presentation: ContainerPresentationTarget = .standard) {
+        switch presentation {
+        case .standard:
+            rootView.webPanelContainerView.debugTriggerEmptyStateAddWebApp()
+        case .fullscreenCompanion:
+            sourceHostController.companionContainer.debugTriggerEmptyStateAddWebApp()
+        }
+    }
+
+    enum ContainerPresentationTarget {
+        case standard
+        case fullscreenCompanion
+    }
+
+    var configuredSlotIDs: Set<UUID> {
+        Set(tabStore.profiles.map(\.id))
+    }
 
     init(
         tabStore: TabStore,
@@ -1341,11 +1399,15 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView = PanelRootView(preferencesStore: resolvedPreferencesStore)
         sourceHostController = FullscreenSourceHostController(
             container: rootView.webPanelContainerView,
+            topLeftResizeHandle: rootView.topLeftResizeHandleView,
+            topRightResizeHandle: rootView.topRightResizeHandleView,
             resizeHandle: rootView.resizeHandleView,
             resizeReadout: rootView.resizeReadoutView,
             shellWindow: panel,
             diagnostics: diagnostics
         )
+        rootView.bottomLeftResizeHandleView.resizeTargetWindow = panel
+        rootView.companionRailFoldControlView.resizeTargetWindow = panel
 
         super.init()
 
@@ -1373,11 +1435,23 @@ final class PanelController: NSObject, NSWindowDelegate {
         sourceHostController.onSourceRebuildRequired = { [weak self] in
             self?.rebuildFullscreenSourceAfterRestoreTimeout()
         }
+        rootView.webPanelContainerView.onAddWebAppRequested = { [weak self] in
+            self?.requestAddWebAppFromEmptyState()
+        }
+        sourceHostController.companionContainer.onAddWebAppRequested = { [weak self] in
+            self?.requestAddWebAppFromEmptyState()
+        }
         rootView.webPanelContainerView.onRetryRequested = { [weak self] in
             self?.retryFailedSelectedSlot(in: .standard)
         }
         sourceHostController.companionContainer.onRetryRequested = { [weak self] in
             self?.retryFailedSelectedSlot(in: .fullscreenCompanion)
+        }
+        rootView.webPanelContainerView.onRestoringReloadRequested = { [weak self] in
+            self?.reloadRestoringSelectedSlot(in: .standard)
+        }
+        sourceHostController.companionContainer.onRestoringReloadRequested = { [weak self] in
+            self?.reloadRestoringSelectedSlot(in: .fullscreenCompanion)
         }
 
         rootView.webPanelContainerView.layer?.borderWidth = 0
@@ -1388,6 +1462,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         configureTransientUI()
 
         rootView.onResizeEnded = { [weak self] in
+            self?.handleManualResizeEnded()
+        }
+        sourceHostController.onResizeEnded = { [weak self] in
             self?.handleManualResizeEnded()
         }
         rootView.fullscreenExitPlaceholderView.onExitFullscreen = { [weak self] in
@@ -1428,18 +1505,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             name: NSWindow.didBecomeKeyNotification,
             object: nil
         )
-        externalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] event in
-            let eventTimestamp = event.timestamp
-            let mouseLocation = NSEvent.mouseLocation
-            Task { @MainActor [weak self] in
-                self?.handleExternalMouseDown(
-                    eventTimestamp: eventTimestamp,
-                    mouseLocation: mouseLocation
-                )
-            }
-        }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(languageDidChange(_:)),
+            name: .floatTabsLanguageDidChange,
+            object: nil
+        )
 
         webViewPool.onResidentSetChange = { [weak self] in
             self?.synchronizeResidentIndicators()
@@ -1449,6 +1520,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         webViewPool.onAttentionEvent = { [weak self] slotID, event in
             self?.handleAttentionEvent(slotID: slotID, event: event)
+        }
+        webViewPool.onUniversalActivityEvent = { [weak self] slotID, event in
+            self?.handleUniversalActivityEvent(slotID: slotID, event: event)
         }
         webViewPool.onAttentionObservation = { [weak self] slotID, observation in
             self?.handleAttentionEvent(
@@ -1472,6 +1546,13 @@ final class PanelController: NSObject, NSWindowDelegate {
                 navigationGeneration: navigationGeneration
             )
         }
+        webViewPool.onSlotNavigationInteractiveReady = { [weak self] slotID, identity, navigationGeneration in
+            self?.handleSlotNavigationInteractiveReady(
+                slotID: slotID,
+                runtimeIdentity: identity,
+                navigationGeneration: navigationGeneration
+            )
+        }
         webViewPool.onSlotNavigationFinish = { [weak self] slotID, identity, navigationGeneration in
             self?.handleSlotNavigationFinish(
                 slotID: slotID,
@@ -1486,6 +1567,13 @@ final class PanelController: NSObject, NSWindowDelegate {
                 navigationGeneration: navigationGeneration
             )
         }
+        webViewPool.onSlotNavigationProvisionalCancelled = { [weak self] slotID, identity, navigationGeneration in
+            self?.handleSlotNavigationProvisionalCancelled(
+                slotID: slotID,
+                runtimeIdentity: identity,
+                navigationGeneration: navigationGeneration
+            )
+        }
         webViewPool.onRuntimeRecoveryStart = { [weak self] slotID, identity in
             self?.handleRuntimeRecoveryStart(slotID: slotID, runtimeIdentity: identity)
         }
@@ -1493,15 +1581,24 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.handleRuntimeRecoveryUnavailable(slotID: slotID, runtimeIdentity: identity)
         }
         tabStore.onChange = { [weak self] in
-            guard let self, !self.suppressTabStoreSynchronization else { return }
+            guard let self else { return }
+            self.onTabStoreDidChange?()
+            guard !self.suppressTabStoreSynchronization else { return }
             self.synchronizeSlotState()
         }
+        rootView.externalControlZoneView.setPresentationVisible(false)
+        rootView.interactionBorderView.setPresentationVisible(false)
+        rootView.companionRailFoldControlView.setPresentationVisible(false)
+        sourceHostController.railFoldControl.setPresentationVisible(false)
+        synchronizeExternalMouseMonitor()
         synchronizeSlotState()
     }
 
     deinit {
         presentationFocusTask?.cancel()
         presentationWebFocusTask?.cancel()
+        delayedFaviconRecheckTasks.values.forEach { $0.cancel() }
+        delayedFaviconRecheckTasks.removeAll()
         if let externalMouseMonitor {
             NSEvent.removeMonitor(externalMouseMonitor)
         }
@@ -1528,6 +1625,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         NotificationCenter.default.removeObserver(
             self,
             name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: .floatTabsLanguageDidChange,
             object: nil
         )
     }
@@ -1594,6 +1696,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
         synchronizeSlotState()
         panel.orderFrontRegardless()
+        sourceHostController.orderFrontAndFocus(nil)
         activateFloatTabs(trace: trace)
         panel.makeKeyAndOrderFront(nil)
         presentationDisplayMovement.begin(
@@ -2124,11 +2227,17 @@ final class PanelController: NSObject, NSWindowDelegate {
             trace: trace
         )
         cancelPendingRuntimeMaterialization(reason: "app_terminating")
+        flushPendingPersistence()
         persistPanelFrame()
     }
 
+    func flushPendingPersistence() {
+        tabStore.flushPendingRuntimePersistence()
+    }
+
     func storedWebAppStateSnapshot() -> StoredWebAppState {
-        tabStore.storedStateSnapshot()
+        flushPendingPersistence()
+        return tabStore.storedStateSnapshot()
     }
 
     func websiteCacheCleanupCoordinator(
@@ -2149,7 +2258,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 guard let self else {
                     throw WebsiteCacheCleanupServiceError.dataStoreUnavailable
                 }
-                return try self.webViewPool.websiteDataStore(for: identity)
+                return self.webViewPool.websiteDataStore(for: identity)
             }
         )
 
@@ -2183,14 +2292,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             },
             restoreRuntime: { [weak self] in
                 self?.restoreAfterWebsiteCacheCleanup()
-            }
+            },
+            diagnostics: diagnostics
         )
         websiteCacheCleanupCoordinator = coordinator
         return coordinator
     }
 
-    func websiteDataStore(for identity: BrowserProfileIdentity) throws -> WKWebsiteDataStore {
-        try webViewPool.websiteDataStore(for: identity)
+    func websiteDataStore(for identity: BrowserProfileIdentity) -> WKWebsiteDataStore {
+        webViewPool.websiteDataStore(for: identity)
     }
 
     private func websiteCacheProfileSnapshots(
@@ -2198,7 +2308,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     ) -> [WebsiteCacheProfileSnapshot] {
         var lastUsedByIdentity: [BrowserProfileIdentity: Date] = [:]
         var residencyByIdentity: [BrowserProfileIdentity: SlotResidencyPolicy] = [:]
-        var identities = Set<BrowserProfileIdentity>([.default])
+        var identities = Set<BrowserProfileIdentity>()
+        if !tabStore.isDefaultBrowserProfileDeleted
+            || tabStore.profiles.contains(where: { $0.browserProfileID == nil }) {
+            identities.insert(.default)
+        }
 
         for profile in tabStore.profiles {
             let identity = BrowserProfileIdentity(browserProfileID: profile.browserProfileID)
@@ -2274,8 +2388,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 self?.browserProfileManagementSnapshot()
                     ?? BrowserProfileManagementSnapshot(
                         customProfiles: [],
-                        referencedProfileIDs: [],
-                        customProfilesSupported: false
+                        referencedProfileIDs: []
                     )
             },
             create: { [weak self] name in
@@ -2295,16 +2408,22 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     func browserProfileManagementSnapshot() -> BrowserProfileManagementSnapshot {
         var referencingWebAppNamesByProfileID: [UUID: [String]] = [:]
+        var defaultReferencingWebAppNames: [String] = []
         for profile in tabStore.profiles {
-            guard let browserProfileID = profile.browserProfileID else { continue }
+            guard let browserProfileID = profile.browserProfileID else {
+                defaultReferencingWebAppNames.append(profile.name)
+                continue
+            }
             referencingWebAppNamesByProfileID[browserProfileID, default: []].append(profile.name)
         }
         return BrowserProfileManagementSnapshot(
             customProfiles: tabStore.browserProfiles,
             defaultProfilePresentation: tabStore.defaultBrowserProfilePresentation,
+            includesDefaultProfile: !tabStore.isDefaultBrowserProfileDeleted,
             referencedProfileIDs: Set(referencingWebAppNamesByProfileID.keys),
+            isDefaultProfileReferenced: !defaultReferencingWebAppNames.isEmpty,
             referencingWebAppNamesByProfileID: referencingWebAppNamesByProfileID,
-            customProfilesSupported: webViewPool.customBrowserProfilesSupported
+            defaultReferencingWebAppNames: defaultReferencingWebAppNames
         )
     }
 
@@ -2312,13 +2431,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         currentProfileID: UUID?,
         targetProfileID: UUID?,
         targetExists: Bool,
-        customProfilesSupported: Bool,
-        sessionIsLocked: Bool
+        sessionIsLocked: Bool,
+        defaultProfileAvailable: Bool = true
     ) -> Bool {
-        guard targetProfileID == nil || targetExists else { return false }
+        guard targetProfileID == nil ? defaultProfileAvailable : targetExists else { return false }
         guard currentProfileID != targetProfileID else { return true }
         guard !sessionIsLocked else { return false }
-        guard targetProfileID == nil || customProfilesSupported else { return false }
         return true
     }
 
@@ -2335,13 +2453,15 @@ final class PanelController: NSObject, NSWindowDelegate {
         let targetProfile = targetProfileID.flatMap { targetID in
             tabStore.browserProfiles.first(where: { $0.id == targetID })
         }
-        let targetExists = targetProfileID == nil || targetProfile != nil
+        let targetExists = targetProfileID == nil
+            ? !tabStore.isDefaultBrowserProfileDeleted
+            : targetProfile != nil
         guard Self.canRequestBrowserProfileSwitch(
             currentProfileID: sourceProfile.browserProfileID,
             targetProfileID: targetProfileID,
             targetExists: targetExists,
-            customProfilesSupported: webViewPool.customBrowserProfilesSupported,
-            sessionIsLocked: sourceHostController.isSessionLocked
+            sessionIsLocked: sourceHostController.isSessionLocked,
+            defaultProfileAvailable: !tabStore.isDefaultBrowserProfileDeleted
         ) else {
             NSSound.beep()
             return false
@@ -2367,13 +2487,15 @@ final class PanelController: NSObject, NSWindowDelegate {
         let currentTargetProfile = targetProfileID.flatMap { targetID in
             tabStore.browserProfiles.first(where: { $0.id == targetID })
         }
-        let currentTargetExists = targetProfileID == nil || currentTargetProfile != nil
+        let currentTargetExists = targetProfileID == nil
+            ? !tabStore.isDefaultBrowserProfileDeleted
+            : currentTargetProfile != nil
         guard Self.canRequestBrowserProfileSwitch(
             currentProfileID: currentProfile.browserProfileID,
             targetProfileID: targetProfileID,
             targetExists: currentTargetExists,
-            customProfilesSupported: webViewPool.customBrowserProfilesSupported,
-            sessionIsLocked: sourceHostController.isSessionLocked
+            sessionIsLocked: sourceHostController.isSessionLocked,
+            defaultProfileAvailable: !tabStore.isDefaultBrowserProfileDeleted
         ) else {
             NSSound.beep()
             return false
@@ -2401,15 +2523,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         sourceExists: Bool,
         targetProfileID: UUID?,
         targetExists: Bool,
-        customProfilesSupported: Bool,
-        sessionIsLocked: Bool
+        sessionIsLocked: Bool,
+        defaultProfileAvailable: Bool = true
     ) -> Bool {
         guard sourceExists,
-              targetProfileID == nil || targetExists else {
+              targetProfileID == nil ? defaultProfileAvailable : targetExists else {
             return false
         }
         guard !sessionIsLocked else { return false }
-        guard targetProfileID == nil || customProfilesSupported else { return false }
         return true
     }
 
@@ -2420,13 +2541,14 @@ final class PanelController: NSObject, NSWindowDelegate {
     ) -> WebAppProfile? {
         let sourceExists = tabStore.profiles.contains(where: { $0.id == sourceSlotID })
         let targetExists = targetProfileID == nil
-            || tabStore.browserProfiles.contains(where: { $0.id == targetProfileID })
+            ? !tabStore.isDefaultBrowserProfileDeleted
+            : tabStore.browserProfiles.contains(where: { $0.id == targetProfileID })
         guard Self.canRequestOpenInNewTabWithBrowserProfile(
             sourceExists: sourceExists,
             targetProfileID: targetProfileID,
             targetExists: targetExists,
-            customProfilesSupported: webViewPool.customBrowserProfilesSupported,
-            sessionIsLocked: sourceHostController.isSessionLocked
+            sessionIsLocked: sourceHostController.isSessionLocked,
+            defaultProfileAvailable: !tabStore.isDefaultBrowserProfileDeleted
         ) else {
             NSSound.beep()
             return nil
@@ -2443,21 +2565,20 @@ final class PanelController: NSObject, NSWindowDelegate {
         targetProfile: BrowserProfile?,
         defaultProfileName: String
     ) -> Bool {
-        let targetName = targetProfile?.name ?? defaultProfileName
+        let targetName = targetProfile?.name ?? L10n.defaultDisplayName(defaultProfileName)
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Switch Browser Profile?"
-        alert.informativeText = "Switching \(sourceProfile.name) to \(targetName) replaces the current page runtime. Ongoing or unseen ChatGPT work may be discarded. To keep both identities live, use “Open in New Tab with Profile” instead."
-        alert.addButton(withTitle: "Switch Profile")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.tr("Switch Browser Profile?", "切换浏览器配置文件？")
+        alert.informativeText = L10n.tr(
+            "Switching \(sourceProfile.name) to \(targetName) replaces the current page runtime. Ongoing or unseen ChatGPT work may be discarded. To keep both identities live, use “Open in New Tab with Profile” instead.",
+            "将“\(sourceProfile.name)”切换到“\(targetName)”会重新创建当前页面实例，进行中的对话或未保存状态可能会丢失。如需同时保留两个身份运行，请改用右键菜单中的“使用配置文件在新标签打开”。"
+        )
+        alert.addButton(withTitle: L10n.tr("Switch Profile", "切换配置文件"))
+        alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
         return alert.runModal() == .alertFirstButtonReturn
     }
 
     func createBrowserProfile(name: String) throws -> BrowserProfile {
-        guard webViewPool.customBrowserProfilesSupported else {
-            throw BrowserProfileManagementError.unsupported
-        }
-
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
             throw BrowserProfileManagementError.invalidName
@@ -2513,17 +2634,29 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func deleteBrowserProfile(
-        id: UUID,
+        id: UUID?,
         usageStore: WebsiteCacheUsageStore? = nil
     ) async throws {
-        guard tabStore.browserProfiles.contains(where: { $0.id == id }) else {
-            throw BrowserProfileManagementError.notFound
+        if let id {
+            guard tabStore.browserProfiles.contains(where: { $0.id == id }) else {
+                throw BrowserProfileManagementError.notFound
+            }
+            guard !tabStore.profiles.contains(where: { $0.browserProfileID == id }) else {
+                throw BrowserProfileManagementError.referenced
+            }
+        } else {
+            guard !tabStore.isDefaultBrowserProfileDeleted else {
+                throw BrowserProfileManagementError.notFound
+            }
+            guard !tabStore.profiles.contains(where: { $0.browserProfileID == nil }) else {
+                throw BrowserProfileManagementError.referenced
+            }
         }
-        guard !tabStore.profiles.contains(where: { $0.browserProfileID == id }) else {
-            throw BrowserProfileManagementError.referenced
+        guard tabStore.totalBrowserProfileCount > 1 else {
+            throw BrowserProfileManagementError.lastRemainingProfile
         }
 
-        let identity = BrowserProfileIdentity.custom(id)
+        let identity = BrowserProfileIdentity(browserProfileID: id)
         let staleSlotIDs = webViewPool.residentSlotIDs(using: identity)
         for slotID in staleSlotIDs {
             slotLifecycleCoordinator.remove(slotID: slotID)
@@ -2533,7 +2666,11 @@ final class PanelController: NSObject, NSWindowDelegate {
             throw BrowserProfileManagementError.runtimeStillResident
         }
 
-        try await webViewPool.removeCustomBrowserProfileDataStore(id: id)
+        if let id {
+            try await webViewPool.removeCustomBrowserProfileDataStore(id: id)
+        } else {
+            try await webViewPool.removeDefaultBrowserProfileWebsiteData()
+        }
         guard tabStore.deleteBrowserProfileMetadata(id: id) else {
             throw BrowserProfileManagementError.metadataPersistenceFailed
         }
@@ -2561,6 +2698,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             unreadResponseCoordinator.removeSlot(slotID: slotID)
             if unreadBeforeReplacement.contains(slotID),
                !unreadResponseCoordinator.unreadSlotIDs.contains(slotID) {
+                onUnreadSlotAcknowledged?(slotID)
                 recordUnreadDiagnostic(event: "unread.removed", fields: [
                     "slot_id": .string(slotID.uuidString),
                     "reason": .string("stored_state_replaced")
@@ -2586,12 +2724,65 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func togglePinnedState() {
         isPinned.toggle()
         rootView.externalControlZoneView.setPinned(isPinned)
+        synchronizeExternalMouseMonitor()
         synchronizePinnedPresentation()
         if isPinned, sourceHostController.sessionState == .fullscreen {
             updateRequestedVisibility(true)
             fullscreenVisibilityIntent.requestPresentation()
             showFullscreenCompanionIfReady()
         }
+    }
+
+    private func synchronizeExternalMouseMonitor() {
+        let needsMonitor = requestedVisibility && !isPinned
+        if needsMonitor {
+            guard externalMouseMonitor == nil else { return }
+            externalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+            ) { [weak self] event in
+                let eventTimestamp = event.timestamp
+                let mouseLocation = NSEvent.mouseLocation
+                Task { @MainActor [weak self] in
+                    self?.handleExternalMouseDown(
+                        eventTimestamp: eventTimestamp,
+                        mouseLocation: mouseLocation
+                    )
+                }
+            }
+        } else if let externalMouseMonitor {
+            NSEvent.removeMonitor(externalMouseMonitor)
+            self.externalMouseMonitor = nil
+        }
+    }
+
+    static func isSystemCredentialHelperBundleIdentifier(_ bundleIdentifier: String?) -> Bool {
+        guard let normalized = bundleIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+              !normalized.isEmpty else {
+            return false
+        }
+        let knownCredentialHelpers: Set<String> = [
+            "com.apple.passwords",
+            "com.apple.passwords.menubarextra",
+            "com.apple.autofillpanelservice",
+            "com.apple.safariplatformsupport.helper",
+            "com.apple.coreauthui",
+            "com.apple.localauthentication.uiagent",
+            "com.apple.securityagent",
+            "com.apple.authenticationservicescore.authenticationservicesagent",
+        ]
+        return knownCredentialHelpers.contains(normalized)
+            || normalized.hasPrefix("com.apple.authenticationservices")
+            || normalized.hasPrefix("com.apple.autofill")
+    }
+
+    private var hasActiveModalSheetOrCredentialHelper: Bool {
+        panel.attachedSheet != nil
+            || sourceHostController.window.attachedSheet != nil
+            || Self.isSystemCredentialHelperBundleIdentifier(
+                NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            )
     }
 
     private func synchronizePinnedPresentation() {
@@ -2662,6 +2853,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             insidePresentation: insidePresentation
         )
         guard !staleEvent else { return }
+        if hasActiveModalSheetOrCredentialHelper { return }
         if insidePresentation {
             fullscreenExperimentLog(
                 "GLOBAL_MOUSE_IGNORED reason=insidePresentation "
@@ -2796,6 +2988,23 @@ final class PanelController: NSObject, NSWindowDelegate {
                 frontmostMatches: true
             )
             acknowledgeActiveAttentionIfActuallyPresented()
+            return
+        }
+
+        if Self.isSystemCredentialHelperBundleIdentifier(activatedApplication.bundleIdentifier)
+            || panel.attachedSheet != nil
+            || sourceHostController.window.attachedSheet != nil {
+            let trace = presentationTrace ?? diagnostics.beginTrace(root: "panel.auto-hide")
+            recordAutoHideDecision(
+                trigger: .workspaceActivation,
+                trace: trace,
+                candidateApplication: activatedApplication,
+                frontmostApplication: NSWorkspace.shared.frontmostApplication,
+                decision: .ignore(reason: .ownApplication),
+                suppressionActive: false,
+                presentationFocusPending: presentationFocusTask != nil,
+                frontmostMatches: true
+            )
             return
         }
 
@@ -3119,8 +3328,28 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.webPanelContainerView.debugTriggerLoadFailureRetry()
     }
 
+    var debugIsShowingRestoringReloadAction: Bool {
+        rootView.webPanelContainerView.isRestoringReloadActionVisible
+    }
+
+    func debugSetRestoringSlowActionDelay(_ delay: TimeInterval) {
+        rootView.webPanelContainerView.setSlowRestoreActionDelay(delay)
+    }
+
+    func debugTriggerRestoringReload() {
+        rootView.webPanelContainerView.debugTriggerRestoringReload()
+    }
+
     var debugPanelFrame: NSRect {
         panel.frame
+    }
+
+    var debugSourceWindowIsVisible: Bool {
+        sourceHostController.window.isVisible
+    }
+
+    var debugSourceWindowAccessibilityDocument: String? {
+        sourceHostController.window.accessibilityDocument()
     }
 
     var debugPresentedWebView: WKWebView? {
@@ -3386,6 +3615,22 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeAppearance()
     }
 
+    @objc private func languageDidChange(_ notification: Notification) {
+        synchronizeLanguagePresentation()
+    }
+
+    private func synchronizeLanguagePresentation() {
+        rootView.externalControlZoneView.refreshLocalization()
+        sourceHostController.railFoldControl.refreshLocalization()
+        rootView.companionRailFoldControlView.refreshLocalization()
+        rootView.webPanelContainerView.refreshLocalization()
+        sourceHostController.companionContainer.refreshLocalization()
+        rootView.fullscreenExitPlaceholderView.refreshLocalization()
+        addressOverlayView.refreshLocalization()
+        synchronizeBrowserProfileMenuPresentation()
+        synchronizeGroupIndicators()
+    }
+
     private func synchronizeAppearance() {
         let appearance = preferencesStore.appearanceMode.appKitAppearance
         panel.appearance = appearance
@@ -3418,7 +3663,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     @objc private func fixedWindowSizeDidChange(_ notification: Notification) {
-        guard preferencesStore.windowSizeMode == .fixed else { return }
+        guard !isCommittingManualResize,
+              preferencesStore.windowSizeMode == .fixed else { return }
         applySharedFixedViewport(preferencesStore.fixedViewportSize, animated: panel.isVisible)
     }
 
@@ -3429,19 +3675,47 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeWindowSizeMode()
     }
 
+    private func synchronizedGroupMenuOptions() -> [WebAppGroupMenuOption] {
+        let unreadIDs = unreadResponseCoordinator.unreadSlotIDs
+        let unreadCountsByGroup = tabStore.profiles.reduce(into: [UUID?: Int]()) { counts, profile in
+            if unreadIDs.contains(profile.id) {
+                counts[profile.groupID, default: 0] += 1
+            }
+        }
+        return tabStore.groupMenuOptions.map { option in
+            var updated = option
+            updated.unreadCount = unreadCountsByGroup[option.id] ?? 0
+            return updated
+        }
+    }
+
+    private func synchronizeGroupIndicators() {
+        rootView.externalControlZoneView.setGroupsSnapshot(
+            options: synchronizedGroupMenuOptions(),
+            activeGroupID: tabStore.activeGroupID,
+            globalBorderTheme: preferencesStore.borderTheme,
+            globalCustomBorderColor: preferencesStore.customBorderColor
+        )
+    }
+
     private func synchronizeBorderTheme() {
+        let resolved = tabStore.effectiveBorderAppearance(
+            globalTheme: preferencesStore.borderTheme,
+            globalCustomColor: preferencesStore.customBorderColor
+        )
         rootView.interactionBorderView.apply(
-            theme: preferencesStore.borderTheme,
-            customColor: preferencesStore.customBorderColor
+            theme: resolved.theme,
+            customColor: resolved.customColor
         )
         sourceHostController.railFoldControl.apply(
-            theme: preferencesStore.borderTheme,
-            customColor: preferencesStore.customBorderColor
+            theme: resolved.theme,
+            customColor: resolved.customColor
         )
         rootView.companionRailFoldControlView.apply(
-            theme: preferencesStore.borderTheme,
-            customColor: preferencesStore.customBorderColor
+            theme: resolved.theme,
+            customColor: resolved.customColor
         )
+        synchronizeGroupIndicators()
     }
 
     private func synchronizeWindowSizeMode() {
@@ -3519,6 +3793,24 @@ final class PanelController: NSObject, NSWindowDelegate {
         rail.onManageBrowserProfiles = { [weak self] in
             self?.onOpenGlobalSettings?()
         }
+        rail.onSaveToBookmarks = { [weak self] slotID in
+            self?.presentSaveToBookmarksSheet(slotID: slotID)
+        }
+        rail.onMoveSlotToGroup = { [weak self] slotID, groupID in
+            _ = self?.tabStore.moveSlotToGroup(slotID: slotID, groupID: groupID)
+        }
+        rail.onSelectGroup = { [weak self] groupID in
+            _ = self?.tabStore.selectGroup(id: groupID)
+        }
+        rail.onCreateGroup = { [weak self] in
+            self?.presentGroupEditorSheet(editingGroupID: nil, isCreating: true)
+        }
+        rail.onEditGroup = { [weak self] groupID in
+            self?.presentGroupEditorSheet(editingGroupID: groupID, isCreating: false)
+        }
+        rail.onDeleteGroup = { [weak self] groupID in
+            self?.presentDeleteGroupConfirmation(groupID: groupID)
+        }
         rail.onReorder = { [weak self] id, destination in
             _ = self?.tabStore.move(id: id, toIndex: destination)
         }
@@ -3560,16 +3852,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeSlotState() {
-        let selectedSlotID = tabStore.activeTabID
-        for slotID in Array(manualFaviconReloadIntentsBySlot.keys)
-            where slotID != selectedSlotID {
-            manualFaviconReloadIntentsBySlot.removeValue(forKey: slotID)
-        }
-        for slotID in Array(faviconDOMReadBySlot.keys)
-            where slotID != selectedSlotID
-                && faviconDOMReadBySlot[slotID]?.isManualReloadRefresh == true {
-            faviconDOMReadBySlot.removeValue(forKey: slotID)
-        }
         if let pending = pendingRuntimeMaterialization,
            pending.slotID != tabStore.activeTabID {
             cancelPendingRuntimeMaterialization(reason: "active_slot_changed")
@@ -3599,10 +3881,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         pendingSlotSynchronization = false
 
+        let activeGroupProfiles = tabStore.activeGroupProfiles
         rootView.externalControlZoneView.apply(
-            profiles: orderedProfiles,
+            profiles: activeGroupProfiles,
             activeTabID: tabStore.activeTabID
         )
+        synchronizeBorderTheme()
         synchronizeDurableUnreadPresentation()
         synchronizeResidentIndicators()
         slotLifecycleCoordinator.reconcile(profiles: orderedProfiles)
@@ -3618,7 +3902,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             webFocusRouter.setCurrentWebView(nil)
             rootView.webPanelContainerView.showEmptyState()
             synchronizeResidentIndicators()
-            onSelectedSlotPresentationChange?(nil, nil)
+            notifySelectedSlotPresentationChange(title: nil, url: nil)
             return
         }
 
@@ -3650,9 +3934,9 @@ final class PanelController: NSObject, NSWindowDelegate {
             )
             lastSynchronizedActiveID = activeProfile.id
             lastSynchronizedActiveProfile = activeProfile
-            onSelectedSlotPresentationChange?(
-                activeProfile.name,
-                faviconURL(for: activeProfile)
+            notifySelectedSlotPresentationChange(
+                title: activeProfile.name,
+                url: faviconURL(for: activeProfile)
             )
             synchronizeResidentIndicators()
             return
@@ -3674,9 +3958,9 @@ final class PanelController: NSObject, NSWindowDelegate {
                 slotLifecycleCoordinator.activate(profile: activeProfile)
                 lastSynchronizedActiveID = activeProfile.id
                 lastSynchronizedActiveProfile = activeProfile
-                onSelectedSlotPresentationChange?(
-                    activeProfile.name,
-                    faviconURL(for: activeProfile)
+                notifySelectedSlotPresentationChange(
+                    title: activeProfile.name,
+                    url: faviconURL(for: activeProfile)
                 )
             }
             return
@@ -3696,20 +3980,9 @@ final class PanelController: NSObject, NSWindowDelegate {
             webView = try webViewForPanelController(activeProfile)
         } catch {
             webFocusRouter.setCurrentWebView(nil)
-            if let profileName = Self.unsupportedBrowserProfileName(
-                for: activeProfile,
-                error: error,
-                browserProfiles: tabStore.browserProfiles
-            ) {
-                rootView.webPanelContainerView.showUnsupportedBrowserProfile(
-                    profileName: profileName,
-                    defaultProfileName: tabStore.defaultBrowserProfilePresentation.name
-                )
-            } else {
-                rootView.webPanelContainerView.showLoadFailure(
-                    retryEnabled: canRetrySelectedSlot(activeProfile)
-                )
-            }
+            rootView.webPanelContainerView.showLoadFailure(
+                retryEnabled: canRetrySelectedSlot(activeProfile)
+            )
             synchronizeResidentIndicators()
             return
         }
@@ -3722,9 +3995,9 @@ final class PanelController: NSObject, NSWindowDelegate {
                 slotLifecycleCoordinator.activate(profile: activeProfile)
                 lastSynchronizedActiveID = activeProfile.id
                 lastSynchronizedActiveProfile = activeProfile
-                onSelectedSlotPresentationChange?(
-                    activeProfile.name,
-                    faviconURL(for: activeProfile)
+                notifySelectedSlotPresentationChange(
+                    title: activeProfile.name,
+                    url: faviconURL(for: activeProfile)
                 )
                 synchronizeResidentIndicators()
             }
@@ -3754,9 +4027,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         lastSynchronizedActiveID = activeProfile.id
         lastSynchronizedActiveProfile = activeProfile
         synchronizeResidentIndicators()
-        onSelectedSlotPresentationChange?(
-            activeProfile.name,
-            faviconURL(for: activeProfile)
+        notifySelectedSlotPresentationChange(
+            title: activeProfile.name,
+            url: faviconURL(for: activeProfile)
         )
 
         acknowledgeAttentionIfActuallyVisible(slotID: activeProfile.id)
@@ -3905,16 +4178,19 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         runtimeMaterializationGeneration += 1
+        let hadResidentWebViewAtStart = webViewPool.existingWebView(for: profile.id) != nil
         let request = PendingRuntimeMaterialization(
             generation: runtimeMaterializationGeneration,
             slotID: profile.id,
-            surface: surface
+            surface: surface,
+            startedAtUptime: ProcessInfo.processInfo.systemUptime,
+            hadResidentWebViewAtStart: hadResidentWebViewAtStart
         )
         pendingRuntimeMaterialization = request
         pendingRuntimeMaterializationIdentity = nil
-        onSelectedSlotPresentationChange?(
-            profile.name,
-            faviconURL(for: profile)
+        notifySelectedSlotPresentationChange(
+            title: profile.name,
+            url: faviconURL(for: profile)
         )
         if surface == .fullscreenCompanion {
             rootView.installFullscreenCompanionContainer(
@@ -4152,7 +4428,13 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         var fields: [String: RuntimeDiagnosticValue] = [
             "slot_id": .string(profile.id.uuidString),
-            "materialization_generation": .integer(Int64(request.generation))
+            "materialization_generation": .integer(Int64(request.generation)),
+            "materialization_elapsed_ms": .integer(
+                Self.boundedMaterializationMilliseconds(
+                    ProcessInfo.processInfo.systemUptime - request.startedAtUptime
+                )
+            ),
+            "had_resident_webview_at_start": .bool(request.hadResidentWebViewAtStart)
         ]
         fields.merge(
             pendingRuntimeMaterializationIdentity?.fields ?? [:]
@@ -4186,6 +4468,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             fields: [
                 "slot_id": .string(pending.slotID.uuidString),
                 "materialization_generation": .integer(Int64(pending.generation)),
+                "materialization_elapsed_ms": .integer(
+                    Self.boundedMaterializationMilliseconds(
+                        ProcessInfo.processInfo.systemUptime - pending.startedAtUptime
+                    )
+                ),
+                "had_resident_webview_at_start": .bool(pending.hadResidentWebViewAtStart),
                 "reason": .string(reason)
             ]
         )
@@ -4209,6 +4497,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             fields: [
                 "slot_id": .string(request.slotID.uuidString),
                 "materialization_generation": .integer(Int64(request.generation)),
+                "materialization_elapsed_ms": .integer(
+                    Self.boundedMaterializationMilliseconds(
+                        ProcessInfo.processInfo.systemUptime - request.startedAtUptime
+                    )
+                ),
+                "had_resident_webview_at_start": .bool(request.hadResidentWebViewAtStart),
                 "reason": .string(reason),
                 "replaced_by_newer_request": .bool(
                     currentGeneration != nil && currentGeneration != request.generation
@@ -4243,32 +4537,31 @@ final class PanelController: NSObject, NSWindowDelegate {
         webFocusRouter.setCurrentWebView(nil)
         let presentationContainer = pending.map { container(for: $0.surface) }
             ?? rootView.webPanelContainerView
-        if let profileName = Self.unsupportedBrowserProfileName(
-            for: profile,
-            error: error,
-            browserProfiles: tabStore.browserProfiles
-        ) {
-            presentationContainer.showUnsupportedBrowserProfile(
-                profileName: profileName,
-                defaultProfileName: tabStore.defaultBrowserProfilePresentation.name
+        presentationContainer.showLoadFailure(
+            retryEnabled: canRetrySelectedSlot(profile)
+        )
+        var failureFields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(profile.id.uuidString),
+            "materialization_generation": .integer(
+                Int64(runtimeMaterializationGeneration)
             )
-        } else {
-            presentationContainer.showLoadFailure(
-                retryEnabled: canRetrySelectedSlot(profile)
+        ]
+        if let pending {
+            failureFields["materialization_elapsed_ms"] = .integer(
+                Self.boundedMaterializationMilliseconds(
+                    ProcessInfo.processInfo.systemUptime - pending.startedAtUptime
+                )
             )
+            failureFields["had_resident_webview_at_start"] = .bool(pending.hadResidentWebViewAtStart)
+        }
+        failureFields.merge(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) {
+            current, _ in current
         }
         diagnostics.record(
             event: "panel.materialization.failed",
             level: .warning,
             subsystem: "panel",
-            fields: [
-                "slot_id": .string(profile.id.uuidString),
-                "materialization_generation": .integer(
-                    Int64(runtimeMaterializationGeneration)
-                )
-            ].merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) {
-                current, _ in current
-            }
+            fields: failureFields
         )
     }
 
@@ -4412,6 +4705,49 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
+    func handleSlotNavigationInteractiveReady(
+        slotID: UUID,
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        navigationGeneration: UInt64
+    ) {
+        guard navigationGeneration > 0,
+              webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
+              webViewPool.existingWebView(for: slotID) != nil else {
+            return
+        }
+        let currentRecord = runtimeReadinessBySlot[slotID].flatMap {
+            $0.identity == runtimeIdentity ? $0 : nil
+        }
+        if let currentGeneration = currentRecord?.navigationGeneration,
+           navigationGeneration != currentGeneration {
+            return
+        }
+        if currentRecord?.state == .ready || currentRecord?.state == .failed {
+            return
+        }
+        runtimeReadinessBySlot[slotID] = RuntimeReadinessRecord(
+            identity: runtimeIdentity,
+            state: .ready,
+            navigationGeneration: navigationGeneration
+        )
+        let isManualReloadRefresh = manualFaviconReloadIntentsBySlot[slotID]?
+            .matchesCapturedGeneration(
+                runtimeIdentity: runtimeIdentity,
+                navigationGeneration: navigationGeneration
+            ) == true
+        readFaviconDOMCandidatesIfCurrent(
+            slotID: slotID,
+            runtimeIdentity: runtimeIdentity,
+            navigationGeneration: navigationGeneration,
+            isManualReloadRefresh: isManualReloadRefresh
+        )
+        advancePendingMaterializationReadinessIfCurrent(
+            slotID: slotID,
+            runtimeIdentity: runtimeIdentity,
+            readinessSource: "post_commit_interactive"
+        )
+    }
+
     func handleSlotNavigationFinish(
         slotID: UUID,
         runtimeIdentity: WebRuntimeDiagnosticIdentity,
@@ -4456,10 +4792,36 @@ final class PanelController: NSObject, NSWindowDelegate {
                 slotID: slotID,
                 runtimeIdentity: runtimeIdentity,
                 navigationGeneration: navigationGeneration,
-                isManualReloadRefresh: isManualReloadRefresh
+                isManualReloadRefresh: isManualReloadRefresh,
+                forceDOMReextract: isManualReloadRefresh
             )
+            delayedFaviconRecheckTasks[slotID]?.cancel()
+            delayedFaviconRecheckTasks[slotID] = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                guard !Task.isCancelled, let self else { return }
+                self.delayedFaviconRecheckTasks.removeValue(forKey: slotID)
+                self.readFaviconDOMCandidatesIfCurrent(
+                    slotID: slotID,
+                    runtimeIdentity: runtimeIdentity,
+                    navigationGeneration: navigationGeneration,
+                    isManualReloadRefresh: false,
+                    forceDOMReextract: true
+                )
+            }
         }
 
+        advancePendingMaterializationReadinessIfCurrent(
+            slotID: slotID,
+            runtimeIdentity: runtimeIdentity,
+            readinessSource: "navigation_finished"
+        )
+    }
+
+    private func advancePendingMaterializationReadinessIfCurrent(
+        slotID: UUID,
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        readinessSource: String
+    ) {
         guard let pending = pendingRuntimeMaterialization,
               pending.slotID == slotID,
               isPendingRuntimeMaterializationCurrent(pending) else {
@@ -4470,25 +4832,32 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
         guard pendingRuntimeMaterializationIdentity == runtimeIdentity else { return }
-        completePendingRuntimeMaterialization(pending, runtimeIdentity: runtimeIdentity)
+        completePendingRuntimeMaterialization(
+            pending,
+            runtimeIdentity: runtimeIdentity,
+            readinessSource: readinessSource
+        )
     }
 
     private func readFaviconDOMCandidatesIfCurrent(
         slotID: UUID,
         runtimeIdentity: WebRuntimeDiagnosticIdentity,
         navigationGeneration: UInt64,
-        isManualReloadRefresh: Bool = false
+        isManualReloadRefresh: Bool = false,
+        forceDOMReextract: Bool = false
     ) {
         guard navigationGeneration > 0,
-              tabStore.activeTabID == slotID,
               runtimeReadinessBySlot[slotID]?.identity == runtimeIdentity,
               runtimeReadinessBySlot[slotID]?.navigationGeneration == navigationGeneration,
               webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
               let webView = webViewPool.existingWebView(for: slotID),
-              let committedURL = webViewPool.committedURL(for: slotID) else {
+              let committedURL = webViewPool.committedURL(for: slotID),
+              !WebsiteFaviconProvider.isAuthenticationInterstitialURL(committedURL),
+              tabStore.profiles.contains(where: { $0.id == slotID }) else {
             return
         }
-        if let existing = faviconDOMReadBySlot[slotID],
+        if !forceDOMReextract,
+           let existing = faviconDOMReadBySlot[slotID],
            existing.identity == runtimeIdentity,
            existing.navigationGeneration == navigationGeneration,
            existing.committedURL == committedURL {
@@ -4506,26 +4875,35 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
         faviconDOMReadBySlot[slotID] = read
 
-        WebsiteFaviconProvider.readDOMFaviconCandidates(from: webView) { [weak self, weak webView] result in
+        WebsiteFaviconProvider.extractSessionFavicon(from: webView) { [weak self, weak webView] extraction in
             guard let self,
                   let webView,
-                  self.tabStore.activeTabID == slotID,
                   self.webViewPool.existingWebView(for: slotID) === webView,
                   self.webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
                   self.webViewPool.committedURL(for: slotID) == committedURL,
+                  !WebsiteFaviconProvider.isAuthenticationInterstitialURL(committedURL),
                   self.runtimeReadinessBySlot[slotID]?.identity == runtimeIdentity,
                   self.runtimeReadinessBySlot[slotID]?.navigationGeneration == navigationGeneration,
                   self.faviconDOMReadBySlot[slotID] == read,
-                  let activeProfile = self.tabStore.profiles.first(where: { $0.id == slotID }) else {
+                  let slotProfile = self.tabStore.profiles.first(where: { $0.id == slotID }) else {
                 if let current = self?.faviconDOMReadBySlot[slotID],
                    current == read {
                     self?.faviconDOMReadBySlot.removeValue(forKey: slotID)
                 }
                 return
             }
+            let result: WebsiteFaviconProvider.DOMCandidateReadResult
+            if !extraction.readSucceeded {
+                result = .readFailed
+            } else if extraction.candidates.isEmpty {
+                result = .noCandidates
+            } else {
+                result = .candidates(extraction.candidates)
+            }
             var fields = runtimeIdentity.fields
             fields["slot_id"] = .string(slotID.uuidString)
             fields["navigation_generation"] = .integer(Int64(navigationGeneration))
+            fields["rendered_in_session"] = .bool(extraction.renderedPNGData != nil)
             switch result {
             case let .candidates(candidates):
                 fields["result"] = .string("candidates_found")
@@ -4540,7 +4918,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                     WebsiteFaviconProvider.shared.refreshAfterManualReload(
                         candidateReadResult: .candidates(candidates),
                         committedURL: committedURL,
-                        for: [committedURL, activeProfile.homeURL]
+                        for: [committedURL, slotProfile.homeURL]
                     )
                 } else {
                     WebsiteFaviconProvider.shared.setDOMCandidates(
@@ -4563,7 +4941,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                     provider.refreshAfterManualReload(
                         candidateReadResult: .noCandidates,
                         committedURL: committedURL,
-                        for: [committedURL, activeProfile.homeURL]
+                        for: [committedURL, slotProfile.homeURL]
                     )
                 } else {
                     provider.setDOMCandidates(
@@ -4584,16 +4962,29 @@ final class PanelController: NSObject, NSWindowDelegate {
                     WebsiteFaviconProvider.shared.refreshAfterManualReload(
                         candidateReadResult: .readFailed,
                         committedURL: committedURL,
-                        for: [committedURL, activeProfile.homeURL]
+                        for: [committedURL, slotProfile.homeURL]
                     )
                 }
+            }
+            if extraction.readSucceeded {
+                WebsiteFaviconProvider.shared.acceptSessionRenderedIcon(
+                    pngData: extraction.renderedPNGData,
+                    kind: extraction.renderedKind,
+                    resourceURL: extraction.renderedResourceURL,
+                    forSlotID: slotID,
+                    committedURL: committedURL,
+                    homeURL: slotProfile.homeURL,
+                    fallbackCandidates: extraction.candidates,
+                    forceRefreshSlot: read.isManualReloadRefresh
+                )
             }
         }
     }
 
     private func completePendingRuntimeMaterialization(
         _ pending: PendingRuntimeMaterialization,
-        runtimeIdentity: WebRuntimeDiagnosticIdentity
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        readinessSource: String = "navigation_finished"
     ) {
         guard isPendingRuntimeMaterializationCurrent(pending),
               pendingRuntimeMaterialization?.generation == pending.generation,
@@ -4617,10 +5008,15 @@ final class PanelController: NSObject, NSWindowDelegate {
         pendingRuntimeMaterialization = nil
         pendingRuntimeMaterializationIdentity = nil
         container(for: pending.surface).hideRestoringState()
+        let materializationElapsedMs = Self.boundedMaterializationMilliseconds(
+            ProcessInfo.processInfo.systemUptime - pending.startedAtUptime
+        )
         var revealFields: [String: RuntimeDiagnosticValue] = [
             "slot_id": .string(pending.slotID.uuidString),
             "materialization_generation": .integer(Int64(pending.generation)),
-            "readiness_source": .string("navigation_finished"),
+            "materialization_elapsed_ms": .integer(materializationElapsedMs),
+            "had_resident_webview_at_start": .bool(pending.hadResidentWebViewAtStart),
+            "readiness_source": .string(readinessSource),
             "panel_window_visible": .bool(panel.isVisible),
             "panel_window_key": .bool(panel.isKeyWindow)
         ]
@@ -4647,7 +5043,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         var fields: [String: RuntimeDiagnosticValue] = [
             "slot_id": .string(pending.slotID.uuidString),
             "materialization_generation": .integer(Int64(pending.generation)),
-            "readiness_source": .string("navigation_finished")
+            "materialization_elapsed_ms": .integer(materializationElapsedMs),
+            "had_resident_webview_at_start": .bool(pending.hadResidentWebViewAtStart),
+            "readiness_source": .string(readinessSource)
         ]
         fields.merge(runtimeIdentity.fields) { _, new in new }
         diagnostics.record(
@@ -4655,6 +5053,78 @@ final class PanelController: NSObject, NSWindowDelegate {
             level: .notice,
             subsystem: "panel",
             fields: fields
+        )
+    }
+
+    private static func boundedMaterializationMilliseconds(_ elapsedSeconds: TimeInterval) -> Int64 {
+        let clamped = min(max(elapsedSeconds.isFinite ? elapsedSeconds : 0, 0) * 1_000, 3_600_000)
+        return Int64(clamped.rounded())
+    }
+
+    private func clearNavigationIntentMetadata(
+        slotID: UUID,
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        navigationGeneration: UInt64?
+    ) {
+        if let intent = manualFaviconReloadIntentsBySlot[slotID],
+           intent.matchesNavigationFailure(
+               runtimeIdentity: runtimeIdentity,
+               navigationGeneration: navigationGeneration
+           ) {
+            manualFaviconReloadIntentsBySlot.removeValue(forKey: slotID)
+        }
+        if let read = faviconDOMReadBySlot[slotID],
+           read.isManualReloadRefresh,
+           read.identity == runtimeIdentity,
+           read.navigationGeneration == navigationGeneration {
+            faviconDOMReadBySlot.removeValue(forKey: slotID)
+        }
+    }
+
+    func handleSlotNavigationProvisionalCancelled(
+        slotID: UUID,
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        navigationGeneration: UInt64
+    ) {
+        guard navigationGeneration > 0,
+              webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity,
+              webViewPool.existingWebView(for: slotID) != nil else {
+            return
+        }
+        let currentRecord = runtimeReadinessBySlot[slotID].flatMap {
+            $0.identity == runtimeIdentity ? $0 : nil
+        }
+        if let currentGeneration = currentRecord?.navigationGeneration,
+           navigationGeneration != currentGeneration {
+            return
+        }
+        clearNavigationIntentMetadata(
+            slotID: slotID,
+            runtimeIdentity: runtimeIdentity,
+            navigationGeneration: navigationGeneration
+        )
+        if let pending = pendingRuntimeMaterialization,
+           pending.slotID == slotID,
+           isPendingRuntimeMaterializationCurrent(pending) {
+            handleSlotNavigationFailure(
+                slotID: slotID,
+                runtimeIdentity: runtimeIdentity,
+                navigationGeneration: navigationGeneration
+            )
+            return
+        }
+        guard webViewPool.committedURL(for: slotID) != nil else {
+            handleSlotNavigationFailure(
+                slotID: slotID,
+                runtimeIdentity: runtimeIdentity,
+                navigationGeneration: navigationGeneration
+            )
+            return
+        }
+        runtimeReadinessBySlot[slotID] = RuntimeReadinessRecord(
+            identity: runtimeIdentity,
+            state: .ready,
+            navigationGeneration: navigationGeneration
         )
     }
 
@@ -4680,19 +5150,11 @@ final class PanelController: NSObject, NSWindowDelegate {
             state: .failed,
             navigationGeneration: navigationGeneration ?? currentRecord?.navigationGeneration
         )
-        if let intent = manualFaviconReloadIntentsBySlot[slotID],
-           intent.matchesNavigationFailure(
-               runtimeIdentity: runtimeIdentity,
-               navigationGeneration: navigationGeneration
-           ) {
-            manualFaviconReloadIntentsBySlot.removeValue(forKey: slotID)
-        }
-        if let read = faviconDOMReadBySlot[slotID],
-           read.isManualReloadRefresh,
-           read.identity == runtimeIdentity,
-           read.navigationGeneration == navigationGeneration {
-            faviconDOMReadBySlot.removeValue(forKey: slotID)
-        }
+        clearNavigationIntentMetadata(
+            slotID: slotID,
+            runtimeIdentity: runtimeIdentity,
+            navigationGeneration: navigationGeneration
+        )
 
         let pending = pendingRuntimeMaterialization.flatMap { request in
             request.slotID == slotID
@@ -4746,6 +5208,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         ]
         if let pending {
             fields["materialization_generation"] = .integer(Int64(pending.generation))
+            fields["materialization_elapsed_ms"] = .integer(
+                Self.boundedMaterializationMilliseconds(
+                    ProcessInfo.processInfo.systemUptime - pending.startedAtUptime
+                )
+            )
+            fields["had_resident_webview_at_start"] = .bool(pending.hadResidentWebViewAtStart)
         }
         fields.merge(runtimeIdentity.fields) { _, new in new }
         diagnostics.record(
@@ -4813,13 +5281,51 @@ final class PanelController: NSObject, NSWindowDelegate {
         webFocusRouter.setCurrentWebView(nil)
     }
 
+    private func reloadRestoringSelectedSlot(in surface: RuntimePresentationSurface) {
+        let presentationContainer = container(for: surface)
+        guard presentationContainer.isShowingRestoringState,
+              let profile = tabStore.activeProfile else {
+            return
+        }
+        switch surface {
+        case .standard where sourceHostController.isSessionLocked:
+            return
+        case .fullscreenCompanion where !sourceHostController.isSessionLocked:
+            return
+        default:
+            break
+        }
+
+        if let webView = webViewPool.existingWebView(for: profile.id) {
+            if webViewPool.committedURL(for: profile.id) != nil {
+                reloadSlot(id: profile.id)
+            } else if webViewPool.canRetryNavigation(slotID: profile.id) {
+                webView.stopLoading()
+                _ = webViewPool.retryNavigation(slotID: profile.id)
+            } else {
+                reloadSlot(id: profile.id)
+            }
+            webFocusRouter.setCurrentWebView(nil)
+            return
+        }
+
+        beginDeferredRuntimeMaterialization(for: profile, surface: surface)
+    }
+
+    private func notifySelectedSlotPresentationChange(title: String?, url: URL?) {
+        sourceHostController.updateAccessibilityDocumentOrigin(
+            for: (requestedVisibility || panel.isVisible) ? url : nil
+        )
+        onSelectedSlotPresentationChange?(title, url)
+    }
+
     private func handleCommittedURLChange(slotID: UUID, url: URL) {
         guard tabStore.activeTabID == slotID,
               let activeProfile = tabStore.activeProfile,
               activeProfile.id == slotID else {
             return
         }
-        onSelectedSlotPresentationChange?(activeProfile.name, url)
+        notifySelectedSlotPresentationChange(title: activeProfile.name, url: url)
         if let webView = selectedPresentationWebView() {
             Task { @MainActor [weak self, weak webView] in
                 guard let self, let webView else { return }
@@ -4838,18 +5344,23 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeBrowserProfileMenuPresentation() {
-        let options = [BrowserProfileMenuOption.defaultProfile(
-            name: tabStore.defaultBrowserProfilePresentation.name,
-            color: tabStore.defaultBrowserProfilePresentation.color
-        )]
-            + tabStore.browserProfiles.map {
-                BrowserProfileMenuOption(
-                    id: $0.id,
-                    name: $0.name,
-                    color: $0.color,
-                    isEnabled: webViewPool.customBrowserProfilesSupported
+        var options: [BrowserProfileMenuOption] = []
+        if !tabStore.isDefaultBrowserProfileDeleted || tabStore.browserProfiles.isEmpty {
+            options.append(
+                BrowserProfileMenuOption.defaultProfile(
+                    name: L10n.defaultDisplayName(tabStore.defaultBrowserProfilePresentation.name),
+                    color: tabStore.defaultBrowserProfilePresentation.color
                 )
-            }
+            )
+        }
+        options.append(contentsOf: tabStore.browserProfiles.map {
+            BrowserProfileMenuOption(
+                id: $0.id,
+                name: $0.name,
+                color: $0.color,
+                isEnabled: true
+            )
+        })
         rootView.externalControlZoneView.setBrowserProfileMenuSnapshot(
             options: options,
             assignmentEnabled: !sourceHostController.isSessionLocked,
@@ -4868,6 +5379,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.externalControlZoneView.setUnreadSlotIDs(
             unreadResponseCoordinator.unreadSlotIDs
         )
+        synchronizeGroupIndicators()
     }
 
     private func synchronizeDurableUnreadPresentation() {
@@ -4877,15 +5389,119 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func updateRequestedVisibility(_ visible: Bool) {
         requestedVisibility = visible
+        synchronizeExternalMouseMonitor()
+        rootView.externalControlZoneView.setPresentationVisible(visible)
+        rootView.interactionBorderView.setPresentationVisible(visible)
+        rootView.companionRailFoldControlView.setPresentationVisible(visible)
+        sourceHostController.railFoldControl.setPresentationVisible(visible)
+        if !visible {
+            sourceHostController.updateAccessibilityDocumentOrigin(for: nil)
+        }
         onAttentionPresentationChange?(
             unreadResponseCoordinator.unreadSlotIDs.count,
             requestedVisibility
         )
     }
 
+    private enum NotificationPreviewSource {
+        case chatGPTResponseBridge
+        case inline(previewText: String?, fallbackBody: String)
+    }
+
+    func handleUniversalActivityEvent(
+        slotID: UUID,
+        event: UniversalWebActivityEvent
+    ) {
+        guard let profile = tabStore.profiles.first(where: { $0.id == slotID }) else {
+            return
+        }
+        switch event {
+        case .generationStarted:
+            handleAttentionEvent(
+                slotID: slotID,
+                event: ChatGPTAttentionEvent(observation: .generationStarted, responseIdentity: nil)
+            )
+
+        case let .generationFinished(responseIdentity, previewText):
+            handleAttentionEvent(
+                slotID: slotID,
+                event: ChatGPTAttentionEvent(
+                    observation: .generationFinished,
+                    responseIdentity: responseIdentity
+                ),
+                previewSource: .inline(
+                    previewText: previewText,
+                    fallbackBody: L10n.tr("Response is ready.", "已完成回复。")
+                )
+            )
+
+        case let .backgroundActivity(identity, title, body, isExplicitNotification):
+            if let identity,
+               unreadResponseCoordinator.isHandled(slotID: slotID, responseIdentity: identity) {
+                return
+            }
+            if isAttentionUserVisible(slotID: slotID) {
+                if let identity {
+                    unreadResponseCoordinator.recordHandled(
+                        slotID: slotID,
+                        responseIdentity: identity
+                    )
+                }
+                return
+            }
+            let wasAlreadyUnread = unreadResponseCoordinator.unreadSlotIDs.contains(slotID)
+            unreadResponseCoordinator.markUnread(slotID: slotID, responseIdentity: identity)
+            synchronizeDurableUnreadPresentation()
+            guard !wasAlreadyUnread || isExplicitNotification else {
+                return
+            }
+            onChatGPTGenerationCompleted?(slotID)
+
+            let slotLabel = slotNotificationDisplayName(for: profile)
+            let resolvedTitle: String?
+            if let title,
+               !title.isEmpty,
+               title.caseInsensitiveCompare(profile.name) != .orderedSame {
+                resolvedTitle = slotLabel.map { "\($0) — \(title)" } ?? title
+            } else {
+                resolvedTitle = slotLabel
+            }
+            deliverUniversalNotification(
+                slotID: slotID,
+                displayName: resolvedTitle,
+                preview: body,
+                fallbackBody: L10n.tr(
+                    "New background activity.",
+                    "收到新的后台消息或动态。"
+                )
+            )
+
+        case .activityCleared:
+            guard unreadResponseCoordinator.unreadSlotIDs.contains(slotID) else {
+                return
+            }
+            unreadResponseCoordinator.acknowledge(slotID: slotID)
+            synchronizeDurableUnreadPresentation()
+            onUnreadSlotAcknowledged?(slotID)
+
+        case .trustedInteraction:
+            acknowledgeUnreadAfterTrustedPageInteraction(
+                slotID: slotID,
+                source: .trustedManualScroll
+            )
+
+        case .runtimeReset:
+            handleAttentionEvent(
+                slotID: slotID,
+                event: ChatGPTAttentionEvent(observation: .runtimeReset, responseIdentity: nil)
+            )
+        }
+    }
+
     private func handleAttentionEvent(
         slotID: UUID,
-        event: ChatGPTAttentionEvent
+        event: ChatGPTAttentionEvent,
+        previewSource: NotificationPreviewSource = .chatGPTResponseBridge
     ) {
         let observation = event.observation
         let attentionStateBefore = attentionCoordinator.state(for: slotID)
@@ -4975,7 +5591,20 @@ final class PanelController: NSObject, NSWindowDelegate {
             )
         }
         if case .marked = completionResult {
-            projectCompletionNotification(slotID: slotID)
+            switch previewSource {
+            case .chatGPTResponseBridge:
+                projectCompletionNotification(slotID: slotID)
+            case let .inline(previewText, fallbackBody):
+                let displayName = tabStore.profiles
+                    .first(where: { $0.id == slotID })
+                    .flatMap(slotNotificationDisplayName(for:))
+                deliverUniversalNotification(
+                    slotID: slotID,
+                    displayName: displayName,
+                    preview: previewText,
+                    fallbackBody: fallbackBody
+                )
+            }
         }
         if isValidGenerationCompletion {
             onChatGPTGenerationCompleted?(slotID)
@@ -5398,6 +6027,27 @@ final class PanelController: NSObject, NSWindowDelegate {
         return attempt
     }
 
+    private func slotNotificationDisplayName(for profile: WebAppProfile) -> String? {
+        guard !tabStore.groups.isEmpty,
+              let groupName = tabStore.groupMenuOptions.first(where: { $0.id == profile.groupID })?.name else {
+            return profile.name
+        }
+        return "\(L10n.defaultDisplayName(groupName)) · \(profile.name)"
+    }
+
+    private func deliverUniversalNotification(
+        slotID: UUID,
+        displayName: String?,
+        preview: String?,
+        fallbackBody: String
+    ) {
+        if let onUniversalNotificationRequested {
+            onUniversalNotificationRequested(slotID, displayName, preview, fallbackBody)
+        } else {
+            onChatGPTUnreadCompletionMarked?(slotID, displayName, preview ?? fallbackBody)
+        }
+    }
+
     /// Resolves bounded notification projection input for one newly `.marked`
     /// hidden completion: the persistent Slot display name and an optional
     /// one-shot assistant-response preview. The preview is best-effort — a
@@ -5405,7 +6055,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// state simply yields no preview. Exactly one projection callback fires
     /// per `.marked` completion; neither name nor preview is persisted here.
     private func projectCompletionNotification(slotID: UUID) {
-        let displayName = tabStore.profiles.first(where: { $0.id == slotID })?.name
+        let slotProfile = tabStore.profiles.first(where: { $0.id == slotID })
+        let displayName = slotProfile.flatMap(slotNotificationDisplayName(for:))
         guard let responseBridge = webViewPool.responseBridge(for: slotID) else {
             onChatGPTUnreadCompletionMarked?(slotID, displayName, nil)
             return
@@ -5440,6 +6091,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             )
             guard reconciliation == .cleared else { return }
             self.synchronizeDurableUnreadPresentation()
+            self.onUnreadSlotAcknowledged?(slotID)
             self.recordUnreadDiagnostic(
                 event: "unread.late_completion_reconciled",
                 fields: [
@@ -5475,6 +6127,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             )
             return
         }
+        onUnreadSlotAcknowledged?(attempt.slotID)
         recordUnreadDiagnostic(
             event: "unread.acknowledged",
             trace: attempt.trace,
@@ -5561,15 +6214,18 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func reloadSlot(id: UUID) {
         let manualIntent: ManualFaviconReloadIntent? = {
-            guard tabStore.activeTabID == id,
-                  let identity = webViewPool.runtimeDiagnosticIdentity(for: id),
-                  webViewPool.existingWebView(for: id) != nil,
-                  let readiness = runtimeReadinessBySlot[id],
-                  readiness.identity == identity,
-                  let baselineGeneration = readiness.navigationGeneration,
-                  baselineGeneration > 0 else {
+            guard let identity = webViewPool.runtimeDiagnosticIdentity(for: id),
+                  webViewPool.existingWebView(for: id) != nil else {
                 return nil
             }
+            let baselineGeneration: UInt64 = {
+                if let readiness = runtimeReadinessBySlot[id],
+                   readiness.identity == identity,
+                   let generation = readiness.navigationGeneration {
+                    return generation
+                }
+                return 0
+            }()
             return ManualFaviconReloadIntent(
                 runtimeIdentity: identity,
                 baselineNavigationGeneration: baselineGeneration
@@ -5584,6 +6240,12 @@ final class PanelController: NSObject, NSWindowDelegate {
                 manualFaviconReloadIntentsBySlot.removeValue(forKey: id)
             }
             return
+        }
+        if let profile = tabStore.profiles.first(where: { $0.id == id }) {
+            WebsiteFaviconProvider.shared.reloadSlotIcon(
+                slotID: id,
+                homeURL: profile.homeURL
+            )
         }
         if tabStore.activeTabID == id {
             focusActiveWebViewIfAvailable()
@@ -5610,19 +6272,38 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
+    private func requestAddWebAppFromEmptyState() {
+        if let emptyStateAddWebAppHandlerForTesting {
+            emptyStateAddWebAppHandlerForTesting()
+            return
+        }
+        prepareForExplicitActivation()
+        presentAddWebAppEditor()
+    }
+
     private func presentAddWebAppEditor() {
         guard let modalHost = modalPresentationHostWindow(),
               modalHost.attachedSheet == nil else {
             return
+        }
+        if modalHost.isVisible {
+            NSApp.activate(ignoringOtherApps: true)
+            modalHost.makeKeyAndOrderFront(nil)
         }
         beginRailModalInteraction()
         rootView.externalControlZoneView.setAddEditorOpen(true)
 
         WebAppEditorController.presentAdd(
             browserProfiles: tabStore.browserProfiles,
-            defaultProfileName: tabStore.defaultBrowserProfilePresentation.name,
-            customProfilesSupported: webViewPool.customBrowserProfilesSupported,
+            defaultProfileName: L10n.defaultDisplayName(tabStore.defaultBrowserProfilePresentation.name),
+            includesDefaultProfile: !tabStore.isDefaultBrowserProfileDeleted,
+            initialBrowserProfileID: tabStore.defaultNewSlotBrowserProfileID,
             allowsWindowSizeEditing: preferencesStore.windowSizeMode == .perWebApp,
+            bookmarkFolders: tabStore.orderedBookmarkFolders,
+            bookmarks: tabStore.orderedBookmarks,
+            onManageBookmarks: { [weak self] in
+                self?.onOpenBookmarksSettings?()
+            },
             attachedTo: modalHost
         ) { [weak self] value in
             Task { @MainActor [weak self] in
@@ -5630,7 +6311,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 self.endRailModalInteraction()
                 self.rootView.externalControlZoneView.setAddEditorOpen(false)
                 guard let value,
-                      value.browserProfileID == nil || self.webViewPool.customBrowserProfilesSupported,
                       let added = self.tabStore.add(
                         name: value.name,
                         homeURL: value.url,
@@ -5639,6 +6319,12 @@ final class PanelController: NSObject, NSWindowDelegate {
                         browserProfileID: value.browserProfileID
                       ) else {
                     return
+                }
+                if value.runtimeRetentionPreference != .automatic {
+                    _ = self.tabStore.updateRuntimeRetentionPreference(
+                        id: added.id,
+                        preference: value.runtimeRetentionPreference
+                    )
                 }
 
                 if self.preferencesStore.windowSizeMode == .perWebApp {
@@ -5662,6 +6348,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         beginRailModalInteraction()
         WebAppEditorController.presentEdit(
             profile: profile,
+            browserProfiles: tabStore.browserProfiles,
+            defaultProfileName: L10n.defaultDisplayName(tabStore.defaultBrowserProfilePresentation.name),
+            includesDefaultProfile: !tabStore.isDefaultBrowserProfileDeleted || profile.browserProfileID == nil,
+            allowsBrowserProfileEditing: true,
             allowsWindowSizeEditing: preferencesStore.windowSizeMode == .perWebApp,
             attachedTo: modalHost
         ) { [weak self] value in
@@ -5669,7 +6359,10 @@ final class PanelController: NSObject, NSWindowDelegate {
                 guard let self else { return }
                 self.endRailModalInteraction()
                 guard let value else { return }
-                let oldHomeURL = self.tabStore.profiles.first(where: { $0.id == id })?.homeURL
+                let existingProfile = self.tabStore.profiles.first(where: { $0.id == id })
+                let oldHomeURL = existingProfile?.homeURL
+                let oldBrowserProfileID = existingProfile?.browserProfileID
+                let oldRetention = existingProfile?.runtimeRetentionPreference
                 guard self.tabStore.update(
                     id: id,
                     name: value.name,
@@ -5679,7 +6372,21 @@ final class PanelController: NSObject, NSWindowDelegate {
                 ) else {
                     return
                 }
+                if oldRetention != value.runtimeRetentionPreference {
+                    _ = self.tabStore.updateRuntimeRetentionPreference(
+                        id: id,
+                        preference: value.runtimeRetentionPreference
+                    )
+                }
                 if oldHomeURL != value.url {
+                    WebsiteFaviconProvider.shared.invalidateSlotIcon(slotID: id)
+                }
+                if oldBrowserProfileID != value.browserProfileID {
+                    _ = self.requestBrowserProfileSwitch(
+                        slotID: id,
+                        targetProfileID: value.browserProfileID
+                    )
+                } else if oldHomeURL != value.url {
                     self.webViewPool.navigate(
                         slotID: id,
                         to: value.url,
@@ -5709,10 +6416,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         slotLifecycleCoordinator.remove(slotID: id)
         webViewPool.remove(slotID: id)
+        WebsiteFaviconProvider.shared.removeSlotIcon(slotID: id)
         attentionCoordinator.removeSlot(id)
         unreadResponseCoordinator.removeSlot(slotID: id)
         synchronizeDurableUnreadPresentation()
         if wasUnread {
+            onUnreadSlotAcknowledged?(id)
             recordUnreadDiagnostic(event: "unread.removed", fields: [
                 "slot_id": .string(id.uuidString),
                 "reason": .string("slot_deleted")
@@ -5984,7 +6693,9 @@ final class PanelController: NSObject, NSWindowDelegate {
                 }
             }
         case .fixed:
+            isCommittingManualResize = true
             preferencesStore.fixedViewportSize = viewport
+            isCommittingManualResize = false
         }
         preferredPanelSize = panel.frame.size
         persistPanelFrame()
@@ -6053,9 +6764,9 @@ final class PanelController: NSObject, NSWindowDelegate {
             ]
         )
         _ = NSRunningApplication.current.activate(
-            options: [.activateAllWindows, .activateIgnoringOtherApps]
+            options: [.activateAllWindows]
         )
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
     }
 
     private func beginPresentationFocusHandshake(
@@ -7018,11 +7729,12 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeFullscreenCompanionSlotState() {
-        let orderedProfiles = tabStore.orderedProfiles
+        let activeGroupProfiles = tabStore.activeGroupProfiles
         rootView.externalControlZoneView.apply(
-            profiles: orderedProfiles,
+            profiles: activeGroupProfiles,
             activeTabID: tabStore.activeTabID
         )
+        synchronizeBorderTheme()
         synchronizeDurableUnreadPresentation()
         synchronizeResidentIndicators()
 
@@ -7034,13 +7746,13 @@ final class PanelController: NSObject, NSWindowDelegate {
                 sourceHostController.companionContainer
             )
             rootView.removeFullscreenExitPlaceholder()
-            onSelectedSlotPresentationChange?(nil, nil)
+            notifySelectedSlotPresentationChange(title: nil, url: nil)
             return
         }
 
-        onSelectedSlotPresentationChange?(
-            activeProfile.name,
-            faviconURL(for: activeProfile)
+        notifySelectedSlotPresentationChange(
+            title: activeProfile.name,
+            url: faviconURL(for: activeProfile)
         )
 
         guard activeProfile.id != fullscreenProfile?.id else {
@@ -7100,26 +7812,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             webView = try webViewForPanelController(activeProfile)
         } catch {
             webFocusRouter.setCurrentWebView(nil)
-            if let profileName = Self.unsupportedBrowserProfileName(
-                for: activeProfile,
-                error: error,
-                browserProfiles: tabStore.browserProfiles
-            ) {
-                rootView.installFullscreenCompanionContainer(
-                    sourceHostController.companionContainer
-                )
-                sourceHostController.companionContainer.showUnsupportedBrowserProfile(
-                    profileName: profileName,
-                    defaultProfileName: tabStore.defaultBrowserProfilePresentation.name
-                )
-            } else {
-                rootView.installFullscreenCompanionContainer(
-                    sourceHostController.companionContainer
-                )
-                sourceHostController.companionContainer.showLoadFailure(
-                    retryEnabled: canRetrySelectedSlot(activeProfile)
-                )
-            }
+            rootView.installFullscreenCompanionContainer(
+                sourceHostController.companionContainer
+            )
+            sourceHostController.companionContainer.showLoadFailure(
+                retryEnabled: canRetrySelectedSlot(activeProfile)
+            )
             companionActiveProfile = nil
             synchronizeResidentIndicators()
             return
@@ -7191,6 +7889,468 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
         companionActiveProfile = nil
     }
+
+    // MARK: - Bookmarks & Groups Coordination
+
+    func bookmarkManagementClient() -> BookmarkManagementClient {
+        BookmarkManagementClient(
+            folders: { [weak self] in
+                self?.tabStore.orderedBookmarkFolders ?? []
+            },
+            bookmarks: { [weak self] in
+                self?.tabStore.orderedBookmarks ?? []
+            },
+            browserProfiles: { [weak self] in
+                guard let self else { return [.defaultProfile()] }
+                var options: [BrowserProfileMenuOption] = []
+                if !self.tabStore.isDefaultBrowserProfileDeleted || self.tabStore.browserProfiles.isEmpty {
+                    options.append(.defaultProfile(
+                        name: self.tabStore.defaultBrowserProfilePresentation.name,
+                        color: self.tabStore.defaultBrowserProfilePresentation.color
+                    ))
+                }
+                options.append(contentsOf: self.tabStore.browserProfiles.map { profile in
+                    BrowserProfileMenuOption(
+                        id: profile.id,
+                        name: profile.name,
+                        color: profile.color,
+                        isEnabled: true
+                    )
+                })
+                return options
+            },
+            createFolder: { [weak self] name, parentFolderID in
+                self?.tabStore.createBookmarkFolder(name: name, parentFolderID: parentFolderID)
+            },
+            renameFolder: { [weak self] id, name in
+                self?.tabStore.renameBookmarkFolder(id: id, name: name) ?? false
+            },
+            deleteFolder: { [weak self] id in
+                self?.tabStore.deleteBookmarkFolder(id: id) ?? false
+            },
+            addBookmark: { [weak self] title, url, folderID, notes, mode, profileID in
+                self?.tabStore.addBookmark(
+                    title: title,
+                    url: url,
+                    folderID: folderID,
+                    notes: notes,
+                    preferredWebsiteMode: mode,
+                    browserProfileID: profileID
+                )
+            },
+            updateBookmark: { [weak self] id, title, url, folderID, notes, mode, profileID in
+                self?.tabStore.updateBookmark(
+                    id: id,
+                    title: title,
+                    url: url,
+                    folderID: folderID,
+                    notes: notes,
+                    preferredWebsiteMode: mode,
+                    browserProfileID: profileID
+                ) ?? false
+            },
+            deleteBookmark: { [weak self] id in
+                self?.tabStore.deleteBookmark(id: id) ?? false
+            },
+            importHTML: { [weak self] html in
+                self?.tabStore.importBookmarksHTML(html) ?? (0, 0)
+            },
+            exportHTML: { [weak self] in
+                self?.tabStore.exportBookmarksHTML() ?? ""
+            },
+            openBookmarkAsTab: { [weak self] bookmark in
+                guard let self else { return }
+                var rendering = WebRenderingProfile.canonicalDefault
+                if let mode = bookmark.preferredWebsiteMode {
+                    rendering = rendering.settingWebsiteMode(mode)
+                }
+                let validProfileID = bookmark.browserProfileID.flatMap { id in
+                    self.tabStore.browserProfiles.contains(where: { $0.id == id }) ? id : nil
+                }
+                if self.tabStore.add(
+                    name: bookmark.title,
+                    homeURL: bookmark.url,
+                    homeURLSchemeWasInferred: false,
+                    renderingProfile: rendering,
+                    browserProfileID: validProfileID
+                ) != nil {
+                    self.presentFloatTabs()
+                }
+            }
+        )
+    }
+
+    private func presentGroupEditorSheet(editingGroupID: UUID?, isCreating: Bool) {
+        guard let modalHost = modalPresentationHostWindow(),
+              modalHost.attachedSheet == nil else {
+            return
+        }
+
+        let initialName: String
+        let initialTheme: PanelBorderTheme?
+        let initialCustomHex: String?
+        if isCreating {
+            initialName = ""
+            initialTheme = .rainbow
+            initialCustomHex = nil
+        } else if let editingGroupID,
+                  let existing = tabStore.groups.first(where: { $0.id == editingGroupID }) {
+            initialName = existing.name
+            initialTheme = existing.borderTheme
+            initialCustomHex = existing.customBorderColorHex
+        } else {
+            initialName = tabStore.defaultGroupPresentation.name
+            initialTheme = tabStore.defaultGroupPresentation.borderTheme
+            initialCustomHex = tabStore.defaultGroupPresentation.customBorderColorHex
+        }
+
+        let initialCustomColor = initialCustomHex
+            .flatMap(AppPreferencesStore.color(fromHex:))
+            ?? preferencesStore.customBorderColor
+
+        let alert = NSAlert()
+        alert.messageText = isCreating
+            ? L10n.tr("New Tab Group", "新建标签分组")
+            : L10n.tr("Edit Group & Border", "编辑分组与边框")
+        alert.addButton(
+            withTitle: isCreating
+                ? L10n.tr("Create Group", "创建分组")
+                : L10n.tr("Save Changes", "保存更改")
+        )
+        alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
+
+        let displayedInitialName = editingGroupID == nil && !isCreating
+            ? L10n.defaultDisplayName(initialName)
+            : initialName
+        let formHelper = GroupBorderEditorAccessoryHelper(
+            initialName: displayedInitialName,
+            initialTheme: initialTheme,
+            initialCustomColor: initialCustomColor
+        )
+        alert.accessoryView = formHelper.view
+
+        beginRailModalInteraction()
+        alert.beginSheetModal(for: modalHost) { [weak self] response in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.endRailModalInteraction()
+                // Keep formHelper alive throughout the modal lifetime.
+                let values = formHelper.currentValues()
+                guard response == .alertFirstButtonReturn else { return }
+
+                let rawTrimmedName = values.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmedName = (editingGroupID == nil && !isCreating && initialName == DefaultWebAppGroupPresentation.defaultName && rawTrimmedName == L10n.tr("Default", "默认"))
+                    ? DefaultWebAppGroupPresentation.defaultName
+                    : rawTrimmedName
+                guard !trimmedName.isEmpty else {
+                    NSSound.beep()
+                    return
+                }
+                let customHex = values.theme == .custom
+                    ? AppPreferencesStore.hex(from: values.customColor)
+                    : nil
+
+                let succeeded: Bool
+                if isCreating {
+                    succeeded = self.tabStore.createGroup(
+                        name: trimmedName,
+                        borderTheme: values.theme,
+                        customBorderColorHex: customHex,
+                        selectImmediately: true
+                    ) != nil
+                } else {
+                    succeeded = self.tabStore.updateGroup(
+                        id: editingGroupID,
+                        name: trimmedName,
+                        borderTheme: values.theme,
+                        customBorderColorHex: customHex
+                    )
+                }
+                if !succeeded {
+                    NSSound.beep()
+                }
+            }
+        }
+        if modalHost.attachedSheet == nil {
+            endRailModalInteraction()
+        }
+    }
+
+    private func presentDeleteGroupConfirmation(groupID: UUID) {
+        guard let modalHost = modalPresentationHostWindow(),
+              modalHost.attachedSheet == nil,
+              let group = tabStore.groups.first(where: { $0.id == groupID }) else {
+            return
+        }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = L10n.tr("Delete Group \"\(group.name)\"?", "删除分组“\(group.name)”？")
+        let defaultGroupName = L10n.defaultDisplayName(tabStore.defaultGroupPresentation.name)
+        alert.informativeText = L10n.tr(
+            "Tabs inside this group will be moved safely to \"\(defaultGroupName)\".",
+            "该分组中的标签页将安全移动到“\(defaultGroupName)”中，不会被删除。"
+        )
+        alert.addButton(withTitle: L10n.tr("Delete Group", "删除分组"))
+        alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
+        alert.buttons.first?.hasDestructiveAction = true
+
+        beginRailModalInteraction()
+        alert.beginSheetModal(for: modalHost) { [weak self] response in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.endRailModalInteraction()
+                guard response == .alertFirstButtonReturn else { return }
+                _ = self.tabStore.deleteGroup(id: groupID)
+            }
+        }
+        if modalHost.attachedSheet == nil {
+            endRailModalInteraction()
+        }
+    }
+
+    private func presentSaveToBookmarksSheet(slotID: UUID) {
+        guard let modalHost = modalPresentationHostWindow(),
+              modalHost.attachedSheet == nil,
+              let profile = tabStore.profiles.first(where: { $0.id == slotID }) else {
+            return
+        }
+
+        let currentURL = webViewPool.committedURL(for: slotID)
+            ?? profile.currentURL
+            ?? profile.homeURL
+        let alert = NSAlert()
+        alert.messageText = L10n.tr("Save to Bookmarks", "保存到书签")
+        alert.addButton(withTitle: L10n.tr("Save Bookmark", "保存书签"))
+        alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
+
+        let titleField = NSTextField(string: profile.name)
+        let urlField = NSTextField(string: currentURL.absoluteString)
+
+        let folders = tabStore.orderedBookmarkFolders
+        let folderPopup = NSPopUpButton()
+        folderPopup.addItem(withTitle: L10n.tr("General", "通用"))
+        folderPopup.lastItem?.representedObject = "general"
+        for folder in folders {
+            let displayPath = tabStore.bookmarkFolderDisplayPath(id: folder.id)
+            folderPopup.addItem(withTitle: displayPath.isEmpty ? folder.name : displayPath)
+            folderPopup.lastItem?.representedObject = folder.id.uuidString
+        }
+        folderPopup.addItem(withTitle: L10n.tr("New Folder…", "新建文件夹…"))
+        folderPopup.lastItem?.representedObject = "new_folder"
+
+        let newFolderField = NSTextField(string: "")
+        newFolderField.placeholderString = L10n.tr(
+            "New folder name (when creating folder)",
+            "新文件夹名称（选择新建文件夹时填写）"
+        )
+
+        let modePopup = NSPopUpButton()
+        modePopup.addItem(withTitle: L10n.tr("Follow Default Website Mode", "跟随默认网站模式"))
+        modePopup.lastItem?.representedObject = NSNull()
+        for mode in WebsiteMode.allCases {
+            modePopup.addItem(withTitle: mode.displayName)
+            modePopup.lastItem?.representedObject = mode.rawValue
+        }
+        if let modeIndex = WebsiteMode.allCases.firstIndex(of: profile.renderingProfile.websiteMode) {
+            modePopup.selectItem(at: modeIndex + 1)
+        }
+
+        let notesField = NSTextField(string: "")
+        notesField.placeholderString = L10n.tr("Optional notes", "备注（可选）")
+
+        let label: (String) -> NSTextField = { text in
+            let field = NSTextField(labelWithString: text)
+            field.font = .systemFont(ofSize: 12, weight: .medium)
+            return field
+        }
+        let stack = NSStackView(views: [
+            label(L10n.tr("Title", "标题")),
+            titleField,
+            label(L10n.tr("URL", "网址")),
+            urlField,
+            label(L10n.tr("Folder", "文件夹")),
+            folderPopup,
+            newFolderField,
+            label(L10n.tr("Preferred Website Mode", "默认网站模式")),
+            modePopup,
+            label(L10n.tr("Notes", "备注")),
+            notesField,
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        for control in [titleField, urlField, folderPopup, newFolderField, modePopup, notesField] {
+            control.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        }
+        stack.setFrameSize(NSSize(width: 360, height: 1))
+        stack.layoutSubtreeIfNeeded()
+        stack.setFrameSize(NSSize(width: 360, height: ceil(stack.fittingSize.height)))
+        alert.accessoryView = stack
+
+        beginRailModalInteraction()
+        alert.beginSheetModal(for: modalHost) { [weak self] response in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.endRailModalInteraction()
+                guard response == .alertFirstButtonReturn else { return }
+                let rawURL = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let normalized = WebAppURL.normalizedEntry(from: rawURL) else {
+                    NSSound.beep()
+                    return
+                }
+                var targetFolderID: UUID?
+                let token = folderPopup.selectedItem?.representedObject as? String
+                if token == "new_folder" {
+                    let folderName = newFolderField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !folderName.isEmpty,
+                          let createdFolder = self.tabStore.createBookmarkFolder(name: folderName) else {
+                        NSSound.beep()
+                        return
+                    }
+                    targetFolderID = createdFolder.id
+                } else if let token, let uuid = UUID(uuidString: token) {
+                    targetFolderID = uuid
+                }
+
+                let preferredMode = (modePopup.selectedItem?.representedObject as? String)
+                    .flatMap(WebsiteMode.init(rawValue:))
+                let title = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                let resolvedTitle = title.isEmpty
+                    ? WebAppURL.defaultDisplayName(for: normalized.url)
+                    : title
+                let notes = notesField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                _ = self.tabStore.addBookmark(
+                    title: resolvedTitle,
+                    url: normalized.url,
+                    folderID: targetFolderID,
+                    notes: notes.isEmpty ? nil : notes,
+                    preferredWebsiteMode: preferredMode,
+                    browserProfileID: profile.browserProfileID
+                )
+            }
+        }
+        if modalHost.attachedSheet == nil {
+            endRailModalInteraction()
+        }
+    }
+}
+
+@MainActor
+private final class GroupBorderEditorAccessoryHelper: NSObject {
+    let view: NSView
+    private let nameField: NSTextField
+    private let overrideCheckbox: NSButton
+    private let customColorWell: NSColorWell
+    private var swatchButtons: [BorderThemeSwatchButton] = []
+    private var selectedTheme: PanelBorderTheme?
+    private var customColor: NSColor
+
+    init(
+        initialName: String,
+        initialTheme: PanelBorderTheme?,
+        initialCustomColor: NSColor
+    ) {
+        self.nameField = NSTextField(string: initialName)
+        self.overrideCheckbox = NSButton(
+            checkboxWithTitle: L10n.tr("Custom Border Color for This Group", "为此分组单独指定边框颜色"),
+            target: nil,
+            action: nil
+        )
+        self.customColorWell = NSColorWell()
+        self.selectedTheme = initialTheme
+        self.customColor = initialCustomColor
+        self.view = NSView(frame: .zero)
+        super.init()
+
+        nameField.placeholderString = L10n.tr("Work, Research, Media…", "例如：工作、科研、媒体…")
+        nameField.widthAnchor.constraint(equalToConstant: 380).isActive = true
+
+        overrideCheckbox.state = initialTheme != nil ? .on : .off
+        overrideCheckbox.target = self
+        overrideCheckbox.action = #selector(overrideToggled(_:))
+
+        customColorWell.color = initialCustomColor
+        customColorWell.target = self
+        customColorWell.action = #selector(customColorChanged(_:))
+        customColorWell.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        customColorWell.heightAnchor.constraint(equalToConstant: 24).isActive = true
+
+        let row1 = NSStackView()
+        let row2 = NSStackView()
+        for row in [row1, row2] {
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 8
+        }
+        let allThemes = PanelBorderTheme.allCases
+        for (index, theme) in allThemes.enumerated() {
+            let button = BorderThemeSwatchButton(theme: theme, customColor: initialCustomColor)
+            button.target = self
+            button.action = #selector(swatchClicked(_:))
+            swatchButtons.append(button)
+            if index < 5 {
+                row1.addArrangedSubview(button)
+            } else {
+                row2.addArrangedSubview(button)
+            }
+        }
+        row2.addArrangedSubview(customColorWell)
+
+        let titleLabel = NSTextField(labelWithString: L10n.tr("Group Name", "分组名称"))
+        titleLabel.font = .systemFont(ofSize: 12, weight: .medium)
+
+        let stack = NSStackView(views: [titleLabel, nameField, overrideCheckbox, row1, row2])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: view.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        view.setFrameSize(NSSize(width: 380, height: 1))
+        view.layoutSubtreeIfNeeded()
+        view.setFrameSize(NSSize(width: 380, height: ceil(stack.fittingSize.height)))
+        refreshSelectionUI()
+    }
+
+    func currentValues() -> (name: String, theme: PanelBorderTheme?, customColor: NSColor) {
+        let theme = overrideCheckbox.state == .on ? (selectedTheme ?? .rainbow) : nil
+        return (nameField.stringValue, theme, customColorWell.color)
+    }
+
+    @objc private func overrideToggled(_ sender: NSButton) {
+        if sender.state == .on, selectedTheme == nil {
+            selectedTheme = .rainbow
+        }
+        refreshSelectionUI()
+    }
+
+    @objc private func swatchClicked(_ sender: BorderThemeSwatchButton) {
+        selectedTheme = sender.theme
+        overrideCheckbox.state = .on
+        refreshSelectionUI()
+    }
+
+    @objc private func customColorChanged(_ sender: NSColorWell) {
+        customColor = sender.color
+        selectedTheme = .custom
+        overrideCheckbox.state = .on
+        refreshSelectionUI()
+    }
+
+    private func refreshSelectionUI() {
+        let activeTheme = overrideCheckbox.state == .on ? (selectedTheme ?? .rainbow) : nil
+        for button in swatchButtons {
+            button.customColor = customColor
+            button.isThemeSelected = button.theme == activeTheme
+            button.alphaValue = overrideCheckbox.state == .on ? 1.0 : 0.45
+        }
+        customColorWell.isEnabled = overrideCheckbox.state == .on && activeTheme == .custom
+    }
 }
 
 @MainActor
@@ -7203,8 +8363,8 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
 
     let field = NSTextField()
     private let copyButton = NSButton()
-    private let setHomeButton = NSButton(title: "Set Home", target: nil, action: nil)
-    private let createButton = NSButton(title: "New App", target: nil, action: nil)
+    private let setHomeButton = NSButton(title: L10n.tr("Set Home", "设为主页"), target: nil, action: nil)
+    private let createButton = NSButton(title: L10n.tr("New App", "新建应用"), target: nil, action: nil)
     private var copyFeedbackWorkItem: DispatchWorkItem?
     private(set) var isPresented = false
 
@@ -7223,30 +8383,24 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
         field.focusRingType = .none
         field.delegate = self
 
-        copyButton.image = NSImage(
-            systemSymbolName: "doc.on.doc",
-            accessibilityDescription: "Copy URL"
-        )
-        copyButton.toolTip = "Copy URL"
         copyButton.bezelStyle = .inline
         copyButton.isBordered = false
         copyButton.translatesAutoresizingMaskIntoConstraints = false
         copyButton.target = self
         copyButton.action = #selector(copyPressed(_:))
 
-        setHomeButton.toolTip = "Set the current page as this Tab's Home"
         setHomeButton.bezelStyle = .rounded
         setHomeButton.controlSize = .small
         setHomeButton.translatesAutoresizingMaskIntoConstraints = false
         setHomeButton.target = self
         setHomeButton.action = #selector(setHomePressed(_:))
 
-        createButton.toolTip = "Create a new Web App from the current page"
         createButton.bezelStyle = .rounded
         createButton.controlSize = .small
         createButton.translatesAutoresizingMaskIntoConstraints = false
         createButton.target = self
         createButton.action = #selector(createPressed(_:))
+        refreshLocalization()
 
         addSubview(field)
         addSubview(copyButton)
@@ -7326,12 +8480,27 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
         return false
     }
 
+    func refreshLocalization() {
+        setHomeButton.title = L10n.tr("Set Home", "设为主页")
+        setHomeButton.toolTip = L10n.tr(
+            "Set the current page as this Tab's Home",
+            "将当前页面设为此标签页的主页"
+        )
+        createButton.title = L10n.tr("New App", "新建应用")
+        createButton.toolTip = L10n.tr(
+            "Create a new Web App from the current page",
+            "根据当前页面创建一个新的网页应用"
+        )
+        copyButton.toolTip = L10n.tr("Copy URL", "复制网址")
+        restoreCopyIcon()
+    }
+
     @objc private func copyPressed(_ sender: NSButton) {
         guard onCopy?(field.stringValue) == true else { return }
         copyFeedbackWorkItem?.cancel()
         copyButton.image = NSImage(
             systemSymbolName: "checkmark",
-            accessibilityDescription: "Copied"
+            accessibilityDescription: L10n.tr("Copied", "已复制")
         )
         let workItem = DispatchWorkItem { [weak self] in
             self?.restoreCopyIcon()
@@ -7351,7 +8520,7 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
     private func restoreCopyIcon() {
         copyButton.image = NSImage(
             systemSymbolName: "doc.on.doc",
-            accessibilityDescription: "Copy URL"
+            accessibilityDescription: L10n.tr("Copy URL", "复制网址")
         )
     }
 }
@@ -7398,7 +8567,7 @@ final class StatusHUDView: NSView {
     }
 
     func show(residency: SlotResidencyPolicy) {
-        show(message: "Mode: \(residency.displayName)")
+        show(message: L10n.tr("Mode: \(residency.displayName)", "模式：\(residency.displayName)"))
     }
 
     func show(message: String) {

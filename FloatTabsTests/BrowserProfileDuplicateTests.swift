@@ -32,17 +32,16 @@ final class BrowserProfileDuplicateTests: XCTestCase {
         let menu = try XCTUnwrap(tab.menu(for: makeMenuEvent()))
         let profile = try XCTUnwrap(menu.item(withTitle: "Profile"))
         let duplicate = try XCTUnwrap(
-            menu.item(withTitle: "Open in New Tab with Profile")
+            profile.submenu?.item(withTitle: "Open in New Tab with Profile")
         )
         let duplicateMenu = try XCTUnwrap(duplicate.submenu)
 
         XCTAssertEqual(
             menu.items.filter { !$0.isSeparatorItem }.map(\.title),
             [
-                "Return to Home", "Reload", "Lock Current Icon", "Unlock Icon",
-                "Refresh & Choose Icon", "Shared by tabs on this website",
+                "Return to Home", "Reload", "Save to Bookmarks…",
                 "Website Mode", "Window Size", "Zoom", "Profile",
-                "Open in New Tab with Profile", "Runtime Retention", "Background Media",
+                "Runtime Retention", "Background Media",
                 "Edit Web App…", "Remove Web App…",
             ]
         )
@@ -78,7 +77,8 @@ final class BrowserProfileDuplicateTests: XCTestCase {
 
         var menu = try XCTUnwrap(tab.menu(for: makeMenuEvent()))
         var items = try XCTUnwrap(
-            menu.item(withTitle: "Open in New Tab with Profile")?.submenu?.items
+            menu.item(withTitle: "Profile")?.submenu?
+                .item(withTitle: "Open in New Tab with Profile")?.submenu?.items
         )
         XCTAssertTrue(items[0].isEnabled)
         XCTAssertFalse(items[1].isEnabled)
@@ -86,7 +86,8 @@ final class BrowserProfileDuplicateTests: XCTestCase {
         tab.setBrowserProfileDuplicationEnabled(false)
         menu = try XCTUnwrap(tab.menu(for: makeMenuEvent()))
         items = try XCTUnwrap(
-            menu.item(withTitle: "Open in New Tab with Profile")?.submenu?.items
+            menu.item(withTitle: "Profile")?.submenu?
+                .item(withTitle: "Open in New Tab with Profile")?.submenu?.items
         )
         XCTAssertFalse(items[0].isEnabled)
         XCTAssertFalse(items[1].isEnabled)
@@ -95,8 +96,7 @@ final class BrowserProfileDuplicateTests: XCTestCase {
             PanelController.canRequestOpenInNewTabWithBrowserProfile(
                 sourceExists: true,
                 targetProfileID: companyID,
-                targetExists: true,
-                customProfilesSupported: false,
+                targetExists: false,
                 sessionIsLocked: false
             )
         )
@@ -105,7 +105,6 @@ final class BrowserProfileDuplicateTests: XCTestCase {
                 sourceExists: true,
                 targetProfileID: nil,
                 targetExists: true,
-                customProfilesSupported: false,
                 sessionIsLocked: true
             )
         )
@@ -114,7 +113,6 @@ final class BrowserProfileDuplicateTests: XCTestCase {
                 sourceExists: true,
                 targetProfileID: nil,
                 targetExists: true,
-                customProfilesSupported: false,
                 sessionIsLocked: false
             )
         )
@@ -480,7 +478,6 @@ final class BrowserProfileDuplicateTests: XCTestCase {
     }
 
     private func makePool(
-        customProfilesSupported: Bool = true,
         defaultStoreResolver: @escaping () -> WKWebsiteDataStore = {
             WKWebsiteDataStore.nonPersistent()
         },
@@ -490,7 +487,6 @@ final class BrowserProfileDuplicateTests: XCTestCase {
         initialLoad: @escaping WebViewPool.LoadHandler = { _, _ in }
     ) -> WebViewPool {
         let provider = BrowserProfileDataStoreProvider(
-            isCustomProfileSupported: { customProfilesSupported },
             defaultStoreResolver: defaultStoreResolver,
             customStoreResolver: customStoreResolver
         )

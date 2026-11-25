@@ -8,6 +8,10 @@ final class AppCoordinator {
     typealias WebsiteCacheClock = @MainActor () -> Date
     typealias WebsiteCacheSleeper = @MainActor (TimeInterval) async throws -> Void
 
+    private static var isRunningUnderXCTest: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+
     private static let websiteCacheLogger = Logger(
         subsystem: "com.lost0rz.FloatTabs",
         category: "WebsiteCache"
@@ -55,6 +59,7 @@ final class AppCoordinator {
     private var pendingExternalSlotDelta = 0
     private var externalSlotBatchTrace: RuntimeDiagnosticTrace?
     private var externalSlotFlushScheduled = false
+    nonisolated(unsafe) private var appLanguageObserver: NSObjectProtocol?
     private var isTerminating = false
     private var preserveExistingAutomaticBackupAfterEmptyStartupRecovery = false
 #if DEBUG
@@ -89,6 +94,20 @@ final class AppCoordinator {
         // builds any windows/views so a saved Dark choice cannot be cached as
         // Aqua white until the next appearance transition.
         resolvedPreferencesStore.applyStoredAppearance()
+        if !Self.isRunningUnderXCTest {
+            resolvedPreferencesStore.applyStoredLanguage(postNotification: false)
+        }
+        appLanguageObserver = NotificationCenter.default.addObserver(
+            forName: .floatTabsAppLanguageDidChange,
+            object: resolvedPreferencesStore,
+            queue: .main
+        ) { [weak resolvedPreferencesStore] _ in
+            Task { @MainActor [weak resolvedPreferencesStore] in
+                guard !Self.isRunningUnderXCTest,
+                      let resolvedPreferencesStore else { return }
+                AppLocalization.apply(resolvedPreferencesStore.appLanguage)
+            }
+        }
         self.preferencesStore = resolvedPreferencesStore
         self.diagnostics = diagnostics
         self.diagnosticExporter = RuntimeDiagnosticExporter(diagnostics: diagnostics)
@@ -108,7 +127,11 @@ final class AppCoordinator {
         } else {
             let profileRepository = ProfileRepository()
             self.profileRepository = profileRepository
-            let tabStore = TabStore(repository: profileRepository, diagnostics: diagnostics)
+            let tabStore = TabStore(
+                repository: profileRepository,
+                diagnostics: diagnostics,
+                runtimePersistenceDebounceInterval: Self.isRunningUnderXCTest ? 0 : 0.35
+            )
             tabStore.onPersistenceFailure = {
                 Self.presentConfigurationSaveFailure()
             }
@@ -167,7 +190,24 @@ final class AppCoordinator {
                 assistantPreview: assistantPreview
             )
         }
+        panelController.onUniversalNotificationRequested = { [weak completionNotificationCoordinator] slotID, displayName, preview, fallbackBody in
+            completionNotificationCoordinator?.notify(
+                slotID: slotID,
+                displayName: displayName,
+                assistantPreview: preview,
+                fallbackBody: fallbackBody
+            )
+        }
+        panelController.onUnreadSlotAcknowledged = { [weak completionNotificationCoordinator] slotID in
+            completionNotificationCoordinator?.withdrawNotification(for: slotID)
+        }
         resolveStartupConfigurationRecoveryIfNeeded()
+        resolveStartupBookmarksRecoveryIfNeeded()
+        if profileRepository != nil {
+            WebsiteFaviconProvider.shared.pruneOrphanSlotIcons(
+                keeping: panelController.configuredSlotIDs
+            )
+        }
 
         let websiteCacheCoordinator = panelController.websiteCacheCleanupCoordinator(
             preferencesStore: preferencesStore,
@@ -175,13 +215,9 @@ final class AppCoordinator {
         )
         websiteCacheCleanupCoordinator = websiteCacheCoordinator
 
-#if DEBUG
-        let captureIncidentHandler: RuntimeDiagnosticsIncidentCaptureHandler? = { [weak self] in
+        let captureIncidentHandler: RuntimeDiagnosticsIncidentCaptureHandler = { [weak self] in
             self?.panelController.captureStuckTabSnapshot() ?? "Snapshot unavailable."
         }
-#else
-        let captureIncidentHandler: RuntimeDiagnosticsIncidentCaptureHandler? = nil
-#endif
 
         globalSettingsController = GlobalSettingsController(
             preferencesStore: preferencesStore,
@@ -199,6 +235,7 @@ final class AppCoordinator {
                 usageStore: websiteCacheUsageStore
             ),
             websiteCacheManager: websiteCacheCoordinator.client,
+            bookmarkManager: panelController.bookmarkManagementClient(),
             onExportDiagnostics: { [weak self] url, completion in
                 self?.diagnosticExporter.exportRecent(to: url, completion: completion)
                     ?? completion(.failure(.writerUnavailable))
@@ -206,7 +243,20 @@ final class AppCoordinator {
             onOpenDiagnosticsLogs: {
                 Self.openDiagnosticsLogsFolder()
             },
-            onCaptureDiagnosticsIncident: captureIncidentHandler
+            onCaptureDiagnosticsIncident: captureIncidentHandler,
+            onProvideDiagnosticsLiveStatus: { [weak self] in
+                guard let self else { return nil }
+                return self.panelController.diagnosticsLiveStatusSnapshot(
+                    sessionSummary: self.diagnostics.sessionSummary()
+                )
+            },
+            onLoadRecentDiagnosticsEvents: { [weak self] limit, completion in
+                guard let self else {
+                    completion([])
+                    return
+                }
+                self.diagnostics.loadRecentCombinedEvents(limit: limit, completion: completion)
+            }
         )
         let observationCoordinator = LongTermPerformanceObservationCoordinator(
             preferencesStore: preferencesStore,
@@ -232,6 +282,12 @@ final class AppCoordinator {
         panelController.onOpenGlobalSettings = { [weak self] in
             self?.showGlobalSettings()
         }
+        panelController.onOpenBookmarksSettings = { [weak self] in
+            self?.showGlobalSettings(selecting: .bookmarks)
+        }
+        panelController.onTabStoreDidChange = { [weak self] in
+            self?.globalSettingsController?.refreshBookmarksIfLoaded()
+        }
 
         statusItemController = StatusItemController(
             onToggle: { [weak self] in self?.toggleFloatTabs() },
@@ -247,6 +303,16 @@ final class AppCoordinator {
             onSettings: { [weak self] in self?.showGlobalSettings() },
             onQuit: { NSApp.terminate(nil) },
             preferencesStore: preferencesStore,
+            menuSnapshotProvider: { [weak self] in
+                self?.panelController.statusItemMenuSnapshot
+                    ?? StatusItemMenuSnapshot(slots: [], isPinned: false)
+            },
+            onSelectSlot: { [weak self] slotID in
+                _ = self?.panelController.selectAndPresentSlotFromMenuBar(slotID)
+            },
+            onTogglePin: { [weak self] in
+                self?.panelController.handle(.togglePin)
+            },
             diagnostics: diagnostics,
             onToggleWithTrace: { [weak self] trace in
                 self?.panelController.toggleFloatTabs(
@@ -302,6 +368,9 @@ final class AppCoordinator {
         appCommandController = AppCommandController(
             isEnabled: { [weak self] in
                 self?.panelController.acceptsAppCommands ?? false
+            },
+            presentedAddressOverlayProvider: { [weak self] in
+                self?.panelController.presentedAddressOverlay
             },
             onCommand: { [weak self] command in
                 guard let self else { return }
@@ -552,19 +621,27 @@ final class AppCoordinator {
         }
 
         panelController.prepareForExplicitActivation()
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
 
         while profileRepository.startupRecoveryRequired {
             let latest = backupService.latestValidAutomaticSnapshot()
             let alert = NSAlert()
             alert.alertStyle = .critical
-            alert.messageText = "FloatTabs Couldn’t Read Its Configuration"
-            alert.informativeText = "The existing WebAppProfiles.json will not be overwritten until FloatTabs preserves an exact recovery copy. Restore a known-good backup, choose another backup file, or explicitly start with an empty configuration."
+            alert.messageText = L10n.tr(
+                "FloatTabs Couldn’t Read Its Configuration",
+                "FloatTabs 无法读取配置文件"
+            )
+            alert.informativeText = L10n.tr(
+                "The existing WebAppProfiles.json will not be overwritten until FloatTabs preserves an exact recovery copy. Restore a known-good backup, choose another backup file, or explicitly start with an empty configuration.",
+                "在完整保留恢复副本之前，现有的 WebAppProfiles.json 不会被覆盖。你可以恢复已知正常的备份、选择其他备份文件，或显式以空白配置启动。"
+            )
 
-            let restoreLatestButton = alert.addButton(withTitle: "Restore Latest Backup")
+            let restoreLatestButton = alert.addButton(
+                withTitle: L10n.tr("Restore Latest Backup", "恢复最新备份")
+            )
             restoreLatestButton.isEnabled = latest != nil
-            alert.addButton(withTitle: "Choose Backup…")
-            alert.addButton(withTitle: "Start Empty")
+            alert.addButton(withTitle: L10n.tr("Choose Backup…", "选择备份…"))
+            alert.addButton(withTitle: L10n.tr("Start Empty", "以空白启动"))
 
             do {
                 switch alert.runModal() {
@@ -591,8 +668,8 @@ final class AppCoordinator {
 
     private func chooseStartupBackupURL() -> URL? {
         let panel = NSOpenPanel()
-        panel.title = "Choose FloatTabs Backup"
-        panel.prompt = "Restore"
+        panel.title = L10n.tr("Choose FloatTabs Backup", "选择 FloatTabs 备份")
+        panel.prompt = L10n.tr("Restore", "恢复")
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
@@ -622,7 +699,8 @@ final class AppCoordinator {
             throw FloatTabsBackupError.startupRecoveryFailed
         }
         try profileRepository.performStartupRecoveryReplacement {
-            guard panelController.restoreStoredWebAppState(.empty) else {
+            let emptyState = profileRepository.emptyCoreStatePreservingSidecarBookmarks()
+            guard panelController.restoreStoredWebAppState(emptyState) else {
                 throw FloatTabsBackupError.startupRecoveryFailed
             }
         }
@@ -643,20 +721,84 @@ final class AppCoordinator {
         }
     }
 
+    deinit {
+        if let appLanguageObserver {
+            NotificationCenter.default.removeObserver(appLanguageObserver)
+        }
+    }
+
+    private func resolveStartupBookmarksRecoveryIfNeeded() {
+        guard !Self.isRunningUnderXCTest,
+              let profileRepository,
+              profileRepository.bookmarksRecoveryRequired else {
+            return
+        }
+
+        panelController.prepareForExplicitActivation()
+        NSApp.activate()
+
+        while profileRepository.bookmarksRecoveryRequired {
+            let latest = backupService.latestValidAutomaticSnapshot()
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = L10n.tr(
+                "FloatTabs Couldn’t Read Bookmarks.json",
+                "FloatTabs 无法读取书签文件 Bookmarks.json"
+            )
+            alert.informativeText = L10n.tr(
+                "A recovery copy of the unreadable Bookmarks.json was preserved and the original file has not been overwritten. Restore a backup to recover your bookmarks, or explicitly continue with an empty bookmark list.",
+                "FloatTabs 已保留无法读取的 Bookmarks.json 恢复副本，且尚未覆盖原文件。你可以从备份恢复书签，或显式以空白书签列表继续。"
+            )
+
+            let restoreLatestButton = alert.addButton(
+                withTitle: L10n.tr("Restore Latest Backup", "恢复最新备份")
+            )
+            restoreLatestButton.isEnabled = latest != nil
+            alert.addButton(withTitle: L10n.tr("Choose Backup…", "选择备份…"))
+            alert.addButton(withTitle: L10n.tr("Continue with Empty Bookmarks", "以空白书签继续"))
+
+            do {
+                switch alert.runModal() {
+                case .alertFirstButtonReturn:
+                    guard let latest else { continue }
+                    try applyBackupDocument(latest.document)
+
+                case .alertSecondButtonReturn:
+                    guard let selectedURL = chooseStartupBackupURL() else { continue }
+                    let document = try backupService.load(from: selectedURL)
+                    try applyBackupDocument(document)
+
+                case .alertThirdButtonReturn:
+                    try profileRepository.acceptEmptyBookmarksAfterRecovery()
+                    preserveExistingAutomaticBackupAfterEmptyStartupRecovery = true
+
+                default:
+                    continue
+                }
+            } catch {
+                presentStartupRecoveryFailure(error)
+            }
+        }
+    }
+
     private func presentStartupRecoveryFailure(_ error: Error) {
         let alert = NSAlert(error: error)
         alert.alertStyle = .critical
-        alert.messageText = "Recovery Was Not Completed"
-        alert.informativeText = "FloatTabs has kept the unreadable configuration protected and has not written an automatic empty backup. Choose another recovery option to continue.\n\n\(error.localizedDescription)"
+        alert.messageText = L10n.tr("Recovery Was Not Completed", "未能完成恢复")
+        alert.informativeText = L10n.tr(
+            "FloatTabs has kept the unreadable configuration protected and has not written an automatic empty backup. Choose another recovery option to continue.\n\n\(error.localizedDescription)",
+            "FloatTabs 已保护无法读取的配置文件，并未写入自动空白备份。请选择其他恢复方式以继续。\n\n\(error.localizedDescription)"
+        )
         alert.runModal()
     }
 
     nonisolated static func shouldWriteAutomaticVersionSnapshot(
         startupRecoveryRequired: Bool,
+        bookmarksRecoveryRequired: Bool = false,
         preserveExistingAutomaticBackupAfterEmptyStartupRecovery: Bool,
         webAppState: StoredWebAppState
     ) -> Bool {
-        guard !startupRecoveryRequired else { return false }
+        guard !startupRecoveryRequired, !bookmarksRecoveryRequired else { return false }
         if preserveExistingAutomaticBackupAfterEmptyStartupRecovery,
            webAppState.profiles.isEmpty {
             return false
@@ -668,6 +810,7 @@ final class AppCoordinator {
         let webAppState = panelController.storedWebAppStateSnapshot()
         guard Self.shouldWriteAutomaticVersionSnapshot(
             startupRecoveryRequired: profileRepository?.startupRecoveryRequired == true,
+            bookmarksRecoveryRequired: profileRepository?.bookmarksRecoveryRequired == true,
             preserveExistingAutomaticBackupAfterEmptyStartupRecovery:
                 preserveExistingAutomaticBackupAfterEmptyStartupRecovery,
             webAppState: webAppState
@@ -685,6 +828,16 @@ final class AppCoordinator {
                 carbonModifiers: $0.carbonModifiers
             )
         }
+        let allShortcutNames: [KeyboardShortcuts.Name] = [.toggleFloatTabs] + AppShortcutCatalog.allNames
+        let appShortcuts = allShortcutNames.map { name in
+            let assigned = KeyboardShortcuts.getShortcut(for: name).map {
+                FloatTabsBackupShortcut(
+                    carbonKeyCode: $0.carbonKeyCode,
+                    carbonModifiers: $0.carbonModifiers
+                )
+            }
+            return FloatTabsNamedBackupShortcut(name: name.rawValue, shortcut: assigned)
+        }
         let appVersion = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
         ) as? String ?? "unknown"
@@ -700,6 +853,7 @@ final class AppCoordinator {
             webAppState: panelController.storedWebAppStateSnapshot(),
             globalPreferences: FloatTabsBackupPreferences(
                 appearanceMode: preferencesStore.appearanceMode,
+                appLanguage: preferencesStore.appLanguage,
                 followPreferredSize: preferencesStore.followPreferredSize,
                 borderTheme: preferencesStore.borderTheme,
                 customBorderColorHex: preferencesStore.customBorderColorHex,
@@ -707,11 +861,16 @@ final class AppCoordinator {
                 fixedViewportHeight: Double(preferencesStore.fixedViewportSize.height),
                 isTabRailCollapsed: preferencesStore.isTabRailCollapsed,
                 menuBarDisplayMode: preferencesStore.menuBarDisplayMode,
+                attentionStyle: preferencesStore.attentionStyle,
+                attentionPalette: preferencesStore.attentionPalette,
                 attentionSoundEnabled: preferencesStore.attentionSoundEnabled,
                 attentionSoundName: preferencesStore.attentionSoundName,
-                attentionSoundVolume: preferencesStore.attentionSoundVolume
+                attentionSoundVolume: preferencesStore.attentionSoundVolume,
+                externalCommandsEnabled: preferencesStore.externalCommandsEnabled
             ),
-            globalShowHideShortcut: shortcutBackup
+            globalShowHideShortcut: shortcutBackup,
+            appShortcuts: appShortcuts,
+            websiteCachePolicy: preferencesStore.websiteCachePolicy
         )
     }
 
@@ -727,17 +886,28 @@ final class AppCoordinator {
     }
 
     private func applyBackupDocument(_ imported: FloatTabsBackupDocument) throws {
+        try profileRepository?.allowBookmarksReplacementAfterBackupRestore()
         guard panelController.restoreStoredWebAppState(imported.webAppState) else {
             throw FloatTabsBackupError.restoreFailed
         }
 
         preferencesStore.followPreferredSize = imported.globalPreferences.followPreferredSize
         preferencesStore.appearanceMode = imported.globalPreferences.appearanceMode
+        if let appLanguage = imported.globalPreferences.appLanguage {
+            preferencesStore.appLanguage = appLanguage
+            if !Self.isRunningUnderXCTest {
+                AppLocalization.apply(appLanguage)
+            }
+        }
         preferencesStore.customBorderColorHex = imported.globalPreferences.customBorderColorHex
             ?? AppPreferencesStore.defaultCustomBorderColorHex
         preferencesStore.borderTheme = imported.globalPreferences.borderTheme ?? .rainbow
         preferencesStore.menuBarDisplayMode =
             imported.globalPreferences.resolvedMenuBarDisplayMode
+        preferencesStore.attentionStyle =
+            imported.globalPreferences.resolvedAttentionStyle
+        preferencesStore.attentionPalette =
+            imported.globalPreferences.resolvedAttentionPalette
         Self.restoreAttentionSoundPreferences(
             imported.globalPreferences,
             to: preferencesStore
@@ -750,14 +920,50 @@ final class AppCoordinator {
             preferencesStore.isTabRailCollapsed = isTabRailCollapsed
             panelController.applyRestoredRailCollapse(isTabRailCollapsed)
         }
-
-        let shortcut = imported.globalShowHideShortcut.map {
-            KeyboardShortcuts.Shortcut(
-                carbonKeyCode: $0.carbonKeyCode,
-                carbonModifiers: $0.carbonModifiers
-            )
+        preferencesStore.externalCommandsEnabled =
+            imported.globalPreferences.resolvedExternalCommandsEnabled
+        if let websiteCachePolicy = imported.websiteCachePolicy {
+            preferencesStore.websiteCachePolicy = websiteCachePolicy
+            websiteCacheCleanupCoordinator?.onPolicyChanged?()
         }
-        KeyboardShortcuts.setShortcut(shortcut, for: .toggleFloatTabs)
+
+        if let backedUpShortcuts = imported.appShortcuts {
+            let namesByRawValue = Dictionary(
+                uniqueKeysWithValues: ([KeyboardShortcuts.Name.toggleFloatTabs] + AppShortcutCatalog.allNames)
+                    .map { ($0.rawValue, $0) }
+            )
+            var restoredToggle = false
+            for entry in backedUpShortcuts {
+                guard let name = namesByRawValue[entry.name] else { continue }
+                let restored = entry.shortcut.map {
+                    KeyboardShortcuts.Shortcut(
+                        carbonKeyCode: $0.carbonKeyCode,
+                        carbonModifiers: $0.carbonModifiers
+                    )
+                }
+                KeyboardShortcuts.setShortcut(restored, for: name)
+                if name == .toggleFloatTabs {
+                    restoredToggle = true
+                }
+            }
+            if !restoredToggle {
+                let fallback = imported.globalShowHideShortcut.map {
+                    KeyboardShortcuts.Shortcut(
+                        carbonKeyCode: $0.carbonKeyCode,
+                        carbonModifiers: $0.carbonModifiers
+                    )
+                }
+                KeyboardShortcuts.setShortcut(fallback, for: .toggleFloatTabs)
+            }
+        } else {
+            let shortcut = imported.globalShowHideShortcut.map {
+                KeyboardShortcuts.Shortcut(
+                    carbonKeyCode: $0.carbonKeyCode,
+                    carbonModifiers: $0.carbonModifiers
+                )
+            }
+            KeyboardShortcuts.setShortcut(shortcut, for: .toggleFloatTabs)
+        }
     }
 
     static func restoreAttentionSoundPreferences(
@@ -776,9 +982,9 @@ final class AppCoordinator {
         preferencesStore.attentionSoundSourceKind = .system
     }
 
-    private func showGlobalSettings() {
+    private func showGlobalSettings(selecting page: GlobalSettingsPage? = nil) {
         panelController.prepareForExplicitActivation()
-        globalSettingsController?.show()
+        globalSettingsController?.show(selecting: page)
     }
 
     private func toggleFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
@@ -841,6 +1047,15 @@ final class AppCoordinator {
         _ command: FloatTabsExternalCommand,
         userInfo: [AnyHashable: Any]?
     ) {
+        guard preferencesStore.externalCommandsEnabled else {
+            diagnostics.record(
+                event: "external.command.ignored_disabled",
+                level: .info,
+                subsystem: "external",
+                fields: ["command": .string(command.rawValue)]
+            )
+            return
+        }
         let trace = diagnostics.beginTrace(root: "external.command")
         diagnostics.record(
             event: "external.command.received",
@@ -967,9 +1182,12 @@ final class AppCoordinator {
     private static func presentConfigurationSaveFailure() {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Couldn’t Save Changes"
-        alert.informativeText = "FloatTabs couldn’t save its configuration. Your previous settings were kept."
-        alert.addButton(withTitle: "OK")
+        alert.messageText = L10n.tr("Couldn’t Save Changes", "无法保存更改")
+        alert.informativeText = L10n.tr(
+            "FloatTabs couldn’t save its configuration. Your previous settings were kept.",
+            "FloatTabs 无法保存配置，之前的设置已保留。"
+        )
+        alert.addButton(withTitle: L10n.tr("OK", "好"))
 
         if let window = NSApp.keyWindow, window.attachedSheet == nil {
             alert.beginSheetModal(for: window)

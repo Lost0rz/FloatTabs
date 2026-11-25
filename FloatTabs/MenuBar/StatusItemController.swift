@@ -6,6 +6,18 @@ struct MenuShortcutPresentation: Equatable {
     let modifiers: NSEvent.ModifierFlags
 }
 
+struct StatusItemSlotMenuEntry: Equatable {
+    let id: UUID
+    let title: String
+    let isSelected: Bool
+    let isUnread: Bool
+}
+
+struct StatusItemMenuSnapshot: Equatable {
+    let slots: [StatusItemSlotMenuEntry]
+    let isPinned: Bool
+}
+
 enum StatusItemAttentionBadge: Equatable {
     case none
     case dot
@@ -66,12 +78,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
     private let toggleMenuItem = NSMenuItem(
-        title: "Show FloatTabs",
+        title: L10n.tr("Show FloatTabs", "显示 FloatTabs"),
         action: #selector(toggleFromMenu),
         keyEquivalent: ""
     )
     private let settingsMenuItem = NSMenuItem(
-        title: "Settings…",
+        title: L10n.tr("Settings…", "设置…"),
         action: #selector(openSettings),
         keyEquivalent: ""
     )
@@ -85,6 +97,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let preferencesStore: AppPreferencesStore
     private let loadFavicon: FaviconLoadHandler
     private let cancelFavicon: FaviconCancelHandler
+    private let menuSnapshotProvider: (() -> StatusItemMenuSnapshot)?
+    private let onSelectSlot: ((UUID) -> Void)?
+    private let onTogglePin: (() -> Void)?
     private let faviconConsumerID: UUID
     private let diagnostics: any RuntimeDiagnosticRecording
     private let onToggleWithTrace: ((RuntimeDiagnosticTrace) -> Void)?
@@ -140,6 +155,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         preferencesStore: AppPreferencesStore = AppPreferencesStore(),
         faviconLoader: FaviconLoadHandler? = nil,
         faviconCanceller: FaviconCancelHandler? = nil,
+        menuSnapshotProvider: (() -> StatusItemMenuSnapshot)? = nil,
+        onSelectSlot: ((UUID) -> Void)? = nil,
+        onTogglePin: (() -> Void)? = nil,
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         onToggleWithTrace: ((RuntimeDiagnosticTrace) -> Void)? = nil
     ) {
@@ -150,6 +168,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         self.onSettings = onSettings
         self.onQuit = onQuit
         self.preferencesStore = preferencesStore
+        self.menuSnapshotProvider = menuSnapshotProvider
+        self.onSelectSlot = onSelectSlot
+        self.onTogglePin = onTogglePin
         self.diagnostics = diagnostics
         self.onToggleWithTrace = onToggleWithTrace
         let faviconConsumerID = UUID()
@@ -175,6 +196,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             name: .floatTabsMenuBarDisplayModeDidChange,
             object: preferencesStore
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(languageDidChange(_:)),
+            name: .floatTabsLanguageDidChange,
+            object: nil
+        )
     }
 
     deinit {
@@ -182,6 +209,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             self,
             name: .floatTabsMenuBarDisplayModeDidChange,
             object: preferencesStore
+        )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: .floatTabsLanguageDidChange,
+            object: nil
         )
     }
 
@@ -224,7 +256,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func setActiveWebApp(name: String?, faviconURL: URL?) {
         latestActiveWebAppName = name
         if let button = statusItem.button {
-            button.toolTip = name.map { "Current Web App · \($0)" } ?? "FloatTabs"
+            button.toolTip = name.map {
+                L10n.tr("Current Web App · \($0)", "当前网页应用 · \($0)")
+            } ?? "FloatTabs"
             applyMenuBarDisplayMode(to: button)
         }
 
@@ -366,7 +400,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }()
         diagnostics.record(
             event: "favicon.ui_projection",
-            level: outcome == .noImageDisplayed ? .warning : .notice,
+            level: outcome == .noImageDisplayed ? .warning : .debug,
             subsystem: "favicon",
             fields: [
                 "surface": .string("menu_bar"),
@@ -403,6 +437,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func menuBarDisplayModeDidChange(_ notification: Notification) {
         guard let button = statusItem.button else { return }
         applyMenuBarDisplayMode(to: button)
+    }
+
+    @objc private func languageDidChange(_ notification: Notification) {
+        if let button = statusItem.button {
+            button.toolTip = latestActiveWebAppName.map {
+                L10n.tr("Current Web App · \($0)", "当前网页应用 · \($0)")
+            } ?? "FloatTabs"
+        }
+        rebuildMenu()
     }
 
     private static func fallbackImage() -> NSImage? {
@@ -470,21 +513,67 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.delegate = self
         toggleMenuItem.target = self
         toggleMenuItem.setShortcut(for: .toggleFloatTabs)
-        menu.addItem(toggleMenuItem)
-        menu.addItem(.separator())
-
         settingsMenuItem.setShortcut(for: .floatTabsSettings)
         settingsMenuItem.target = self
+        rebuildMenu()
+    }
+
+    @discardableResult
+    func rebuildMenu() -> NSMenu {
+        menu.removeAllItems()
+
+        toggleMenuItem.title = isVisible()
+            ? L10n.tr("Hide FloatTabs", "隐藏 FloatTabs")
+            : L10n.tr("Show FloatTabs", "显示 FloatTabs")
+        settingsMenuItem.title = L10n.tr("Settings…", "设置…")
+        menu.addItem(toggleMenuItem)
+
+        let snapshot = menuSnapshotProvider?()
+        if onTogglePin != nil {
+            let pinItem = NSMenuItem(
+                title: L10n.tr("Pin Window", "固定窗口"),
+                action: #selector(togglePinFromMenu),
+                keyEquivalent: ""
+            )
+            pinItem.target = self
+            pinItem.state = snapshot?.isPinned == true ? .on : .off
+            pinItem.setShortcut(KeyboardShortcuts.getShortcut(for: .togglePin))
+            menu.addItem(pinItem)
+        }
+
+        if let slots = snapshot?.slots, !slots.isEmpty {
+            menu.addItem(.separator())
+            for slot in slots {
+                let item = NSMenuItem(
+                    title: slot.title,
+                    action: #selector(selectSlotFromMenu(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = slot.id.uuidString
+                item.state = slot.isSelected ? .on : .off
+                if slot.isUnread {
+                    item.image = Self.unreadMenuMarkerImage()
+                    item.setAccessibilityLabel(
+                        L10n.tr("\(slot.title) · Unread response", "\(slot.title) · 有未读回复")
+                    )
+                }
+                menu.addItem(item)
+            }
+        }
+
+        menu.addItem(.separator())
         menu.addItem(settingsMenuItem)
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
-            title: "Quit FloatTabs",
+            title: L10n.tr("Quit FloatTabs", "退出 FloatTabs"),
             action: #selector(quit),
             keyEquivalent: "q"
         )
         quitItem.target = self
         menu.addItem(quitItem)
+        return menu
     }
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
@@ -504,12 +593,34 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func presentMenu(from button: NSStatusBarButton) {
-        toggleMenuItem.title = isVisible() ? "Hide FloatTabs" : "Show FloatTabs"
+        rebuildMenu()
         menu.popUp(
             positioning: toggleMenuItem,
             at: NSPoint(x: 0, y: button.bounds.minY),
             in: button
         )
+    }
+
+    @objc private func togglePinFromMenu() {
+        onTogglePin?()
+    }
+
+    @objc private func selectSlotFromMenu(_ sender: NSMenuItem) {
+        guard let rawID = sender.representedObject as? String,
+              let slotID = UUID(uuidString: rawID) else {
+            return
+        }
+        onSelectSlot?(slotID)
+    }
+
+    private static func unreadMenuMarkerImage() -> NSImage {
+        let image = NSImage(size: NSSize(width: 8, height: 8))
+        image.lockFocus()
+        NSColor.systemRed.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 1, y: 1, width: 6, height: 6)).fill()
+        image.unlockFocus()
+        image.isTemplate = false
+        return image
     }
 
     @objc private func toggleFromMenu() {

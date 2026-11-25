@@ -1,92 +1,63 @@
 import Foundation
 import WebKit
 
-enum BrowserProfileDataStoreProviderError: Error, Equatable, LocalizedError {
-    case customProfilesUnsupported
-
-    var errorDescription: String? {
-        switch self {
-        case .customProfilesUnsupported:
-            return "Additional Browser Profiles require macOS 14 or later."
-        }
-    }
-}
-
 /// Resolves the WebKit website-data store for a persisted Browser Profile.
 ///
 /// Default is a virtual identity and therefore always maps to WebKit's real
-/// default store. Custom UUID-backed stores are only available on macOS 14+;
-/// callers must handle the explicit unsupported error instead of falling back
-/// to Default. Slot bindings, Profile metadata and WebView lifecycle remain
-/// outside this provider.
+/// default store. Custom UUID-backed stores map directly to WebKit's native
+/// persistent `WKWebsiteDataStore(forIdentifier:)` on macOS 14+.
+/// Slot bindings, Profile metadata and WebView lifecycle remain outside this
+/// provider.
 @MainActor
 struct BrowserProfileDataStoreProvider {
-    typealias AvailabilityResolver = @MainActor () -> Bool
     typealias DefaultStoreResolver = @MainActor () -> WKWebsiteDataStore
     typealias CustomStoreResolver = @MainActor (UUID) -> WKWebsiteDataStore
     typealias CustomStoreRemover = @MainActor (UUID) async throws -> Void
+    typealias DefaultWebsiteDataCleaner = @MainActor () async throws -> Void
 
-    private let isCustomProfileSupported: AvailabilityResolver
     private let defaultStoreResolver: DefaultStoreResolver
     private let customStoreResolver: CustomStoreResolver
     private let customStoreRemover: CustomStoreRemover
+    private let defaultWebsiteDataCleaner: DefaultWebsiteDataCleaner?
 
     init(
-        isCustomProfileSupported: @escaping AvailabilityResolver = {
-            BrowserProfileDataStoreProvider.customProfilesSupportedOnCurrentOS()
-        },
         defaultStoreResolver: @escaping DefaultStoreResolver = {
             WKWebsiteDataStore.default()
         },
         customStoreResolver: @escaping CustomStoreResolver = { id in
-            guard #available(macOS 14.0, *) else {
-                preconditionFailure("Custom Browser Profiles require macOS 14 or later")
-            }
-            return WKWebsiteDataStore(forIdentifier: id)
+            WKWebsiteDataStore(forIdentifier: id)
         },
         customStoreRemover: @escaping CustomStoreRemover = { id in
-            guard #available(macOS 14.0, *) else {
-                throw BrowserProfileDataStoreProviderError.customProfilesUnsupported
-            }
             try await WKWebsiteDataStore.remove(forIdentifier: id)
-        }
+        },
+        defaultWebsiteDataCleaner: DefaultWebsiteDataCleaner? = nil
     ) {
-        self.isCustomProfileSupported = isCustomProfileSupported
         self.defaultStoreResolver = defaultStoreResolver
         self.customStoreResolver = customStoreResolver
         self.customStoreRemover = customStoreRemover
+        self.defaultWebsiteDataCleaner = defaultWebsiteDataCleaner
     }
 
-    /// The capability seam is deliberately backed only by the injected OS
-    /// availability resolver. It never probes WebKit by creating a store.
-    var customProfilesSupported: Bool {
-        isCustomProfileSupported()
-    }
-
-    func dataStore(for browserProfileID: UUID?) throws -> WKWebsiteDataStore {
+    func dataStore(for browserProfileID: UUID?) -> WKWebsiteDataStore {
         guard let browserProfileID else {
             return defaultStoreResolver()
         }
-
-        guard isCustomProfileSupported() else {
-            throw BrowserProfileDataStoreProviderError.customProfilesUnsupported
-        }
-
         return customStoreResolver(browserProfileID)
     }
 
     func removeCustomDataStore(id: UUID) async throws {
-        guard isCustomProfileSupported() else {
-            throw BrowserProfileDataStoreProviderError.customProfilesUnsupported
-        }
-
         try await customStoreRemover(id)
     }
 
-    private static func customProfilesSupportedOnCurrentOS() -> Bool {
-        if #available(macOS 14.0, *) {
-            return true
+    func removeDefaultWebsiteData() async throws {
+        if let defaultWebsiteDataCleaner {
+            try await defaultWebsiteDataCleaner()
+            return
         }
-        return false
+        let store = defaultStoreResolver()
+        await store.removeData(
+            ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+            modifiedSince: .distantPast
+        )
     }
 }

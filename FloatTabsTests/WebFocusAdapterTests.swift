@@ -1181,6 +1181,71 @@ extension WebFocusAdapterTests {
         XCTAssertEqual(observer.currentContentProcessDiagnosticFields["observed_web_process_epoch"], .integer(3))
         XCTAssertEqual(observer.currentContentProcessDiagnosticFields["observed_web_process_termination_count"], .integer(2))
     }
+
+    func testGenericAdapterFocusesLargeContentEditableEditorWithBoundedTextScan() async throws {
+        let webView = makeWebView()
+        let largeEditorBody = String(repeating: "const line = 42; ", count: 2000)
+        load(
+            """
+            <main style="min-height: 500px;">
+                <div contenteditable="true" role="textbox" aria-label="Edit task prompt">\(largeEditorBody)</div>
+            </main>
+            """,
+            baseURL: URL(string: "https://chatgpt.com/codex"),
+            in: webView
+        )
+        await settle(webView)
+
+        XCTAssertTrue(WebFocusDOM.commonFunctions.contains("boundedInputText"))
+        let adapter = GenericWebAdapter()
+        try await adapter.focusInput(in: webView)
+        let focusedLabel = await stringValue(
+            "document.activeElement.getAttribute('aria-label')",
+            in: webView
+        )
+        XCTAssertEqual(focusedLabel, "Edit task prompt")
+    }
+
+    func testNavigationLatenciesRecordedAndCrossWorldLivenessSkipsNonChatGPTBackgroundTask() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let webView = makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: diagnostics,
+            crossWorldLivenessInterval: 300
+        )
+
+        XCTAssertFalse(observer.hasActiveCrossWorldLivenessObservationTask)
+
+        load(
+            "<main>Example latency test</main>",
+            baseURL: URL(string: "https://example.com/"),
+            in: webView
+        )
+        await settle(webView)
+
+        XCTAssertFalse(observer.hasActiveCrossWorldLivenessObservationTask)
+
+        let commitEvent = try XCTUnwrap(writer.events.last { $0.event == "navigation.commit" })
+        if case .integer = commitEvent.fields["provisional_to_commit_ms"] {
+        } else {
+            XCTFail("Expected integer provisional_to_commit_ms on navigation.commit")
+        }
+
+        let finishEvent = try XCTUnwrap(writer.events.last { $0.event == "navigation.finished" })
+        if case .integer = finishEvent.fields["provisional_to_finish_ms"] {
+        } else {
+            XCTFail("Expected integer provisional_to_finish_ms on navigation.finished")
+        }
+        if case .integer = finishEvent.fields["commit_to_finish_ms"] {
+        } else {
+            XCTFail("Expected integer commit_to_finish_ms on navigation.finished")
+        }
+    }
 }
 
 @MainActor

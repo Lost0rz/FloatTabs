@@ -7,9 +7,9 @@ enum RuntimeDiagnosticMode: String, CaseIterable, Codable, Equatable, Sendable {
 
     var displayName: String {
         switch self {
-        case .off: return "Off"
-        case .standard: return "Standard"
-        case .verbose: return "Verbose"
+        case .off: return L10n.tr("Off", "关闭")
+        case .standard: return L10n.tr("Standard", "标准")
+        case .verbose: return L10n.tr("Verbose", "详细")
         }
     }
 
@@ -340,6 +340,9 @@ struct RuntimeDiagnosticEvent: Codable, Equatable, Sendable {
     let subsystem: String
     let event: String
     let fields: [String: RuntimeDiagnosticValue]
+    /// Runtime-only marker indicating `fields` already passed
+    /// `RuntimeDiagnosticPrivacy.sanitize`. Intentionally omitted from JSON.
+    let isPrivacySanitized: Bool
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -364,7 +367,8 @@ struct RuntimeDiagnosticEvent: Codable, Equatable, Sendable {
         level: RuntimeDiagnosticLevel,
         subsystem: String,
         event: String,
-        fields: [String: RuntimeDiagnosticValue]
+        fields: [String: RuntimeDiagnosticValue],
+        isPrivacySanitized: Bool = false
     ) {
         self.schemaVersion = schemaVersion
         self.timestamp = timestamp
@@ -376,5 +380,55 @@ struct RuntimeDiagnosticEvent: Codable, Equatable, Sendable {
         self.subsystem = subsystem
         self.event = event
         self.fields = fields
+        self.isPrivacySanitized = isPrivacySanitized
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        uptime = try container.decode(TimeInterval.self, forKey: .uptime)
+        sequence = try container.decode(UInt64.self, forKey: .sequence)
+        sessionID = try container.decode(UUID.self, forKey: .sessionID)
+        traceID = try container.decodeIfPresent(UUID.self, forKey: .traceID)
+        level = try container.decode(RuntimeDiagnosticLevel.self, forKey: .level)
+        subsystem = try container.decode(String.self, forKey: .subsystem)
+        event = try container.decode(String.self, forKey: .event)
+        fields = try container.decode([String: RuntimeDiagnosticValue].self, forKey: .fields)
+        isPrivacySanitized = false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(uptime, forKey: .uptime)
+        try container.encode(sequence, forKey: .sequence)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encodeIfPresent(traceID, forKey: .traceID)
+        try container.encode(level, forKey: .level)
+        try container.encode(subsystem, forKey: .subsystem)
+        try container.encode(event, forKey: .event)
+        try container.encode(fields, forKey: .fields)
+    }
+
+    static func == (lhs: RuntimeDiagnosticEvent, rhs: RuntimeDiagnosticEvent) -> Bool {
+        lhs.schemaVersion == rhs.schemaVersion
+            && lhs.timestamp == rhs.timestamp
+            && lhs.uptime == rhs.uptime
+            && lhs.sequence == rhs.sequence
+            && lhs.sessionID == rhs.sessionID
+            && lhs.traceID == rhs.traceID
+            && lhs.level == rhs.level
+            && lhs.subsystem == rhs.subsystem
+            && lhs.event == rhs.event
+            && lhs.fields == rhs.fields
+    }
+
+    var isIncidentRelated: Bool {
+        fields["incident_id"] != nil
+            || event.contains("incident")
+            || event.contains("stall")
+            || event == "web_content_process_terminated"
     }
 }

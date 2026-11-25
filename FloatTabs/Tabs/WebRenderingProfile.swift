@@ -6,8 +6,8 @@ enum WebsiteMode: String, Codable, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .desktop: "Desktop"
-        case .mobile: "Mobile"
+        case .desktop: return L10n.tr("Desktop", "桌面端")
+        case .mobile: return L10n.tr("Mobile", "移动端")
         }
     }
 }
@@ -26,16 +26,16 @@ enum BrowserIdentity: String, Codable, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .automatic: "Automatic"
-        case .macosSafari: "macOS Safari"
-        case .macosChrome: "macOS Chrome"
-        case .windowsChrome: "Windows Chrome"
-        case .windowsEdge: "Windows Edge"
-        case .linuxChrome: "Linux Chrome"
-        case .iphoneSafari: "iPhone Safari"
-        case .iphoneChrome: "iPhone Chrome"
-        case .androidChrome: "Android Chrome"
-        case .custom: "Custom User Agent"
+        case .automatic: return L10n.tr("Automatic", "自动")
+        case .macosSafari: return "macOS Safari"
+        case .macosChrome: return "macOS Chrome"
+        case .windowsChrome: return "Windows Chrome"
+        case .windowsEdge: return "Windows Edge"
+        case .linuxChrome: return "Linux Chrome"
+        case .iphoneSafari: return "iPhone Safari"
+        case .iphoneChrome: return "iPhone Chrome"
+        case .androidChrome: return "Android Chrome"
+        case .custom: return L10n.tr("Custom User Agent", "自定义 User Agent")
         }
     }
 }
@@ -49,11 +49,11 @@ enum SimpleViewportPreset: String, Codable, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .small: "Small"
-        case .medium: "Medium"
-        case .large: "Large"
-        case .wide: "Wide"
-        case .custom: "Custom"
+        case .small: return L10n.tr("Small", "紧凑")
+        case .medium: return L10n.tr("Medium", "适中")
+        case .large: return L10n.tr("Large", "较大")
+        case .wide: return L10n.tr("Wide", "宽屏")
+        case .custom: return L10n.tr("Custom", "自定义")
         }
     }
 
@@ -90,8 +90,8 @@ enum DeviceOrientation: String, Codable, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .portrait: "Portrait"
-        case .landscape: "Landscape"
+        case .portrait: return L10n.tr("Portrait", "竖屏")
+        case .landscape: return L10n.tr("Landscape", "横屏")
         }
     }
 }
