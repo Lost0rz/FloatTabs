@@ -432,10 +432,84 @@ final class BrowserProfileSettingsTests: XCTestCase {
         )
     }
 
+    func testDisabledDeleteTooltipWrapperDoesNotStealRenameButtonHitTesting() throws {
+        let company = makeBrowserProfile(name: "Company")
+        let manager = BrowserProfileManagementClient(
+            snapshot: {
+                BrowserProfileManagementSnapshot(
+                    customProfiles: [company],
+                    referencedProfileIDs: [company.id],
+                    isDefaultProfileReferenced: true,
+                    referencingWebAppNamesByProfileID: [company.id: ["Work"]],
+                    defaultReferencingWebAppNames: ["Home"]
+                )
+            },
+            create: { _ in company },
+            rename: { _, _ in },
+            delete: { _ in }
+        )
+        let profilesController = BrowserProfilesSettingsViewController(
+            browserProfileManager: manager,
+            embedsInSettingsPage: true
+        )
+        let pageController = SettingsPageViewController(childViewControllers: [profilesController])
+
+        let hostView = NSView(frame: NSRect(x: 0, y: 0, width: 620, height: 480))
+        pageController.view.translatesAutoresizingMaskIntoConstraints = false
+        hostView.addSubview(pageController.view)
+        NSLayoutConstraint.activate([
+            pageController.view.leadingAnchor.constraint(equalTo: hostView.leadingAnchor),
+            pageController.view.trailingAnchor.constraint(equalTo: hostView.trailingAnchor),
+            pageController.view.topAnchor.constraint(equalTo: hostView.topAnchor),
+            pageController.view.bottomAnchor.constraint(equalTo: hostView.bottomAnchor),
+        ])
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 480),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostView
+        hostView.layoutSubtreeIfNeeded()
+
+        let renameTitle = L10n.tr("Rename…", "重命名…")
+        let deleteTitle = L10n.tr("Delete…", "删除…")
+        let buttons = allSubviews(in: profilesController.view).compactMap { $0 as? NSButton }
+        let renameButtons = buttons.filter { $0.title == renameTitle }
+        let disabledDeleteButtons = buttons.filter { $0.title == deleteTitle && !$0.isEnabled }
+
+        XCTAssertEqual(renameButtons.count, 2)
+        XCTAssertEqual(disabledDeleteButtons.count, 2)
+
+        for (renameButton, deleteButton) in zip(renameButtons, disabledDeleteButtons) {
+            XCTAssertGreaterThan(renameButton.bounds.width, 0)
+            XCTAssertGreaterThan(renameButton.bounds.height, 0)
+            let renameCenter = renameButton.convert(
+                NSPoint(x: renameButton.bounds.midX, y: renameButton.bounds.midY),
+                to: hostView
+            )
+            XCTAssertTrue(
+                pageController.view.hitTest(renameCenter) === renameButton,
+                "Disabled Delete tooltip wrapper must not intercept clicks on Rename…"
+            )
+
+            let deleteWrapper = try XCTUnwrap(deleteButton.superview)
+            XCTAssertGreaterThan(deleteWrapper.bounds.width, 0)
+            XCTAssertGreaterThan(deleteWrapper.bounds.height, 0)
+            let deleteCenter = deleteWrapper.convert(
+                NSPoint(x: deleteWrapper.bounds.midX, y: deleteWrapper.bounds.midY),
+                to: hostView
+            )
+            XCTAssertTrue(pageController.view.hitTest(deleteCenter) === deleteWrapper)
+            XCTAssertNotNil(deleteWrapper.toolTip)
+        }
+    }
+
     private func makeSettingsController(
         snapshot: (() -> BrowserProfileManagementSnapshot)? = nil,
         create: ((String) throws -> BrowserProfile)? = nil
-    ) -> AccountLanguageSettingsViewController {
+    ) -> BrowserProfilesSettingsViewController {
         let resolvedSnapshot = snapshot ?? {
             BrowserProfileManagementSnapshot(
                 customProfiles: [],
@@ -448,11 +522,7 @@ final class BrowserProfileSettingsTests: XCTestCase {
             rename: { _, _ in },
             delete: { _ in }
         )
-        return AccountLanguageSettingsViewController(
-            onExportBackup: { _ in },
-            onRestoreBackup: { _ in URL(fileURLWithPath: "/tmp/rollback.json") },
-            browserProfileManager: manager
-        )
+        return BrowserProfilesSettingsViewController(browserProfileManager: manager)
     }
 
     private func allSubviews(in view: NSView) -> [NSView] {

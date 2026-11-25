@@ -11,6 +11,13 @@ APP_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app"
 DSYM_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app.dSYM"
 ENTITLEMENTS_PATH="$ROOT_DIR/FloatTabs/FloatTabs.entitlements"
 SIGN_IDENTITY="${FLOATTABS_SIGN_IDENTITY:-}"
+LOCAL_SELF_SIGNED=0
+if [[ -z "$SIGN_IDENTITY" && -z "${CI:-}" ]]; then
+  if security find-identity -v -p codesigning 2>/dev/null | grep -Fq '"FloatTabs Local Signing"'; then
+    SIGN_IDENTITY="FloatTabs Local Signing"
+    LOCAL_SELF_SIGNED=1
+  fi
+fi
 NOTARY_PROFILE="${FLOATTABS_NOTARY_PROFILE:-}"
 REQUIRED_ARCHITECTURE="arm64"
 
@@ -89,15 +96,27 @@ DMG_PATH="$OUTPUT_DIR/$DMG_NAME"
 DSYM_ARCHIVE_PATH="$OUTPUT_DIR/$DSYM_ARCHIVE_NAME"
 
 if [[ -n "$SIGN_IDENTITY" ]]; then
-  echo "Signing FloatTabs.app with Developer ID identity: $SIGN_IDENTITY"
-  codesign \
-    --force \
-    --deep \
-    --options runtime \
-    --entitlements "$ENTITLEMENTS_PATH" \
-    --timestamp \
-    --sign "$SIGN_IDENTITY" \
-    "$APP_PATH"
+  if ((LOCAL_SELF_SIGNED == 1)); then
+    echo "Signing FloatTabs.app with local self-signed identity: $SIGN_IDENTITY"
+    codesign \
+      --force \
+      --deep \
+      --options runtime \
+      --entitlements "$ENTITLEMENTS_PATH" \
+      --timestamp=none \
+      --sign "$SIGN_IDENTITY" \
+      "$APP_PATH"
+  else
+    echo "Signing FloatTabs.app with Developer ID identity: $SIGN_IDENTITY"
+    codesign \
+      --force \
+      --deep \
+      --options runtime \
+      --entitlements "$ENTITLEMENTS_PATH" \
+      --timestamp \
+      --sign "$SIGN_IDENTITY" \
+      "$APP_PATH"
+  fi
 else
   # Xcode's arm64-only linker emits an incomplete ad-hoc signature when
   # CODE_SIGNING_ALLOWED=NO. Safari/Gatekeeper reports that bundle as

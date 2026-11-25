@@ -748,39 +748,6 @@ final class RuntimeDiagnosticInMemoryWriter: RuntimeDiagnosticWriting {
     }
 }
 
-final class RuntimeDiagnosticNoopWriter: RuntimeDiagnosticWriting {
-    func enqueue(_ event: RuntimeDiagnosticEvent) {
-        _ = event
-    }
-
-    func exportRecent(
-        metadata: RuntimeDiagnosticEvent,
-        to destination: URL,
-        completion: @escaping @Sendable (Result<Void, RuntimeDiagnosticExportError>) -> Void
-    ) {
-        _ = (metadata, destination)
-        DispatchQueue.global(qos: .utility).async {
-            completion(.failure(.writerDisabled))
-        }
-    }
-
-    func requestFinalFlush(
-        timeout: TimeInterval,
-        completion: @escaping @Sendable () -> Void
-    ) {
-        _ = timeout
-        DispatchQueue.global(qos: .utility).async(execute: completion)
-    }
-
-    func readRecentEvents(
-        limit: Int,
-        completion: @escaping @Sendable ([RuntimeDiagnosticEvent]) -> Void
-    ) {
-        _ = limit
-        completion([])
-    }
-}
-
 private final class CompletionGate: @unchecked Sendable {
     private let lock = NSLock()
     private let completion: @Sendable () -> Void
