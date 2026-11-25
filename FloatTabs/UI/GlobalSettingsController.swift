@@ -1820,9 +1820,12 @@ private final class ProfileDeleteTooltipView: NSView {
     }
 
     // Keep the disabled button genuinely non-interactive while making the
-    // wrapper the tooltip-tracking view.
+    // wrapper the tooltip-tracking view. `hitTest(_:)` receives `point` in
+    // superview coordinates, so convert into local bounds before checking.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(point) ? self : nil
+        guard !isHidden, alphaValue > 0 else { return nil }
+        let localPoint = superview.map { convert(point, from: $0) } ?? point
+        return bounds.contains(localPoint) ? self : nil
     }
 }
 
@@ -1995,14 +1998,12 @@ final class PerformanceSettingsViewController: NSViewController {
         }
 
         view = contentView
-        refreshPerformanceSettings()
         refreshWebsiteCache()
         startWebsiteCacheMeasurement()
     }
 
     override func viewWillAppear() {
         super.viewWillAppear()
-        refreshPerformanceSettings()
         refreshWebsiteCache()
         startWebsiteCacheMeasurement()
     }
@@ -2013,12 +2014,6 @@ final class PerformanceSettingsViewController: NSViewController {
         isWebsiteCacheMeasurementInFlight = false
         websiteCacheMeasurementSequence += 1
         super.viewWillDisappear()
-    }
-
-    func refreshPerformanceSettings() {
-        // Legacy Warm/Cold values remain stored for rollback compatibility but
-        // are no longer consulted by the current product lifecycle.
-        guard isViewLoaded else { return }
     }
 
     func refreshWebsiteCache() {
@@ -2536,7 +2531,9 @@ class BrowserProfilesSettingsViewController: NSViewController {
         alert.accessoryView = field
         alert.addButton(withTitle: L10n.tr("Create", "创建"))
         alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
+        alert.window.initialFirstResponder = field
         alert.beginSheetModal(for: window) { [weak self] response in
+            alert.window.endEditing(for: nil)
             guard response == .alertFirstButtonReturn, let self else { return }
             self.submitNewProfileName(field.stringValue)
         }
@@ -2630,7 +2627,9 @@ class BrowserProfilesSettingsViewController: NSViewController {
         alert.accessoryView = field
         alert.addButton(withTitle: L10n.tr("Rename", "重命名"))
         alert.addButton(withTitle: L10n.tr("Cancel", "取消"))
+        alert.window.initialFirstResponder = field
         alert.beginSheetModal(for: window) { [weak self] response in
+            alert.window.endEditing(for: nil)
             guard response == .alertFirstButtonReturn, let self else { return }
             guard let trimmedName = Self.trimmedProfileName(field.stringValue) else {
                 self.showProfileError(BrowserProfileManagementError.invalidName)
@@ -2728,25 +2727,5 @@ class BrowserProfilesSettingsViewController: NSViewController {
         let view = NSView()
         view.heightAnchor.constraint(equalToConstant: height).isActive = true
         return view
-    }
-}
-
-/// Compatibility name for existing Profile settings tests and callers. The
-/// consolidated Settings UI renders BrowserProfilesSettingsViewController;
-/// the legacy backup closures are intentionally ignored because Backup &
-/// Restore now has its own presentation controller.
-@MainActor
-final class AccountLanguageSettingsViewController: BrowserProfilesSettingsViewController {
-    init(
-        onExportBackup: @escaping GlobalSettingsController.ExportBackupHandler,
-        onRestoreBackup: @escaping GlobalSettingsController.RestoreBackupHandler,
-        browserProfileManager: BrowserProfileManagementClient = .unavailable
-    ) {
-        super.init(browserProfileManager: browserProfileManager)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
     }
 }

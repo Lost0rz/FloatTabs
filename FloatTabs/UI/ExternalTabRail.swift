@@ -2300,12 +2300,6 @@ final class RailFoldControl: NSView {
 }
 
 @MainActor
-enum ExternalTabVisualPalette {
-    /// Single seam for the future Settings → General accent picker.
-    static var activeAccent: NSColor { .controlAccentColor }
-}
-
-@MainActor
 final class WebsiteFaviconAssetStore {
     struct Limits: Equatable {
         let maximumOrigins: Int

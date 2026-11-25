@@ -3,10 +3,8 @@
   "documentation_paths": [
     "README.md",
     "AGENTS.md",
-    "CHANGELOG.md",
     "docs/**",
-    ".github/ISSUE_TEMPLATE/**",
-    ".github/PULL_REQUEST_TEMPLATE/**"
+    ".github/ISSUE_TEMPLATE/**"
   ],
   "fallback_tests": [
     "ci-contracts"
@@ -442,9 +440,7 @@
       "tier": "V3",
       "paths": [
         "FloatTabs.xcodeproj/xcshareddata/xcschemes/**",
-        "FloatTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
-        "Package.swift",
-        "Package.resolved"
+        "FloatTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
       ],
       "runner": [
         "self-hosted",
@@ -487,7 +483,6 @@
       "tier": "V1",
       "paths": [
         ".github/workflows/**",
-        ".github/actions/**",
         ".github/ci-capabilities.json",
         "tools/ci/**",
         ".github/actionlint.yaml",
