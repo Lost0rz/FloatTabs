@@ -23,7 +23,7 @@ class GovernedCIWorkflowContractTests(unittest.TestCase):
         self.assertIn("Main push scoped verification", MACOS_CI)
 
     def test_shared_router_is_pinned_and_only_accepted_catalog_is_used(self):
-        self.assertIn("uses: Lost0rz/Engineering-Governance/.github/workflows/ci-router-reusable.yml@v0.10.1", MACOS_CI)
+        self.assertIn("uses: Lost0rz/Engineering-Governance/.github/workflows/ci-router-reusable.yml@1ae3de7a1db762a4af48c4f9580257dd88d0e098", MACOS_CI)
         self.assertIn("capabilities_path: .github/ci-capabilities.json", MACOS_CI)
         self.assertIn("github.event.pull_request.draft == false", MACOS_CI)
         self.assertNotIn("classify_macos_ci_scope.py", MACOS_CI)
