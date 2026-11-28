@@ -193,7 +193,7 @@ final class GroupsAndBookmarksTests: XCTestCase {
         }
     }
 
-    func testTabGroupsScopeTabsSwitchPerGroupBorderAndPreserveTabsOnDelete() throws {
+    func testTabGroupsScopeTabsSwitchPerGroupAccentAndPreserveTabsOnDelete() throws {
         let repo = MemoryProfileRepository()
         let store = TabStore(repository: repo)
 
@@ -224,19 +224,11 @@ final class GroupsAndBookmarksTests: XCTestCase {
         XCTAssertEqual(store.slotByKeyboardIndex(1)?.id, tabB1.id)
         XCTAssertNil(store.slotByKeyboardIndex(2))
 
-        // Per-group border switches immediately on Group change.
-        let greenBorder = store.effectiveBorderAppearance(
-            globalTheme: .blue,
-            globalCustomColor: .systemBlue
-        )
-        XCTAssertEqual(greenBorder.theme, .green)
+        // Per-group accent remains stored independently of the global frame.
+        XCTAssertEqual(store.activeGroupOption.borderTheme, .green)
 
         XCTAssertTrue(store.selectGroup(id: nil))
-        let rainbowBorder = store.effectiveBorderAppearance(
-            globalTheme: .blue,
-            globalCustomColor: .systemBlue
-        )
-        XCTAssertEqual(rainbowBorder.theme, .rainbow)
+        XCTAssertEqual(store.activeGroupOption.borderTheme, .rainbow)
         XCTAssertEqual(store.activeTabID, tabA2.id)
         XCTAssertEqual(store.activeGroupProfiles.map(\.id), [tabA1.id, tabA2.id])
         XCTAssertEqual(store.slotByKeyboardIndex(1)?.id, tabA1.id)

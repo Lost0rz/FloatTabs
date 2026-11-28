@@ -3664,7 +3664,11 @@ final class PanelController: NSObject, NSWindowDelegate {
                 applySharedFixedViewport(resolvedFixedViewport(), animated: panel.isVisible)
             } else {
                 let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
-                preferencesStore.fixedViewportSize = viewport
+                if let visible = sizingVisibleFrame {
+                    preferencesStore.fixedViewportFraction = ViewportFraction(viewport: viewport, visibleFrame: visible)
+                } else {
+                    preferencesStore.fixedViewportSize = viewport
+                }
             }
         }
     }
@@ -6765,7 +6769,11 @@ final class PanelController: NSObject, NSWindowDelegate {
             applySharedFixedViewport(resolvedFixedViewport(), animated: false)
         } else {
             let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
-            preferencesStore.fixedViewportSize = viewport
+            if let visible = sizingVisibleFrame {
+                preferencesStore.fixedViewportFraction = ViewportFraction(viewport: viewport, visibleFrame: visible)
+            } else {
+                preferencesStore.fixedViewportSize = viewport
+            }
         }
     }
 
@@ -7457,11 +7465,20 @@ final class PanelController: NSObject, NSWindowDelegate {
             fields: targetFields
         )
 
-        refreshPreferredPanelSizeFromModel(on: targetVisibleFrame)
+        let startingFrame = hasPositionedPanel ? panel.frame : restoredFrame
+        let sizingFrame: NSRect
+        if reason == .explicitSummon {
+            sizingFrame = targetVisibleFrame
+        } else {
+            sizingFrame = startingFrame.flatMap {
+                ScreenPositioning.bestVisibleFrame(for: $0, visibleFrames: screens.map(\.visibleFrame))
+            } ?? targetVisibleFrame
+        }
+        refreshPreferredPanelSizeFromModel(on: sizingFrame)
 
         let targetFrame: NSRect
 
-        if let startingFrame = hasPositionedPanel ? panel.frame : restoredFrame {
+        if let startingFrame {
             let frame = frameWithPreferredSize(startingFrame)
             if reason == .explicitSummon {
                 targetFrame = ScreenPositioning.frameForExplicitSummon(
@@ -7471,8 +7488,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             } else {
                 targetFrame = ScreenPositioning.relocatedFrame(
                     frame,
-                    visibleFrames: screens.map(\.visibleFrame),
-                    fallbackVisibleFrame: targetVisibleFrame
+                    visibleFrames: [sizingFrame],
+                    fallbackVisibleFrame: sizingFrame
                 )
             }
         } else {

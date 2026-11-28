@@ -1367,7 +1367,14 @@ private final class AppearanceSettingsViewController: NSViewController {
         let preset = SimpleViewportPreset.selectableCases[sender.selectedSegment]
         guard let size = preset.size else {
             customFixedSizeRow.isHidden = false
-            let fraction = preferencesStore.fixedViewportFraction ?? ViewportFraction(viewport: preferencesStore.fixedViewportSize, visibleFrame: (NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)))
+            let reference = ScreenPositioning.targetScreen()?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
+            let viewport = ScreenPositioning.responsiveViewport(
+                preset: preferencesStore.fixedViewportPreset,
+                custom: preferencesStore.fixedViewportFraction,
+                legacySize: preferencesStore.fixedViewportSize,
+                visibleFrame: reference
+            )
+            let fraction = preferencesStore.fixedViewportFraction ?? ViewportFraction(viewport: viewport, visibleFrame: reference)
             preferencesStore.fixedViewportFraction = fraction
             customFixedWidthField.stringValue = Self.sizeText(fraction.width * 100)
             customFixedHeightField.stringValue = Self.sizeText(fraction.height * 100)
@@ -1456,9 +1463,10 @@ private final class AppearanceSettingsViewController: NSViewController {
         guard isFixed else { return }
 
         let preset = preferencesStore.fixedViewportPreset
+        let reference = ScreenPositioning.targetScreen()?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
         let fraction = preferencesStore.fixedViewportFraction ?? ViewportFraction(
-            viewport: preferencesStore.fixedViewportSize,
-            visibleFrame: NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
+            viewport: ScreenPositioning.responsiveViewport(preset: preset, legacySize: preferencesStore.fixedViewportSize, visibleFrame: reference),
+            visibleFrame: reference
         )
         fixedSizeControl.selectedSegment = SimpleViewportPreset.selectableCases.firstIndex(of: preset) ?? 0
         customFixedSizeRow.isHidden = preset != .custom

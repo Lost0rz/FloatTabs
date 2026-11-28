@@ -522,6 +522,9 @@ private final class RenderingForm: NSObject {
     private let modePopup = NSPopUpButton()
     private let sizePopup = NSPopUpButton()
     private let initialRendering: WebRenderingProfile
+    private let sizingReferenceFrame: NSRect
+    private let initialSizeFields: CGSize
+    private var sizingSelectionChanged = false
     private let allowsWindowSizeEditing: Bool
     private let widthField = NSTextField()
     private let heightField = NSTextField()
@@ -547,6 +550,16 @@ private final class RenderingForm: NSObject {
         let rendering = initial.normalized()
         self.initialRendering = rendering
         self.allowsWindowSizeEditing = allowsWindowSizeEditing
+        let referenceFrame = Self.referenceDisplayFrame
+        self.sizingReferenceFrame = referenceFrame
+        let initialFraction = rendering.customViewportFraction ?? ViewportFraction(
+            viewport: ScreenPositioning.responsiveViewport(for: rendering, visibleFrame: referenceFrame),
+            visibleFrame: referenceFrame
+        )
+        let initialSize = rendering.devicePresetID != nil ? rendering.viewportSize : CGSize(
+            width: initialFraction.width * 100, height: initialFraction.height * 100
+        )
+        self.initialSizeFields = CGSize(width: initialSize.width.rounded(), height: initialSize.height.rounded())
 
         modePopup.addItems(withTitles: WebsiteMode.allCases.map(\.displayName))
         if let index = WebsiteMode.allCases.firstIndex(of: rendering.websiteMode) {
@@ -558,14 +571,6 @@ private final class RenderingForm: NSObject {
             sizePopup.selectItem(at: index)
         }
 
-        let referenceFrame = Self.referenceDisplayFrame
-        let initialFraction = rendering.customViewportFraction ?? ViewportFraction(
-            viewport: ScreenPositioning.responsiveViewport(for: rendering, visibleFrame: referenceFrame),
-            visibleFrame: referenceFrame
-        )
-        let initialSize = rendering.devicePresetID != nil ? rendering.viewportSize : CGSize(
-            width: initialFraction.width * 100, height: initialFraction.height * 100
-        )
         widthField.stringValue = String(format: "%.0f", Double(initialSize.width))
         heightField.stringValue = String(format: "%.0f", Double(initialSize.height))
         widthField.placeholderString = L10n.tr("Width", "宽度")
@@ -739,7 +744,14 @@ private final class RenderingForm: NSObject {
         let orientation: DeviceOrientation
         let size: CGSize
         var customFraction: ViewportFraction? = nil
-        if allowsWindowSizeEditing {
+        let preserveInitialSizing = !allowsWindowSizeEditing || (
+            !sizingSelectionChanged
+            && selectedPreset == initialRendering.sizePreset.presentationPreset
+            && selectedOrientation == initialRendering.orientation
+            && selectedDevicePreset()?.id == initialRendering.devicePresetID
+            && parsedCustomSize() == initialSizeFields
+        )
+        if !preserveInitialSizing {
             preset = selectedPreset
             orientation = selectedOrientation
             if let presetSize = preset.size {
@@ -750,7 +762,7 @@ private final class RenderingForm: NSObject {
                     size = parsed
                 } else {
                     customFraction = ViewportFraction(width: parsed.width / 100, height: parsed.height / 100)
-                    size = ScreenPositioning.responsiveViewport(preset: .custom, custom: customFraction, legacySize: initialRendering.viewportSize, visibleFrame: Self.referenceDisplayFrame)
+                    size = ScreenPositioning.responsiveViewport(preset: .custom, custom: customFraction, legacySize: initialRendering.viewportSize, visibleFrame: sizingReferenceFrame)
                 }
             }
         } else {
@@ -770,7 +782,7 @@ private final class RenderingForm: NSObject {
         }
 
         let deviceID: String?
-        if !allowsWindowSizeEditing {
+        if preserveInitialSizing {
             deviceID = initialRendering.devicePresetID
         } else if let selectedDevice = selectedDevicePreset() {
             let expected = selectedDevice.size(for: orientation)
@@ -867,9 +879,10 @@ private final class RenderingForm: NSObject {
     @objc private func sizeSelectionChanged(_ sender: NSPopUpButton) {
         let index = sender.indexOfSelectedItem
         guard SimpleViewportPreset.selectableCases.indices.contains(index) else { return }
+        sizingSelectionChanged = true
         let preset = SimpleViewportPreset.selectableCases[index]
         if let size = preset.size {
-            let fraction = ViewportFraction(viewport: ScreenPositioning.responsiveViewport(preset: preset, legacySize: size, visibleFrame: Self.referenceDisplayFrame), visibleFrame: Self.referenceDisplayFrame)
+            let fraction = ViewportFraction(viewport: ScreenPositioning.responsiveViewport(preset: preset, legacySize: size, visibleFrame: sizingReferenceFrame), visibleFrame: sizingReferenceFrame)
             setSizeFields(CGSize(width: fraction.width * 100, height: fraction.height * 100))
             devicePopup.selectItem(at: 0)
             selectOrientation(size.width > size.height ? .landscape : .portrait)
@@ -885,19 +898,21 @@ private final class RenderingForm: NSObject {
     }
 
     @objc private func deviceSelectionChanged(_ sender: NSPopUpButton) {
+        sizingSelectionChanged = true
         guard let orientation = selectedOrientation() else { return }
         selectSimplePreset(.custom)
         if let device = selectedDevicePreset() {
             setSizeFields(device.size(for: orientation))
         } else {
             let oldSize = CGSize(width: CGFloat(widthField.doubleValue), height: CGFloat(heightField.doubleValue))
-            let fraction = ViewportFraction(viewport: oldSize, visibleFrame: Self.referenceDisplayFrame)
+            let fraction = ViewportFraction(viewport: oldSize, visibleFrame: sizingReferenceFrame)
             setSizeFields(CGSize(width: fraction.width * 100, height: fraction.height * 100))
         }
         updateCustomFieldEditability()
     }
 
     @objc private func orientationSelectionChanged(_ sender: NSPopUpButton) {
+        sizingSelectionChanged = true
         guard let orientation = selectedOrientation() else { return }
         selectSimplePreset(.custom)
         if let device = selectedDevicePreset() {

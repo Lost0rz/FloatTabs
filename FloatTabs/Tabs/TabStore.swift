@@ -114,23 +114,6 @@ final class TabStore {
         orderedBookmarks.filter { $0.folderID == folderID }
     }
 
-    func effectiveBorderAppearance(
-        globalTheme: PanelBorderTheme,
-        globalCustomColor: NSColor
-    ) -> (theme: PanelBorderTheme, customColor: NSColor) {
-        let activeOption = activeGroupOption
-        guard let overrideTheme = activeOption.borderTheme else {
-            return (globalTheme, globalCustomColor)
-        }
-        if overrideTheme == .custom {
-            return (
-                .custom,
-                activeOption.resolvedCustomColor ?? globalCustomColor
-            )
-        }
-        return (overrideTheme, globalCustomColor)
-    }
-
     var activeProfile: WebAppProfile? {
         guard let activeTabID else { return nil }
         return profiles.first(where: { $0.id == activeTabID })
