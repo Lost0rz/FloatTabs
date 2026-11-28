@@ -5762,21 +5762,17 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
             item.state = preset == renderingProfile.sizePreset.presentationPreset ? .on : .off
             windowSizeMenu.addItem(item)
         }
+        let customTitle: String
         if renderingProfile.sizePreset == .custom {
-            windowSizeMenu.addItem(.separator())
-            let customTitle = renderingProfile.customViewportFraction.map { "\(Int(($0.width * 100).rounded()))% × \(Int(($0.height * 100).rounded()))%" } ?? "\(Int(renderingProfile.viewportWidth)) × \(Int(renderingProfile.viewportHeight)) pt"
-            let custom = NSMenuItem(
-                title: L10n.tr(
-                    "Custom  \(customTitle)",
-                    "自定义  \(customTitle)"
-                ),
-                action: nil,
-                keyEquivalent: ""
-            )
-            custom.state = .on
-            custom.isEnabled = false
-            windowSizeMenu.addItem(custom)
+            let size = renderingProfile.customViewportFraction.map { "\(Int(($0.width * 100).rounded()))% × \(Int(($0.height * 100).rounded()))%" } ?? "\(Int(renderingProfile.viewportWidth)) × \(Int(renderingProfile.viewportHeight)) pt"
+            customTitle = L10n.tr("Custom  \(size)…", "自定义  \(size)…")
+        } else {
+            customTitle = L10n.tr("Custom…", "自定义…")
         }
+        let custom = NSMenuItem(title: customTitle, action: #selector(editFromMenu(_:)), keyEquivalent: "")
+        custom.target = self
+        custom.state = renderingProfile.sizePreset == .custom ? .on : .off
+        windowSizeMenu.addItem(custom)
         windowSize.submenu = windowSizeMenu
         windowSize.isEnabled = windowSizeEditingEnabled
         windowSize.toolTip = windowSizeEditingEnabled

@@ -525,6 +525,7 @@ private final class RenderingForm: NSObject {
     private let allowsWindowSizeEditing: Bool
     private let widthField = NSTextField()
     private let heightField = NSTextField()
+    private let sizeUnitLabel = NSTextField(labelWithString: "%")
     private let zoomPopup = NSPopUpButton()
     private let retentionPopup = NSPopUpButton()
     private let advancedButton = NSButton(title: L10n.tr("Advanced…", "高级设置…"), target: nil, action: nil)
@@ -620,6 +621,7 @@ private final class RenderingForm: NSObject {
             widthField,
             NSTextField(labelWithString: "×"),
             heightField,
+            sizeUnitLabel,
         ])
         sizeRow.orientation = .horizontal
         sizeRow.spacing = 6
@@ -980,6 +982,8 @@ private final class RenderingForm: NSObject {
         let isCustom = SimpleViewportPreset.selectableCases.indices.contains(index)
             && SimpleViewportPreset.selectableCases[index] == .custom
         let unit = selectedDevicePreset() == nil ? "%" : "pt"
+        sizeUnitLabel.stringValue = unit
+        sizeUnitLabel.textColor = .secondaryLabelColor
         widthField.placeholderString = unit
         heightField.placeholderString = unit
         widthField.isEditable = isCustom

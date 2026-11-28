@@ -65,11 +65,13 @@ private final class FullscreenSourceRootView: NSView {
         resizeHandle: PanelResizeHandleView,
         resizeReadout: ResizeReadoutView,
         shellWindow: NSWindow,
-        onResizeEnded: @escaping () -> Void
+        onResizeEnded: @escaping () -> Void,
+        onMoveEnded: @escaping () -> Void
     ) {
         super.init(frame: .zero)
 
         let edgeDragView = WebSourceEdgeDragView(targetWindow: shellWindow)
+        edgeDragView.onMoveEnded = onMoveEnded
         topLeftResizeHandle.resizeTargetWindow = shellWindow
         topRightResizeHandle.resizeTargetWindow = shellWindow
         resizeHandle.resizeTargetWindow = shellWindow
@@ -164,6 +166,8 @@ final class WebSourceEdgeDragView: NSView {
     private weak var targetWindow: NSWindow?
     private var startingMouseLocation: NSPoint?
     private var startingWindowOrigin: NSPoint?
+    private var startingDisplayID: CGDirectDisplayID?
+    var onMoveEnded: (() -> Void)?
 
     init(targetWindow: NSWindow) {
         self.targetWindow = targetWindow
@@ -187,6 +191,7 @@ final class WebSourceEdgeDragView: NSView {
         guard let targetWindow else { return }
         startingMouseLocation = NSEvent.mouseLocation
         startingWindowOrigin = targetWindow.frame.origin
+        startingDisplayID = ScreenPositioning.displayID(for: targetWindow.screen)
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -204,8 +209,12 @@ final class WebSourceEdgeDragView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        let oldDisplay = startingDisplayID
+        let newDisplay = ScreenPositioning.displayID(for: targetWindow?.screen)
         startingMouseLocation = nil
         startingWindowOrigin = nil
+        startingDisplayID = nil
+        if oldDisplay != newDisplay { onMoveEnded?() }
     }
 
     override func resetCursorRects() {
@@ -370,6 +379,7 @@ final class FullscreenSourceHostController {
     var onSessionStateChange: ((FullscreenSourceSessionState) -> Void)?
     var onSourceRebuildRequired: (() -> Void)?
     var onResizeEnded: (() -> Void)?
+    var onMoveEnded: (() -> Void)?
 
     var isSessionLocked: Bool {
         sessionState.locksSourceHost
@@ -425,6 +435,9 @@ final class FullscreenSourceHostController {
             shellWindow: shellWindow,
             onResizeEnded: { [weak self] in
                 self?.onResizeEnded?()
+            },
+            onMoveEnded: { [weak self] in
+                self?.onMoveEnded?()
             }
         )
         attachSourceWindowToShell()

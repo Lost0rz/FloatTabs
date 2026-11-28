@@ -1467,6 +1467,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         sourceHostController.onResizeEnded = { [weak self] in
             self?.handleManualResizeEnded()
         }
+        sourceHostController.onMoveEnded = { [weak self] in
+            guard let self, !self.sourceHostController.isSessionLocked else { return }
+            self.clampPanelToConnectedScreens()
+            self.persistPanelFrame()
+        }
         rootView.fullscreenExitPlaceholderView.onExitFullscreen = { [weak self] in
             self?.sourceHostController.requestFullscreenExit()
         }
@@ -7552,11 +7557,16 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     func windowDidChangeScreen(_ notification: Notification) {
         guard notification.object as? NSWindow === panel, hasPositionedPanel,
-              requestedVisibility, !sourceHostController.isSessionLocked else { return }
+              requestedVisibility, !sourceHostController.isSessionLocked,
+              NSEvent.pressedMouseButtons & 1 == 0 else { return }
+#if DEBUG
+        if debugTargetVisibleFrameOverride != nil { return }
+#endif
         // Reconcile after AppKit finishes its screen-change transaction.
         DispatchQueue.main.async { [weak self] in
             guard let self, self.requestedVisibility,
-                  !self.sourceHostController.isSessionLocked else { return }
+                  !self.sourceHostController.isSessionLocked,
+                  NSEvent.pressedMouseButtons & 1 == 0 else { return }
             self.clampPanelToConnectedScreens()
         }
     }
