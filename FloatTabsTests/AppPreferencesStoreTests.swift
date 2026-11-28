@@ -354,6 +354,17 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         XCTAssertNil(SimpleViewportPreset.matching(second.fixedViewportSize))
     }
 
+    func testFixedCustomFractionPersistsAndPresetSelectionClearsIt() {
+        let store = AppPreferencesStore(defaults: defaults)
+        store.fixedViewportFraction = ViewportFraction(width: 0.4, height: 0.8)
+        let restored = AppPreferencesStore(defaults: defaults)
+        XCTAssertEqual(restored.fixedViewportPreset, .custom)
+        XCTAssertEqual(restored.fixedViewportFraction, ViewportFraction(width: 0.4, height: 0.8))
+        restored.fixedViewportSize = SimpleViewportPreset.wide.size!
+        XCTAssertNil(restored.fixedViewportFraction)
+        XCTAssertEqual(restored.fixedViewportPreset, .wide)
+    }
+
     func testFixedViewportUsesStandardPresetAndClampsUnsafeSmallValues() {
         let store = AppPreferencesStore(defaults: defaults)
         let wide = try! XCTUnwrap(SimpleViewportPreset.wide.size)

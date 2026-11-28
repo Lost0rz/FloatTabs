@@ -467,7 +467,7 @@ final class GroupsAndBookmarksTests: XCTestCase {
         XCTAssertEqual(selected?.id, bookmark.id)
     }
 
-    func testGroupControlDisplaysColorStripeUnreadBadgeAndGlobalBorderTheme() {
+    func testGroupControlDisplaysIndependentColorStripeAndUnreadBadge() {
         let groupBID = UUID()
         let defaultOption = WebAppGroupMenuOption(
             id: nil,
@@ -502,7 +502,8 @@ final class GroupsAndBookmarksTests: XCTestCase {
             globalCustomBorderColor: .systemOrange
         )
 
-        XCTAssertEqual(defaultControl.effectiveAccentThemeForTesting, .orange)
+        XCTAssertEqual(defaultControl.effectiveAccentThemeForTesting, .rainbow)
+        XCTAssertEqual(activeControl.effectiveAccentThemeForTesting, .green)
         XCTAssertTrue(defaultControl.hasVisibleUnreadIndicator)
         XCTAssertFalse(activeControl.hasVisibleUnreadIndicator)
         XCTAssertGreaterThan(activeControl.preferredWidth, defaultControl.preferredWidth)

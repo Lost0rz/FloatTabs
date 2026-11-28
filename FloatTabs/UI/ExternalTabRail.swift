@@ -6976,7 +6976,7 @@ final class WebAppGroupControl: NSView, RailHoverInteractionOwner {
     }
 
     private var effectiveBorderTheme: PanelBorderTheme {
-        option.borderTheme ?? globalBorderTheme
+        option.borderTheme ?? .rainbow
     }
 
     private var effectiveAccentColor: NSColor {
@@ -6984,7 +6984,7 @@ final class WebAppGroupControl: NSView, RailHoverInteractionOwner {
         case .rainbow:
             return .systemPurple
         case .custom:
-            return option.resolvedCustomColor ?? globalCustomBorderColor
+            return option.resolvedCustomColor ?? .systemBlue
         default:
             return effectiveBorderTheme.solidColor ?? .systemBlue
         }
@@ -7000,7 +7000,7 @@ final class WebAppGroupControl: NSView, RailHoverInteractionOwner {
             ? L10n.tr("1 tab", "1 个标签")
             : L10n.tr("\(option.slotCount) tabs", "\(option.slotCount) 个标签")
         let borderDesc = option.borderTheme?.displayName
-            ?? L10n.tr("Global (\(globalBorderTheme.displayName))", "全局（\(globalBorderTheme.displayName)）")
+            ?? L10n.tr("Default group color", "默认分组颜色")
         let unreadDesc: String
         if !option.isActive && option.unreadCount > 0 {
             unreadDesc = L10n.tr(" · \(option.unreadCount) unread", " · \(option.unreadCount) 条未读")
@@ -7126,7 +7126,7 @@ final class WebAppGroupControl: NSView, RailHoverInteractionOwner {
         menu.addItem(newGroup)
 
         let editGroup = NSMenuItem(
-            title: L10n.tr("Edit \"\(displayGroupName)\" & Border…", "编辑“\(displayGroupName)”与边框…"),
+            title: L10n.tr("Edit \"\(displayGroupName)\" & Color…", "编辑“\(displayGroupName)”与颜色…"),
             action: #selector(editGroupFromMenu(_:)),
             keyEquivalent: ""
         )
@@ -7163,7 +7163,7 @@ final class WebAppGroupControl: NSView, RailHoverInteractionOwner {
         }
 
         let editItem = NSMenuItem(
-            title: L10n.tr("Edit \"\(displayGroupName)\" & Border…", "编辑“\(displayGroupName)”与边框…"),
+            title: L10n.tr("Edit \"\(displayGroupName)\" & Color…", "编辑“\(displayGroupName)”与颜色…"),
             action: #selector(editGroupFromMenu(_:)),
             keyEquivalent: ""
         )

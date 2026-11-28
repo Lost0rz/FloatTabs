@@ -191,6 +191,14 @@ struct ViewportFraction: Codable, Equatable {
         self.height = height.isFinite ? min(max(height, 0.05), 1) : 0.8
     }
 
+    private enum CodingKeys: String, CodingKey { case width, height }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(width: try values.decode(CGFloat.self, forKey: .width),
+                  height: try values.decode(CGFloat.self, forKey: .height))
+    }
+
     init(viewport: CGSize, visibleFrame: NSRect) {
         self.init(width: viewport.width / max(visibleFrame.width, 1),
                   height: viewport.height / max(visibleFrame.height, 1))
@@ -206,7 +214,7 @@ enum ScreenPositioning {
     ) -> CGSize {
         let available = PanelMetrics.viewportSize(forPanelSize: visibleFrame.size)
         let desired: CGSize
-        var aspect: CGFloat?
+        var aspect: CGFloat? = nil
         switch preset {
         case .small, .medium:
             let height = visibleFrame.height * 0.85

@@ -490,11 +490,11 @@ enum WebAppEditorController {
         alert.informativeText = nameIsOptional
             ? L10n.tr(
                 "URL must be http/https, Custom Window Size must be 5–100% (or at least 320 × 400 for device presets), and a Custom User Agent cannot be empty.",
-                "网址必须为 http 或 https，自定义窗口尺寸至少为 320 × 400，且自定义 User Agent 不能为空。"
+                "网址必须为 http 或 https，自定义窗口宽高应为 5–100%（设备预设至少为 320 × 400），且自定义 User Agent 不能为空。"
             )
             : L10n.tr(
                 "Name is required, URL must be http/https, Custom Window Size must be 5–100% (or at least 320 × 400 for device presets), and a Custom User Agent cannot be empty.",
-                "名称不能为空，网址必须为 http 或 https，自定义窗口尺寸至少为 320 × 400，且自定义 User Agent 不能为空。"
+                "名称不能为空，网址必须为 http 或 https，自定义窗口宽高应为 5–100%（设备预设至少为 320 × 400），且自定义 User Agent 不能为空。"
             )
         alert.addButton(withTitle: L10n.tr("OK", "好"))
         alert.beginSheetModal(for: window) { _ in
@@ -508,7 +508,7 @@ enum WebAppEditorController {
         alert.messageText = L10n.tr("Check rendering settings", "请检查渲染设置")
         alert.informativeText = L10n.tr(
             "Custom Window Size must be 5–100% (or at least 320 × 400 for device presets) and a Custom User Agent cannot be empty.",
-            "自定义窗口尺寸至少为 320 × 400，且自定义 User Agent 不能为空。"
+            "自定义窗口宽高应为 5–100%（设备预设至少为 320 × 400），且自定义 User Agent 不能为空。"
         )
         alert.addButton(withTitle: L10n.tr("OK", "好"))
         alert.beginSheetModal(for: window)
@@ -557,9 +557,13 @@ private final class RenderingForm: NSObject {
             sizePopup.selectItem(at: index)
         }
 
+        let referenceFrame = Self.referenceDisplayFrame
+        let initialFraction = rendering.customViewportFraction ?? ViewportFraction(
+            viewport: ScreenPositioning.responsiveViewport(for: rendering, visibleFrame: referenceFrame),
+            visibleFrame: referenceFrame
+        )
         let initialSize = rendering.devicePresetID != nil ? rendering.viewportSize : CGSize(
-            width: (rendering.customViewportFraction ?? ViewportFraction(viewport: rendering.viewportSize, visibleFrame: Self.referenceDisplayFrame)).width * 100,
-            height: (rendering.customViewportFraction ?? ViewportFraction(viewport: rendering.viewportSize, visibleFrame: Self.referenceDisplayFrame)).height * 100
+            width: initialFraction.width * 100, height: initialFraction.height * 100
         )
         widthField.stringValue = String(format: "%.0f", Double(initialSize.width))
         heightField.stringValue = String(format: "%.0f", Double(initialSize.height))
@@ -732,7 +736,7 @@ private final class RenderingForm: NSObject {
         let preset: SimpleViewportPreset
         let orientation: DeviceOrientation
         let size: CGSize
-        var customFraction: ViewportFraction?
+        var customFraction: ViewportFraction? = nil
         if allowsWindowSizeEditing {
             preset = selectedPreset
             orientation = selectedOrientation
@@ -879,12 +883,15 @@ private final class RenderingForm: NSObject {
     }
 
     @objc private func deviceSelectionChanged(_ sender: NSPopUpButton) {
-        guard let device = selectedDevicePreset(),
-              let orientation = selectedOrientation() else {
-            return
-        }
+        guard let orientation = selectedOrientation() else { return }
         selectSimplePreset(.custom)
-        setSizeFields(device.size(for: orientation))
+        if let device = selectedDevicePreset() {
+            setSizeFields(device.size(for: orientation))
+        } else {
+            let oldSize = CGSize(width: CGFloat(widthField.doubleValue), height: CGFloat(heightField.doubleValue))
+            let fraction = ViewportFraction(viewport: oldSize, visibleFrame: Self.referenceDisplayFrame)
+            setSizeFields(CGSize(width: fraction.width * 100, height: fraction.height * 100))
+        }
         updateCustomFieldEditability()
     }
 

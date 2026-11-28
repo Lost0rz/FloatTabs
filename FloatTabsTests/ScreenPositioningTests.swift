@@ -51,7 +51,7 @@ final class PanelMetricsTests: XCTestCase {
 
 final class ScreenPositioningTests: XCTestCase {
     func testResponsivePresetsPreserveShapeAcrossDisplays() {
-        for scale: CGFloat in [1, 2] {
+        for scale in [CGFloat(1), CGFloat(2)] {
             let frame = NSRect(x: 0, y: 0, width: 1920 * scale, height: 1080 * scale)
             let portrait = ScreenPositioning.responsiveViewport(preset: .small, legacySize: .zero, visibleFrame: frame)
             let landscape = ScreenPositioning.responsiveViewport(preset: .wide, legacySize: .zero, visibleFrame: frame)

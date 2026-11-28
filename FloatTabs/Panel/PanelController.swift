@@ -3340,6 +3340,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.webPanelContainerView.debugTriggerRestoringReload()
     }
 
+    var debugAppliedBorderTheme: PanelBorderTheme { rootView.interactionBorderView.appliedThemeForTesting }
+
     var debugPanelFrame: NSRect {
         panel.frame
     }
@@ -6691,8 +6693,15 @@ final class PanelController: NSObject, NSWindowDelegate {
         persistPanelFrame()
     }
 
+    private var sizingVisibleFrame: NSRect? {
+#if DEBUG
+        if let debugTargetVisibleFrameOverride { return debugTargetVisibleFrameOverride }
+#endif
+        return panel.screen?.visibleFrame ?? ScreenPositioning.targetScreen()?.visibleFrame
+    }
+
     private func resolvedViewport(_ rendering: WebRenderingProfile, on frame: NSRect? = nil) -> CGSize {
-        guard let visible = frame ?? panel.screen?.visibleFrame ?? ScreenPositioning.targetScreen()?.visibleFrame else {
+        guard let visible = frame ?? sizingVisibleFrame else {
             return rendering.viewportSize
         }
         return ScreenPositioning.responsiveViewport(for: rendering, visibleFrame: visible)
@@ -6700,7 +6709,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func resolvedFixedViewport(on frame: NSRect? = nil) -> CGSize {
         let size = preferencesStore.fixedViewportSize
-        guard let visible = frame ?? panel.screen?.visibleFrame ?? ScreenPositioning.targetScreen()?.visibleFrame else {
+        guard let visible = frame ?? sizingVisibleFrame else {
             return size
         }
         return ScreenPositioning.responsiveViewport(preset: preferencesStore.fixedViewportPreset,
@@ -6726,9 +6735,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 height: viewportSize.height
             ))
         )
-        let visibleFrame = panel.screen?.visibleFrame
-            ?? ScreenPositioning.targetScreen()?.visibleFrame
-        guard let visibleFrame else { return }
+        guard let visibleFrame = sizingVisibleFrame else { return }
 
         let target = ScreenPositioning.frameFollowingPreferredViewport(
             currentFrame: panel.frame,
@@ -7480,13 +7487,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         let screens = NSScreen.screens
         guard let fallbackScreen = ScreenPositioning.targetScreen(screens: screens) else { return }
 
-        refreshPreferredPanelSizeFromModel()
+        let destination = ScreenPositioning.bestVisibleFrame(for: panel.frame, visibleFrames: screens.map(\.visibleFrame)) ?? fallbackScreen.visibleFrame
+        refreshPreferredPanelSizeFromModel(on: destination)
         let clamped: NSRect
         if preservingPreferredSize {
             clamped = ScreenPositioning.relocatedFrame(
                 frameWithPreferredSize(panel.frame),
-                visibleFrames: screens.map(\.visibleFrame),
-                fallbackVisibleFrame: fallbackScreen.visibleFrame
+                visibleFrames: [destination],
+                fallbackVisibleFrame: destination
             )
         } else {
             clamped = ScreenPositioning.restoredFrame(
@@ -8013,7 +8021,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         let initialCustomColor = initialCustomHex
             .flatMap(AppPreferencesStore.color(fromHex:))
-            ?? preferencesStore.customBorderColor
+            ?? .systemBlue
 
         let alert = NSAlert()
         alert.messageText = isCreating
