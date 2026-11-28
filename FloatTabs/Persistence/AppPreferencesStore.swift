@@ -134,6 +134,7 @@ final class AppPreferencesStore {
     static let railCollapsedKey = "FloatTabs.railCollapsed"
     static let fixedViewportWidthKey = "FloatTabs.fixedViewportWidth"
     static let fixedViewportHeightKey = "FloatTabs.fixedViewportHeight"
+    static let fixedViewportFractionKey = "FloatTabs.fixedViewportFraction"
     static let menuBarDisplayModeKey = "FloatTabs.menuBarDisplayMode"
     static let attentionSoundEnabledKey = "FloatTabs.attentionSoundEnabled"
     static let attentionSoundNameKey = "FloatTabs.attentionSoundName"
@@ -282,9 +283,30 @@ final class AppPreferencesStore {
 
     /// The shared viewport used only while Fixed mode is active. It never
     /// replaces or normalizes any Web App's own renderingProfile viewport.
+    var fixedViewportFraction: ViewportFraction? {
+        get {
+            guard let data = defaults.data(forKey: Self.fixedViewportFractionKey) else { return nil }
+            return try? JSONDecoder().decode(ViewportFraction.self, from: data)
+        }
+        set {
+            if let newValue, let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Self.fixedViewportFractionKey)
+            } else {
+                defaults.removeObject(forKey: Self.fixedViewportFractionKey)
+            }
+            NotificationCenter.default.post(name: .floatTabsFixedWindowSizeDidChange, object: self)
+        }
+    }
+
+    var fixedViewportPreset: SimpleViewportPreset {
+        if fixedViewportFraction != nil { return .custom }
+        return (SimpleViewportPreset.matching(fixedViewportSize) ?? .custom).presentationPreset
+    }
+
     var fixedViewportSize: CGSize {
         get {
-            guard hasStoredFixedViewportSize else {
+            guard defaults.object(forKey: Self.fixedViewportWidthKey) != nil,
+                  defaults.object(forKey: Self.fixedViewportHeightKey) != nil else {
                 return Self.defaultFixedViewportSize
             }
             let value = CGSize(
@@ -296,7 +318,9 @@ final class AppPreferencesStore {
         set {
             let normalized = Self.normalizedFixedViewportSize(newValue)
             let current = fixedViewportSize
-            guard !hasStoredFixedViewportSize
+            let hadFraction = fixedViewportFraction != nil
+            defaults.removeObject(forKey: Self.fixedViewportFractionKey)
+            guard hadFraction || !hasStoredFixedViewportSize
                     || abs(current.width - normalized.width) > 0.001
                     || abs(current.height - normalized.height) > 0.001 else {
                 return
@@ -311,8 +335,8 @@ final class AppPreferencesStore {
     }
 
     var hasStoredFixedViewportSize: Bool {
-        defaults.object(forKey: Self.fixedViewportWidthKey) != nil
-            && defaults.object(forKey: Self.fixedViewportHeightKey) != nil
+        fixedViewportFraction != nil || (defaults.object(forKey: Self.fixedViewportWidthKey) != nil
+            && defaults.object(forKey: Self.fixedViewportHeightKey) != nil)
     }
 
     var borderTheme: PanelBorderTheme {

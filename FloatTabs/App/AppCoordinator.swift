@@ -859,6 +859,7 @@ final class AppCoordinator {
                 customBorderColorHex: preferencesStore.customBorderColorHex,
                 fixedViewportWidth: Double(preferencesStore.fixedViewportSize.width),
                 fixedViewportHeight: Double(preferencesStore.fixedViewportSize.height),
+                fixedViewportFraction: preferencesStore.fixedViewportFraction,
                 isTabRailCollapsed: preferencesStore.isTabRailCollapsed,
                 menuBarDisplayMode: preferencesStore.menuBarDisplayMode,
                 attentionStyle: preferencesStore.attentionStyle,
@@ -916,6 +917,7 @@ final class AppCoordinator {
            let height = imported.globalPreferences.fixedViewportHeight {
             preferencesStore.fixedViewportSize = CGSize(width: width, height: height)
         }
+        preferencesStore.fixedViewportFraction = imported.globalPreferences.fixedViewportFraction
         if let isTabRailCollapsed = imported.globalPreferences.isTabRailCollapsed {
             preferencesStore.isTabRailCollapsed = isTabRailCollapsed
             panelController.applyRestoredRailCollapse(isTabRailCollapsed)

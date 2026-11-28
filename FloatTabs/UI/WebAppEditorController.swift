@@ -489,11 +489,11 @@ enum WebAppEditorController {
         alert.messageText = L10n.tr("Enter a valid Web App", "请输入有效的网页应用信息")
         alert.informativeText = nameIsOptional
             ? L10n.tr(
-                "URL must be http/https, Custom Window Size must be at least 320 × 400, and a Custom User Agent cannot be empty.",
+                "URL must be http/https, Custom Window Size must be 5–100% (or at least 320 × 400 for device presets), and a Custom User Agent cannot be empty.",
                 "网址必须为 http 或 https，自定义窗口尺寸至少为 320 × 400，且自定义 User Agent 不能为空。"
             )
             : L10n.tr(
-                "Name is required, URL must be http/https, Custom Window Size must be at least 320 × 400, and a Custom User Agent cannot be empty.",
+                "Name is required, URL must be http/https, Custom Window Size must be 5–100% (or at least 320 × 400 for device presets), and a Custom User Agent cannot be empty.",
                 "名称不能为空，网址必须为 http 或 https，自定义窗口尺寸至少为 320 × 400，且自定义 User Agent 不能为空。"
             )
         alert.addButton(withTitle: L10n.tr("OK", "好"))
@@ -507,7 +507,7 @@ enum WebAppEditorController {
         alert.alertStyle = .warning
         alert.messageText = L10n.tr("Check rendering settings", "请检查渲染设置")
         alert.informativeText = L10n.tr(
-            "Custom Window Size must be at least 320 × 400 and a Custom User Agent cannot be empty.",
+            "Custom Window Size must be 5–100% (or at least 320 × 400 for device presets) and a Custom User Agent cannot be empty.",
             "自定义窗口尺寸至少为 320 × 400，且自定义 User Agent 不能为空。"
         )
         alert.addButton(withTitle: L10n.tr("OK", "好"))
@@ -552,13 +552,17 @@ private final class RenderingForm: NSObject {
             modePopup.selectItem(at: index)
         }
 
-        sizePopup.addItems(withTitles: SimpleViewportPreset.allCases.map(\.menuTitle))
-        if let index = SimpleViewportPreset.allCases.firstIndex(of: rendering.sizePreset) {
+        sizePopup.addItems(withTitles: SimpleViewportPreset.selectableCases.map(\.menuTitle))
+        if let index = SimpleViewportPreset.selectableCases.firstIndex(of: rendering.sizePreset.presentationPreset) {
             sizePopup.selectItem(at: index)
         }
 
-        widthField.stringValue = String(format: "%.0f", Double(rendering.viewportWidth))
-        heightField.stringValue = String(format: "%.0f", Double(rendering.viewportHeight))
+        let initialSize = rendering.devicePresetID != nil ? rendering.viewportSize : CGSize(
+            width: (rendering.customViewportFraction ?? ViewportFraction(viewport: rendering.viewportSize, visibleFrame: Self.referenceDisplayFrame)).width * 100,
+            height: (rendering.customViewportFraction ?? ViewportFraction(viewport: rendering.viewportSize, visibleFrame: Self.referenceDisplayFrame)).height * 100
+        )
+        widthField.stringValue = String(format: "%.0f", Double(initialSize.width))
+        heightField.stringValue = String(format: "%.0f", Double(initialSize.height))
         widthField.placeholderString = L10n.tr("Width", "宽度")
         heightField.placeholderString = L10n.tr("Height", "高度")
 
@@ -711,7 +715,7 @@ private final class RenderingForm: NSObject {
         let orientationIndex = orientationPopup.indexOfSelectedItem
 
         guard WebsiteMode.allCases.indices.contains(modeIndex),
-              SimpleViewportPreset.allCases.indices.contains(sizeIndex),
+              SimpleViewportPreset.selectableCases.indices.contains(sizeIndex),
               ZoomSteps.values.indices.contains(zoomIndex),
               SlotRuntimeRetentionPreference.allCases.indices.contains(retentionIndex),
               BrowserIdentity.allCases.indices.contains(identityIndex),
@@ -720,7 +724,7 @@ private final class RenderingForm: NSObject {
         }
 
         let mode = WebsiteMode.allCases[modeIndex]
-        let selectedPreset = SimpleViewportPreset.allCases[sizeIndex]
+        let selectedPreset = SimpleViewportPreset.selectableCases[sizeIndex]
         let retention = SlotRuntimeRetentionPreference.allCases[retentionIndex]
         let identity = BrowserIdentity.allCases[identityIndex]
         let selectedOrientation = DeviceOrientation.allCases[orientationIndex]
@@ -728,6 +732,7 @@ private final class RenderingForm: NSObject {
         let preset: SimpleViewportPreset
         let orientation: DeviceOrientation
         let size: CGSize
+        var customFraction: ViewportFraction?
         if allowsWindowSizeEditing {
             preset = selectedPreset
             orientation = selectedOrientation
@@ -735,12 +740,18 @@ private final class RenderingForm: NSObject {
                 size = presetSize
             } else {
                 guard let parsed = parsedCustomSize() else { return nil }
-                size = parsed
+                if selectedDevicePreset() != nil {
+                    size = parsed
+                } else {
+                    customFraction = ViewportFraction(width: parsed.width / 100, height: parsed.height / 100)
+                    size = ScreenPositioning.responsiveViewport(preset: .custom, custom: customFraction, legacySize: initialRendering.viewportSize, visibleFrame: Self.referenceDisplayFrame)
+                }
             }
         } else {
             preset = initialRendering.sizePreset
             orientation = initialRendering.orientation
             size = initialRendering.viewportSize
+            customFraction = initialRendering.customViewportFraction
         }
 
         let customUA: String?
@@ -776,7 +787,8 @@ private final class RenderingForm: NSObject {
             orientation: orientation,
             viewportWidth: size.width,
             viewportHeight: size.height,
-            zoom: ZoomSteps.values[zoomIndex]
+            zoom: ZoomSteps.values[zoomIndex],
+            customViewportFraction: customFraction
         ).normalized()
         return (rendering, retention)
     }
@@ -848,10 +860,11 @@ private final class RenderingForm: NSObject {
 
     @objc private func sizeSelectionChanged(_ sender: NSPopUpButton) {
         let index = sender.indexOfSelectedItem
-        guard SimpleViewportPreset.allCases.indices.contains(index) else { return }
-        let preset = SimpleViewportPreset.allCases[index]
+        guard SimpleViewportPreset.selectableCases.indices.contains(index) else { return }
+        let preset = SimpleViewportPreset.selectableCases[index]
         if let size = preset.size {
-            setSizeFields(size)
+            let fraction = ViewportFraction(viewport: ScreenPositioning.responsiveViewport(preset: preset, legacySize: size, visibleFrame: Self.referenceDisplayFrame), visibleFrame: Self.referenceDisplayFrame)
+            setSizeFields(CGSize(width: fraction.width * 100, height: fraction.height * 100))
             devicePopup.selectItem(at: 0)
             selectOrientation(size.width > size.height ? .landscape : .portrait)
         }
@@ -914,18 +927,24 @@ private final class RenderingForm: NSObject {
         return DevicePresetCatalog.all[index]
     }
 
+    private static var referenceDisplayFrame: NSRect {
+        ScreenPositioning.targetScreen()?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
+    }
+
     private func parsedCustomSize() -> CGSize? {
         guard let width = Double(widthField.stringValue),
               let height = Double(heightField.stringValue),
-              width >= Double(WebRenderingProfile.minimumViewportSize.width),
-              height >= Double(WebRenderingProfile.minimumViewportSize.height) else {
-            return nil
+              width.isFinite, height.isFinite else { return nil }
+        if selectedDevicePreset() != nil {
+            guard width >= Double(WebRenderingProfile.minimumViewportSize.width), height >= Double(WebRenderingProfile.minimumViewportSize.height) else { return nil }
+        } else {
+            guard (5...100).contains(width), (5...100).contains(height) else { return nil }
         }
         return CGSize(width: width, height: height)
     }
 
     private func selectSimplePreset(_ preset: SimpleViewportPreset) {
-        guard let index = SimpleViewportPreset.allCases.firstIndex(of: preset) else { return }
+        guard let index = SimpleViewportPreset.selectableCases.firstIndex(of: preset) else { return }
         sizePopup.selectItem(at: index)
     }
 
@@ -951,8 +970,11 @@ private final class RenderingForm: NSObject {
 
     private func updateCustomFieldEditability() {
         let index = sizePopup.indexOfSelectedItem
-        let isCustom = SimpleViewportPreset.allCases.indices.contains(index)
-            && SimpleViewportPreset.allCases[index] == .custom
+        let isCustom = SimpleViewportPreset.selectableCases.indices.contains(index)
+            && SimpleViewportPreset.selectableCases[index] == .custom
+        let unit = selectedDevicePreset() == nil ? "%" : "pt"
+        widthField.placeholderString = unit
+        heightField.placeholderString = unit
         widthField.isEditable = isCustom
         heightField.isEditable = isCustom
         widthField.textColor = isCustom ? .labelColor : .secondaryLabelColor

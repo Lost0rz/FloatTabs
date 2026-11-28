@@ -1174,7 +1174,7 @@ private final class AppearanceSettingsViewController: NSViewController {
         action: nil
     )
     private let fixedSizeControl = NSSegmentedControl(
-        labels: SimpleViewportPreset.allCases.map(\.displayName),
+        labels: SimpleViewportPreset.selectableCases.map(\.displayName),
         trackingMode: .selectOne,
         target: nil,
         action: nil
@@ -1232,7 +1232,7 @@ private final class AppearanceSettingsViewController: NSViewController {
         multiplication.textColor = .secondaryLabelColor
         customFixedSizeRow.setViews(
             [
-                Self.detailInlineLabel(L10n.tr("Custom viewport", "自定义视口")),
+                Self.detailInlineLabel(L10n.tr("Width % × Height %", "宽度 % × 高度 %")),
                 customFixedWidthField,
                 multiplication,
                 customFixedHeightField,
@@ -1363,12 +1363,14 @@ private final class AppearanceSettingsViewController: NSViewController {
     }
 
     @objc private func fixedSizePresetChanged(_ sender: NSSegmentedControl) {
-        guard SimpleViewportPreset.allCases.indices.contains(sender.selectedSegment) else { return }
-        let preset = SimpleViewportPreset.allCases[sender.selectedSegment]
+        guard SimpleViewportPreset.selectableCases.indices.contains(sender.selectedSegment) else { return }
+        let preset = SimpleViewportPreset.selectableCases[sender.selectedSegment]
         guard let size = preset.size else {
             customFixedSizeRow.isHidden = false
-            customFixedWidthField.stringValue = Self.sizeText(preferencesStore.fixedViewportSize.width)
-            customFixedHeightField.stringValue = Self.sizeText(preferencesStore.fixedViewportSize.height)
+            let fraction = preferencesStore.fixedViewportFraction ?? ViewportFraction(viewport: preferencesStore.fixedViewportSize, visibleFrame: (NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)))
+            preferencesStore.fixedViewportFraction = fraction
+            customFixedWidthField.stringValue = Self.sizeText(fraction.width * 100)
+            customFixedHeightField.stringValue = Self.sizeText(fraction.height * 100)
             view.window?.makeFirstResponder(customFixedWidthField)
             return
         }
@@ -1381,19 +1383,18 @@ private final class AppearanceSettingsViewController: NSViewController {
               let height = Double(customFixedHeightField.stringValue),
               width.isFinite,
               height.isFinite,
-              width >= Double(AppPreferencesStore.minimumFixedViewportSize.width),
-              height >= Double(AppPreferencesStore.minimumFixedViewportSize.height) else {
+              (5...100).contains(width), (5...100).contains(height) else {
             NSSound.beep()
             synchronizeFixedSizeControls()
             return
         }
-        preferencesStore.fixedViewportSize = CGSize(width: width, height: height)
+        preferencesStore.fixedViewportFraction = ViewportFraction(width: width / 100, height: height / 100)
         synchronizeFixedSizeControls()
     }
 
     private func configureCustomFixedField(_ field: NSTextField) {
         field.alignment = .right
-        field.placeholderString = "px"
+        field.placeholderString = "%"
         field.target = self
         field.action = #selector(customFixedSizeChanged(_:))
         field.widthAnchor.constraint(equalToConstant: 72).isActive = true
@@ -1454,12 +1455,15 @@ private final class AppearanceSettingsViewController: NSViewController {
         fixedSizeSection.isHidden = !isFixed
         guard isFixed else { return }
 
-        let size = preferencesStore.fixedViewportSize
-        let preset = SimpleViewportPreset.matching(size) ?? .custom
-        fixedSizeControl.selectedSegment = SimpleViewportPreset.allCases.firstIndex(of: preset) ?? 0
+        let preset = preferencesStore.fixedViewportPreset
+        let fraction = preferencesStore.fixedViewportFraction ?? ViewportFraction(
+            viewport: preferencesStore.fixedViewportSize,
+            visibleFrame: NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
+        )
+        fixedSizeControl.selectedSegment = SimpleViewportPreset.selectableCases.firstIndex(of: preset) ?? 0
         customFixedSizeRow.isHidden = preset != .custom
-        customFixedWidthField.stringValue = Self.sizeText(size.width)
-        customFixedHeightField.stringValue = Self.sizeText(size.height)
+        customFixedWidthField.stringValue = Self.sizeText(fraction.width * 100)
+        customFixedHeightField.stringValue = Self.sizeText(fraction.height * 100)
     }
 
     private static func sizeText(_ value: CGFloat) -> String {

@@ -5755,19 +5755,20 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
 
         let windowSize = NSMenuItem(title: L10n.tr("Window Size", "窗口尺寸"), action: nil, keyEquivalent: "")
         let windowSizeMenu = NSMenu(title: L10n.tr("Window Size", "窗口尺寸"))
-        for preset in SimpleViewportPreset.allCases where preset != .custom {
+        for preset in SimpleViewportPreset.selectableCases where preset != .custom {
             let item = NSMenuItem(title: preset.menuTitle, action: #selector(setWindowSizeFromMenu(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = preset.rawValue
-            item.state = preset == renderingProfile.sizePreset ? .on : .off
+            item.state = preset == renderingProfile.sizePreset.presentationPreset ? .on : .off
             windowSizeMenu.addItem(item)
         }
         if renderingProfile.sizePreset == .custom {
             windowSizeMenu.addItem(.separator())
+            let customTitle = renderingProfile.customViewportFraction.map { "\(Int(($0.width * 100).rounded()))% × \(Int(($0.height * 100).rounded()))%" } ?? "\(Int(renderingProfile.viewportWidth)) × \(Int(renderingProfile.viewportHeight)) pt"
             let custom = NSMenuItem(
                 title: L10n.tr(
-                    "Custom  \(Int(renderingProfile.viewportWidth)) × \(Int(renderingProfile.viewportHeight))",
-                    "自定义  \(Int(renderingProfile.viewportWidth)) × \(Int(renderingProfile.viewportHeight))"
+                    "Custom  \(customTitle)",
+                    "自定义  \(customTitle)"
                 ),
                 action: nil,
                 keyEquivalent: ""
