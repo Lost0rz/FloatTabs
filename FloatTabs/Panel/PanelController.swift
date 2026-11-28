@@ -3699,22 +3699,13 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeBorderTheme() {
-        let resolved = tabStore.effectiveBorderAppearance(
-            globalTheme: preferencesStore.borderTheme,
-            globalCustomColor: preferencesStore.customBorderColor
-        )
-        rootView.interactionBorderView.apply(
-            theme: resolved.theme,
-            customColor: resolved.customColor
-        )
-        sourceHostController.railFoldControl.apply(
-            theme: resolved.theme,
-            customColor: resolved.customColor
-        )
-        rootView.companionRailFoldControlView.apply(
-            theme: resolved.theme,
-            customColor: resolved.customColor
-        )
+        // Group accent belongs to the group control only. The outer frame
+        // and rail controls always follow the global appearance preference.
+        let theme = preferencesStore.borderTheme
+        let customColor = preferencesStore.customBorderColor
+        rootView.interactionBorderView.apply(theme: theme, customColor: customColor)
+        sourceHostController.railFoldControl.apply(theme: theme, customColor: customColor)
+        rootView.companionRailFoldControlView.apply(theme: theme, customColor: customColor)
         synchronizeGroupIndicators()
     }
 
@@ -8011,7 +8002,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         let alert = NSAlert()
         alert.messageText = isCreating
             ? L10n.tr("New Tab Group", "新建标签分组")
-            : L10n.tr("Edit Group & Border", "编辑分组与边框")
+            : L10n.tr("Edit Group & Color", "编辑分组与颜色")
         alert.addButton(
             withTitle: isCreating
                 ? L10n.tr("Create Group", "创建分组")
