@@ -13,6 +13,7 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
     let customBorderColorHex: String?
     let fixedViewportWidth: Double?
     let fixedViewportHeight: Double?
+    let fixedViewportFraction: ViewportFraction?
     let isTabRailCollapsed: Bool?
     let menuBarDisplayMode: MenuBarDisplayMode?
     let attentionStyle: TabAttentionStyle?
@@ -66,6 +67,7 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
         customBorderColorHex: String? = nil,
         fixedViewportWidth: Double? = nil,
         fixedViewportHeight: Double? = nil,
+        fixedViewportFraction: ViewportFraction? = nil,
         isTabRailCollapsed: Bool? = nil,
         menuBarDisplayMode: MenuBarDisplayMode? = nil,
         attentionStyle: TabAttentionStyle? = nil,
@@ -82,6 +84,7 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
         self.customBorderColorHex = customBorderColorHex
         self.fixedViewportWidth = fixedViewportWidth
         self.fixedViewportHeight = fixedViewportHeight
+        self.fixedViewportFraction = fixedViewportFraction
         self.isTabRailCollapsed = isTabRailCollapsed
         self.menuBarDisplayMode = menuBarDisplayMode
         self.attentionStyle = attentionStyle

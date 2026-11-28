@@ -410,6 +410,7 @@ final class PanelInteractionBorderView: NSView {
     private let gradientLayer = CAGradientLayer()
     private let borderMask = CAShapeLayer()
     private var borderTheme: PanelBorderTheme = .rainbow
+    var appliedThemeForTesting: PanelBorderTheme { borderTheme }
     private var customBorderColor: NSColor = .systemBlue
     private var isPresentationVisible = true
 

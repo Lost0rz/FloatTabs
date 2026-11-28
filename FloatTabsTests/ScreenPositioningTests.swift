@@ -50,6 +50,31 @@ final class PanelMetricsTests: XCTestCase {
 }
 
 final class ScreenPositioningTests: XCTestCase {
+    func testResponsivePresetsPreserveShapeAcrossDisplays() {
+        for scale in [CGFloat(1), CGFloat(2)] {
+            let frame = NSRect(x: 0, y: 0, width: 1920 * scale, height: 1080 * scale)
+            let portrait = ScreenPositioning.responsiveViewport(preset: .small, legacySize: .zero, visibleFrame: frame)
+            let landscape = ScreenPositioning.responsiveViewport(preset: .wide, legacySize: .zero, visibleFrame: frame)
+            let large = ScreenPositioning.responsiveViewport(preset: .large, legacySize: .zero, visibleFrame: frame)
+            XCTAssertEqual(portrait.height / frame.height, 0.85, accuracy: 0.001)
+            XCTAssertEqual(portrait.width / portrait.height, 9.0 / 16, accuracy: 0.001)
+            XCTAssertEqual(landscape.width / frame.width, 0.5, accuracy: 0.001)
+            XCTAssertEqual(landscape.width / landscape.height, 16.0 / 9, accuracy: 0.001)
+            XCTAssertEqual(large.width / large.height, 4.0 / 3, accuracy: 0.001)
+        }
+    }
+
+    func testCustomFractionAndLegacySizes() {
+        let frame = NSRect(x: 0, y: 0, width: 1600, height: 1000)
+        let legacy = CGSize(width: 610, height: 720)
+        XCTAssertEqual(ScreenPositioning.responsiveViewport(preset: .custom,
+            custom: ViewportFraction(width: 0.4, height: 0.7), legacySize: legacy, visibleFrame: frame),
+            CGSize(width: 640, height: 700))
+        XCTAssertEqual(ScreenPositioning.responsiveViewport(preset: .custom,
+            legacySize: legacy, visibleFrame: frame), legacy)
+        XCTAssertEqual(SimpleViewportPreset.selectableCases, [.small, .wide, .large, .custom])
+    }
+
     func testSameKnownDisplaysAreRecognized() {
         XCTAssertTrue(
             ScreenPositioning.isSameKnownDisplay(1, 1)

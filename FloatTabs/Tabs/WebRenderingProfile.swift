@@ -47,12 +47,16 @@ enum SimpleViewportPreset: String, Codable, CaseIterable {
     case wide
     case custom
 
+    // Preserve the persisted legacy identifiers; medium is a portrait alias.
+    static let selectableCases: [Self] = [.small, .wide, .large, .custom]
+
+    var presentationPreset: Self { self == .medium ? .small : self }
+
     var displayName: String {
         switch self {
-        case .small: return L10n.tr("Small", "紧凑")
-        case .medium: return L10n.tr("Medium", "适中")
-        case .large: return L10n.tr("Large", "较大")
-        case .wide: return L10n.tr("Wide", "宽屏")
+        case .small, .medium: return L10n.tr("Portrait", "竖屏")
+        case .large: return L10n.tr("Large", "大窗口")
+        case .wide: return L10n.tr("Landscape", "横屏")
         case .custom: return L10n.tr("Custom", "自定义")
         }
     }
@@ -71,8 +75,7 @@ enum SimpleViewportPreset: String, Codable, CaseIterable {
     }
 
     var menuTitle: String {
-        guard let size else { return displayName }
-        return "\(displayName)  \(Int(size.width)) × \(Int(size.height))"
+        return displayName
     }
 
     static func matching(_ size: CGSize, tolerance: CGFloat = 0.5) -> SimpleViewportPreset? {
@@ -258,6 +261,7 @@ struct WebRenderingProfile: Codable, Equatable {
     var viewportWidth: CGFloat
     var viewportHeight: CGFloat
     var zoom: CGFloat
+    var customViewportFraction: ViewportFraction? = nil
 
     static let canonicalDefault = WebRenderingProfile(
         websiteMode: .desktop,
@@ -316,6 +320,7 @@ struct WebRenderingProfile: Codable, Equatable {
         }
 
         if let device = DevicePresetCatalog.preset(id: copy.devicePresetID) {
+            copy.customViewportFraction = nil
             copy.sizePreset = .custom
             let size = device.size(for: copy.orientation)
             copy.viewportWidth = size.width
@@ -323,6 +328,7 @@ struct WebRenderingProfile: Codable, Equatable {
         } else {
             copy.devicePresetID = nil
             if let presetSize = copy.sizePreset.size {
+                copy.customViewportFraction = nil
                 copy.viewportWidth = presetSize.width
                 copy.viewportHeight = presetSize.height
             }
@@ -350,6 +356,7 @@ struct WebRenderingProfile: Codable, Equatable {
     func settingSimplePreset(_ preset: SimpleViewportPreset) -> WebRenderingProfile {
         var copy = self
         copy.sizePreset = preset
+        copy.customViewportFraction = nil
         copy.devicePresetID = nil
         if let size = preset.size {
             copy.viewportWidth = size.width
@@ -366,6 +373,7 @@ struct WebRenderingProfile: Codable, Equatable {
         guard let device = DevicePresetCatalog.preset(id: id) else { return self }
         var copy = self
         copy.sizePreset = .custom
+        copy.customViewportFraction = nil
         copy.devicePresetID = device.id
         copy.orientation = orientation
         let size = device.size(for: orientation)
@@ -383,6 +391,7 @@ struct WebRenderingProfile: Codable, Equatable {
             copy.viewportHeight = size.height
         } else if copy.orientation != orientation {
             copy.orientation = orientation
+            copy.customViewportFraction = nil
             swap(&copy.viewportWidth, &copy.viewportHeight)
             copy.sizePreset = .custom
         }
@@ -392,6 +401,7 @@ struct WebRenderingProfile: Codable, Equatable {
     func settingViewport(_ size: CGSize) -> WebRenderingProfile {
         var copy = self
         copy.sizePreset = .custom
+        copy.customViewportFraction = nil
         copy.devicePresetID = nil
         copy.viewportWidth = max(size.width, Self.minimumViewportSize.width)
         copy.viewportHeight = max(size.height, Self.minimumViewportSize.height)
@@ -422,6 +432,7 @@ struct WebRenderingProfile: Codable, Equatable {
         case orientation
         case viewportWidth
         case viewportHeight
+        case customViewportFraction
         case zoom
 
         // Stage 2 / original Stage 3 compatibility fields.
@@ -449,7 +460,8 @@ struct WebRenderingProfile: Codable, Equatable {
         orientation: DeviceOrientation,
         viewportWidth: CGFloat,
         viewportHeight: CGFloat,
-        zoom: CGFloat
+        zoom: CGFloat,
+        customViewportFraction: ViewportFraction? = nil
     ) {
         self.websiteMode = websiteMode
         self.browserIdentity = browserIdentity
@@ -460,6 +472,7 @@ struct WebRenderingProfile: Codable, Equatable {
         self.viewportWidth = viewportWidth
         self.viewportHeight = viewportHeight
         self.zoom = zoom
+        self.customViewportFraction = customViewportFraction
     }
 
     init(from decoder: Decoder) throws {
@@ -505,6 +518,7 @@ struct WebRenderingProfile: Codable, Equatable {
         viewportWidth = width
         viewportHeight = height
         zoom = decodedZoom
+        customViewportFraction = try container.decodeIfPresent(ViewportFraction.self, forKey: .customViewportFraction)
         self = normalized()
     }
 
@@ -520,5 +534,6 @@ struct WebRenderingProfile: Codable, Equatable {
         try container.encode(profile.viewportWidth, forKey: .viewportWidth)
         try container.encode(profile.viewportHeight, forKey: .viewportHeight)
         try container.encode(profile.zoom, forKey: .zoom)
+        try container.encodeIfPresent(profile.customViewportFraction, forKey: .customViewportFraction)
     }
 }

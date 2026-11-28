@@ -1467,6 +1467,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         sourceHostController.onResizeEnded = { [weak self] in
             self?.handleManualResizeEnded()
         }
+        sourceHostController.onMoveEnded = { [weak self] in
+            guard let self, !self.sourceHostController.isSessionLocked else { return }
+            self.clampPanelToConnectedScreens()
+            self.persistPanelFrame()
+        }
         rootView.fullscreenExitPlaceholderView.onExitFullscreen = { [weak self] in
             self?.sourceHostController.requestFullscreenExit()
         }
@@ -3340,6 +3345,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.webPanelContainerView.debugTriggerRestoringReload()
     }
 
+    var debugAppliedBorderTheme: PanelBorderTheme { rootView.interactionBorderView.appliedThemeForTesting }
+
     var debugPanelFrame: NSRect {
         panel.frame
     }
@@ -3649,15 +3656,19 @@ final class PanelController: NSObject, NSWindowDelegate {
         switch preferencesStore.windowSizeMode {
         case .perWebApp:
             if let active = tabStore.activeProfile {
-                applyPreferredViewport(active.renderingProfile.viewportSize)
+                applyPreferredViewport(resolvedViewport(active.renderingProfile))
             }
         case .fixed:
             guard hasPositionedPanel else { return }
             if preferencesStore.hasStoredFixedViewportSize {
-                applySharedFixedViewport(preferencesStore.fixedViewportSize, animated: panel.isVisible)
+                applySharedFixedViewport(resolvedFixedViewport(), animated: panel.isVisible)
             } else {
                 let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
-                preferencesStore.fixedViewportSize = viewport
+                if let visible = sizingVisibleFrame {
+                    preferencesStore.fixedViewportFraction = ViewportFraction(viewport: viewport, visibleFrame: visible)
+                } else {
+                    preferencesStore.fixedViewportSize = viewport
+                }
             }
         }
     }
@@ -3665,7 +3676,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     @objc private func fixedWindowSizeDidChange(_ notification: Notification) {
         guard !isCommittingManualResize,
               preferencesStore.windowSizeMode == .fixed else { return }
-        applySharedFixedViewport(preferencesStore.fixedViewportSize, animated: panel.isVisible)
+        applySharedFixedViewport(resolvedFixedViewport(), animated: panel.isVisible)
     }
 
 
@@ -3699,22 +3710,13 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeBorderTheme() {
-        let resolved = tabStore.effectiveBorderAppearance(
-            globalTheme: preferencesStore.borderTheme,
-            globalCustomColor: preferencesStore.customBorderColor
-        )
-        rootView.interactionBorderView.apply(
-            theme: resolved.theme,
-            customColor: resolved.customColor
-        )
-        sourceHostController.railFoldControl.apply(
-            theme: resolved.theme,
-            customColor: resolved.customColor
-        )
-        rootView.companionRailFoldControlView.apply(
-            theme: resolved.theme,
-            customColor: resolved.customColor
-        )
+        // Group accent belongs to the group control only. The outer frame
+        // and rail controls always follow the global appearance preference.
+        let theme = preferencesStore.borderTheme
+        let customColor = preferencesStore.customBorderColor
+        rootView.interactionBorderView.apply(theme: theme, customColor: customColor)
+        sourceHostController.railFoldControl.apply(theme: theme, customColor: customColor)
+        rootView.companionRailFoldControlView.apply(theme: theme, customColor: customColor)
         synchronizeGroupIndicators()
     }
 
@@ -3757,13 +3759,13 @@ final class PanelController: NSObject, NSWindowDelegate {
             guard let self,
                   self.preferencesStore.windowSizeMode == .perWebApp,
                   let profile = self.tabStore.profiles.first(where: { $0.id == id }),
-                  let size = preset.size,
+                  preset.size != nil,
                   self.tabStore.updateRenderingProfile(
                     id: id,
                     renderingProfile: profile.renderingProfile.settingSimplePreset(preset)
                   ) else { return }
             if self.tabStore.activeTabID == id {
-                self.applyPreferredViewport(size)
+                self.applyPreferredViewport(self.resolvedViewport(profile.renderingProfile.settingSimplePreset(preset)))
             }
         }
         rail.onSetZoom = { [weak self] id, zoom in
@@ -3914,7 +3916,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         if activeChanged, hasPositionedPanel, preferencesStore.followPreferredSize {
-            applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
+            applyPreferredViewport(resolvedViewport(activeProfile.renderingProfile))
         }
 
         if let pending = pendingRuntimeMaterialization,
@@ -4240,17 +4242,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         webFocusRouter.setCurrentWebView(nil)
         recordRestoringSurfaceWindowVisibilityIfNeeded()
         let selectedViewportPanelSize = PanelMetrics.clampedPanelSize(
-            PanelMetrics.panelSize(
-                forViewport: NSSize(
-                    width: profile.renderingProfile.viewportSize.width,
-                    height: profile.renderingProfile.viewportSize.height
-                )
-            )
+            PanelMetrics.panelSize(forViewport: resolvedViewport(profile.renderingProfile))
         )
         if request.surface == .standard,
            preferencesStore.windowSizeMode == .perWebApp,
            preferredPanelSize != selectedViewportPanelSize {
-            applyPreferredViewport(profile.renderingProfile.viewportSize)
+            applyPreferredViewport(resolvedViewport(profile.renderingProfile))
         }
 
         guard isPendingRuntimeMaterializationCurrent(request),
@@ -6328,7 +6325,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 }
 
                 if self.preferencesStore.windowSizeMode == .perWebApp {
-                    self.applyPreferredViewport(added.renderingProfile.viewportSize)
+                    self.applyPreferredViewport(self.resolvedViewport(added.renderingProfile))
                 }
             }
         }
@@ -6395,7 +6392,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 }
                 if self.tabStore.activeTabID == id,
                    self.preferencesStore.windowSizeMode == .perWebApp {
-                    self.applyPreferredViewport(value.renderingProfile.viewportSize)
+                    self.applyPreferredViewport(self.resolvedViewport(value.renderingProfile))
                 }
             }
         }
@@ -6683,11 +6680,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         switch preferencesStore.windowSizeMode {
         case .perWebApp:
             if let active = tabStore.activeProfile {
-                let previousViewport = active.renderingProfile.viewportSize
-                if !tabStore.updatePreferredViewport(
-                    id: active.id,
-                    size: CGSize(width: viewport.width, height: viewport.height)
-                ) {
+                let previousViewport = resolvedViewport(active.renderingProfile)
+                var updated = active.renderingProfile.settingViewport(viewport)
+                if let visibleFrame = panel.screen?.visibleFrame {
+                    updated.customViewportFraction = ViewportFraction(viewport: viewport, visibleFrame: visibleFrame)
+                }
+                if !tabStore.updateRenderingProfile(id: active.id, renderingProfile: updated) {
                     applyViewportSize(previousViewport, animated: false)
                     return
                 }
@@ -6695,10 +6693,36 @@ final class PanelController: NSObject, NSWindowDelegate {
         case .fixed:
             isCommittingManualResize = true
             preferencesStore.fixedViewportSize = viewport
+            if let visibleFrame = panel.screen?.visibleFrame {
+                preferencesStore.fixedViewportFraction = ViewportFraction(viewport: viewport, visibleFrame: visibleFrame)
+            }
             isCommittingManualResize = false
         }
         preferredPanelSize = panel.frame.size
         persistPanelFrame()
+    }
+
+    private var sizingVisibleFrame: NSRect? {
+#if DEBUG
+        if let debugTargetVisibleFrameOverride { return debugTargetVisibleFrameOverride }
+#endif
+        return panel.screen?.visibleFrame ?? ScreenPositioning.targetScreen()?.visibleFrame
+    }
+
+    private func resolvedViewport(_ rendering: WebRenderingProfile, on frame: NSRect? = nil) -> CGSize {
+        guard let visible = frame ?? sizingVisibleFrame else {
+            return rendering.viewportSize
+        }
+        return ScreenPositioning.responsiveViewport(for: rendering, visibleFrame: visible)
+    }
+
+    private func resolvedFixedViewport(on frame: NSRect? = nil) -> CGSize {
+        let size = preferencesStore.fixedViewportSize
+        guard let visible = frame ?? sizingVisibleFrame else {
+            return size
+        }
+        return ScreenPositioning.responsiveViewport(preset: preferencesStore.fixedViewportPreset,
+            custom: preferencesStore.fixedViewportFraction, legacySize: size, visibleFrame: visible)
     }
 
     private func applyPreferredViewport(_ viewportSize: CGSize) {
@@ -6720,9 +6744,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 height: viewportSize.height
             ))
         )
-        let visibleFrame = panel.screen?.visibleFrame
-            ?? ScreenPositioning.targetScreen()?.visibleFrame
-        guard let visibleFrame else { return }
+        guard let visibleFrame = sizingVisibleFrame else { return }
 
         let target = ScreenPositioning.frameFollowingPreferredViewport(
             currentFrame: panel.frame,
@@ -6744,10 +6766,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard preferencesStore.windowSizeMode == .fixed,
               hasPositionedPanel else { return }
         if preferencesStore.hasStoredFixedViewportSize {
-            applySharedFixedViewport(preferencesStore.fixedViewportSize, animated: false)
+            applySharedFixedViewport(resolvedFixedViewport(), animated: false)
         } else {
             let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
-            preferencesStore.fixedViewportSize = viewport
+            if let visible = sizingVisibleFrame {
+                preferencesStore.fixedViewportFraction = ViewportFraction(viewport: viewport, visibleFrame: visible)
+            } else {
+                preferencesStore.fixedViewportSize = viewport
+            }
         }
     }
 
@@ -7439,11 +7465,20 @@ final class PanelController: NSObject, NSWindowDelegate {
             fields: targetFields
         )
 
-        refreshPreferredPanelSizeFromModel()
+        let startingFrame = hasPositionedPanel ? panel.frame : restoredFrame
+        let sizingFrame: NSRect
+        if reason == .explicitSummon {
+            sizingFrame = targetVisibleFrame
+        } else {
+            sizingFrame = startingFrame.flatMap {
+                ScreenPositioning.bestVisibleFrame(for: $0, visibleFrames: screens.map(\.visibleFrame))
+            } ?? targetVisibleFrame
+        }
+        refreshPreferredPanelSizeFromModel(on: sizingFrame)
 
         let targetFrame: NSRect
 
-        if let startingFrame = hasPositionedPanel ? panel.frame : restoredFrame {
+        if let startingFrame {
             let frame = frameWithPreferredSize(startingFrame)
             if reason == .explicitSummon {
                 targetFrame = ScreenPositioning.frameForExplicitSummon(
@@ -7453,13 +7488,13 @@ final class PanelController: NSObject, NSWindowDelegate {
             } else {
                 targetFrame = ScreenPositioning.relocatedFrame(
                     frame,
-                    visibleFrames: screens.map(\.visibleFrame),
-                    fallbackVisibleFrame: targetVisibleFrame
+                    visibleFrames: [sizingFrame],
+                    fallbackVisibleFrame: sizingFrame
                 )
             }
         } else {
             targetFrame = ScreenPositioning.centeredFrame(
-                size: PanelMetrics.defaultPanelSize,
+                size: preferredPanelSize ?? PanelMetrics.defaultPanelSize,
                 in: targetVisibleFrame
             )
         }
@@ -7474,13 +7509,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         let screens = NSScreen.screens
         guard let fallbackScreen = ScreenPositioning.targetScreen(screens: screens) else { return }
 
-        refreshPreferredPanelSizeFromModel()
+        let destination = ScreenPositioning.bestVisibleFrame(for: panel.frame, visibleFrames: screens.map(\.visibleFrame)) ?? fallbackScreen.visibleFrame
+        refreshPreferredPanelSizeFromModel(on: destination)
         let clamped: NSRect
         if preservingPreferredSize {
             clamped = ScreenPositioning.relocatedFrame(
                 frameWithPreferredSize(panel.frame),
-                visibleFrames: screens.map(\.visibleFrame),
-                fallbackVisibleFrame: fallbackScreen.visibleFrame
+                visibleFrames: [destination],
+                fallbackVisibleFrame: destination
             )
         } else {
             clamped = ScreenPositioning.restoredFrame(
@@ -7516,24 +7552,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         return result
     }
 
-    private func refreshPreferredPanelSizeFromModel() {
+    private func refreshPreferredPanelSizeFromModel(on frame: NSRect? = nil) {
         switch preferencesStore.windowSizeMode {
         case .fixed:
             guard preferencesStore.hasStoredFixedViewportSize else { return }
-            preferredPanelSize = PanelMetrics.panelSize(
-                forViewport: NSSize(
-                    width: preferencesStore.fixedViewportSize.width,
-                    height: preferencesStore.fixedViewportSize.height
-                )
-            )
+            preferredPanelSize = PanelMetrics.panelSize(forViewport: resolvedFixedViewport(on: frame))
         case .perWebApp:
             guard let activeProfile = tabStore.activeProfile else { return }
-            preferredPanelSize = PanelMetrics.panelSize(
-                forViewport: NSSize(
-                    width: activeProfile.renderingProfile.viewportSize.width,
-                    height: activeProfile.renderingProfile.viewportSize.height
-                )
-            )
+            preferredPanelSize = PanelMetrics.panelSize(forViewport: resolvedViewport(activeProfile.renderingProfile, on: frame))
         }
     }
 
@@ -7544,6 +7570,22 @@ final class PanelController: NSObject, NSWindowDelegate {
             )
         }
         synchronizeSourceHostFrame(display: false)
+    }
+
+    func windowDidChangeScreen(_ notification: Notification) {
+        guard notification.object as? NSWindow === panel, hasPositionedPanel,
+              requestedVisibility, !sourceHostController.isSessionLocked,
+              NSEvent.pressedMouseButtons & 1 == 0 else { return }
+#if DEBUG
+        if debugTargetVisibleFrameOverride != nil { return }
+#endif
+        // Reconcile after AppKit finishes its screen-change transaction.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.requestedVisibility,
+                  !self.sourceHostController.isSessionLocked,
+                  NSEvent.pressedMouseButtons & 1 == 0 else { return }
+            self.clampPanelToConnectedScreens()
+        }
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -7770,7 +7812,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         if activeChanged {
             deactivateCompanionProfile(pauseInactiveMedia: true)
             if preferencesStore.followPreferredSize {
-                applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
+                applyPreferredViewport(resolvedViewport(activeProfile.renderingProfile))
             }
         }
 
@@ -8006,12 +8048,12 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         let initialCustomColor = initialCustomHex
             .flatMap(AppPreferencesStore.color(fromHex:))
-            ?? preferencesStore.customBorderColor
+            ?? .systemBlue
 
         let alert = NSAlert()
         alert.messageText = isCreating
             ? L10n.tr("New Tab Group", "新建标签分组")
-            : L10n.tr("Edit Group & Border", "编辑分组与边框")
+            : L10n.tr("Edit Group & Color", "编辑分组与颜色")
         alert.addButton(
             withTitle: isCreating
                 ? L10n.tr("Create Group", "创建分组")
@@ -8252,7 +8294,7 @@ private final class GroupBorderEditorAccessoryHelper: NSObject {
     ) {
         self.nameField = NSTextField(string: initialName)
         self.overrideCheckbox = NSButton(
-            checkboxWithTitle: L10n.tr("Custom Border Color for This Group", "为此分组单独指定边框颜色"),
+            checkboxWithTitle: L10n.tr("Custom Color for This Group Label", "为此分组标签单独指定颜色"),
             target: nil,
             action: nil
         )

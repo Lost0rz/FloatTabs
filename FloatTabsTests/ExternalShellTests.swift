@@ -1132,7 +1132,7 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(menu.item(withTitle: "Website Mode")?.submenu?.items.map(\.title), ["Desktop", "Mobile"])
         XCTAssertEqual(
             menu.item(withTitle: "Window Size")?.submenu?.items.filter { !$0.isSeparatorItem }.map(\.title),
-            ["Small  420 × 760", "Medium  600 × 820", "Large  820 × 850", "Wide  1080 × 850"]
+            ["Portrait", "Landscape", "Large", "Custom…"]
         )
         let zoomItems = try! XCTUnwrap(menu.item(withTitle: "Zoom")?.submenu?.items)
         XCTAssertEqual(zoomItems[0].title, "Zoom In")
@@ -3804,6 +3804,21 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
+    func testGroupSelectionCannotOverrideGlobalWindowBorder() throws {
+        let suite = "FloatTabsTests.BorderIsolation.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.borderTheme = .blue
+        let (store, _, controller, _) = try makePhase6Harness(slotName: "BorderIsolation", preferencesStore: preferences)
+        XCTAssertTrue(store.updateGroup(id: nil, name: "Default", borderTheme: .green, customBorderColorHex: nil))
+        XCTAssertEqual(controller.debugAppliedBorderTheme, .blue)
+        _ = try XCTUnwrap(store.createGroup(name: "Media", borderTheme: .orange, selectImmediately: true))
+        XCTAssertEqual(controller.debugAppliedBorderTheme, .blue)
+        preferences.borderTheme = .purple
+        XCTAssertEqual(controller.debugAppliedBorderTheme, .purple)
+    }
+
     func testExplicitSummonMovesRestoredPanelFromAToBThroughController() throws {
         let displayB = NSRect(x: 1440, y: 0, width: 1920, height: 1080)
         let restoredFrameOnA = NSRect(x: 200, y: 28, width: 688, height: 844)
@@ -3813,11 +3828,12 @@ final class ExternalShellTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.set(NSStringFromRect(restoredFrameOnA), forKey: frameKey)
 
-        let (_, _, controller, _) = try makePhase6Harness(
+        let (store, _, controller, profile) = try makePhase6Harness(
             slotName: "SummonRestoredAToB",
             frameStore: PanelFrameStore(defaults: defaults, key: frameKey),
             preferencesStore: AppPreferencesStore(defaults: defaults)
         )
+        XCTAssertTrue(store.updatePreferredViewport(id: profile.id, size: PanelMetrics.viewportSize(forPanelSize: restoredFrameOnA.size)))
         controller.debugTargetVisibleFrameOverride = displayB
 
         controller.showFloatTabs()
@@ -3850,11 +3866,12 @@ final class ExternalShellTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.set(NSStringFromRect(restoredFrameOnB), forKey: frameKey)
 
-        let (_, _, controller, _) = try makePhase6Harness(
+        let (store, _, controller, profile) = try makePhase6Harness(
             slotName: "SummonRestoredBToA",
             frameStore: PanelFrameStore(defaults: defaults, key: frameKey),
             preferencesStore: AppPreferencesStore(defaults: defaults)
         )
+        XCTAssertTrue(store.updatePreferredViewport(id: profile.id, size: PanelMetrics.viewportSize(forPanelSize: restoredFrameOnB.size)))
         controller.debugTargetVisibleFrameOverride = displayA
 
         controller.showFloatTabs()
@@ -3916,7 +3933,9 @@ final class ExternalShellTests: XCTestCase {
             summonedFrameOnB.intersects(displayB),
             "positioned A → B summon must follow the selected display"
         )
-        XCTAssertEqual(summonedFrameOnB.size, positionedFrameOnA.size)
+        XCTAssertGreaterThan(summonedFrameOnB.height, positionedFrameOnA.height)
+        XCTAssertEqual(PanelMetrics.viewportSize(forPanelSize: summonedFrameOnB.size).height,
+                       displayB.height * 0.85, accuracy: 1)
 
         controller.hideFloatTabs()
     }

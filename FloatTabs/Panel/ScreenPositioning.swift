@@ -181,7 +181,76 @@ struct PanelFrameStore {
     }
 }
 
+/// A user-defined fraction of the display's usable area, not a pixel count.
+struct ViewportFraction: Codable, Equatable {
+    let width: CGFloat
+    let height: CGFloat
+
+    init(width: CGFloat, height: CGFloat) {
+        self.width = width.isFinite ? min(max(width, 0.05), 1) : 0.5
+        self.height = height.isFinite ? min(max(height, 0.05), 1) : 0.8
+    }
+
+    private enum CodingKeys: String, CodingKey { case width, height }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(width: try values.decode(CGFloat.self, forKey: .width),
+                  height: try values.decode(CGFloat.self, forKey: .height))
+    }
+
+    init(viewport: CGSize, visibleFrame: NSRect) {
+        self.init(width: viewport.width / max(visibleFrame.width, 1),
+                  height: viewport.height / max(visibleFrame.height, 1))
+    }
+}
+
 enum ScreenPositioning {
+    static func responsiveViewport(
+        preset: SimpleViewportPreset,
+        custom: ViewportFraction? = nil,
+        legacySize: CGSize,
+        visibleFrame: NSRect
+    ) -> CGSize {
+        let available = PanelMetrics.viewportSize(forPanelSize: visibleFrame.size)
+        let desired: CGSize
+        var aspect: CGFloat? = nil
+        switch preset {
+        case .small, .medium:
+            let height = visibleFrame.height * 0.85
+            desired = CGSize(width: height * 9 / 16, height: height)
+            aspect = 9 / 16
+        case .wide:
+            let width = visibleFrame.width * 0.5
+            desired = CGSize(width: width, height: width * 9 / 16)
+            aspect = 16 / 9
+        case .large:
+            let height = visibleFrame.height * 0.85
+            desired = CGSize(width: height * 4 / 3, height: height)
+            aspect = 4 / 3
+        case .custom:
+            guard let custom else { return legacySize }
+            desired = CGSize(width: visibleFrame.width * custom.width,
+                             height: visibleFrame.height * custom.height)
+        }
+        if let aspect {
+            let maximumHeight = min(available.height, available.width / aspect)
+            let minimumHeight = max(PanelMetrics.minimumViewportSize.height,
+                                    PanelMetrics.minimumViewportSize.width / aspect)
+            let height = min(max(desired.height, minimumHeight), maximumHeight)
+            if maximumHeight >= minimumHeight {
+                return CGSize(width: height * aspect, height: height)
+            }
+        }
+        return constrainedSize(desired, minimumSize: PanelMetrics.minimumViewportSize,
+                               maximumSize: available)
+    }
+
+    static func responsiveViewport(for profile: WebRenderingProfile, visibleFrame: NSRect) -> CGSize {
+        responsiveViewport(preset: profile.sizePreset, custom: profile.customViewportFraction,
+                           legacySize: profile.viewportSize, visibleFrame: visibleFrame)
+    }
+
     static func displayID(for screen: NSScreen?) -> CGDirectDisplayID? {
         guard let number = screen?.deviceDescription[
             NSDeviceDescriptionKey("NSScreenNumber")

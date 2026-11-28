@@ -5755,27 +5755,24 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
 
         let windowSize = NSMenuItem(title: L10n.tr("Window Size", "窗口尺寸"), action: nil, keyEquivalent: "")
         let windowSizeMenu = NSMenu(title: L10n.tr("Window Size", "窗口尺寸"))
-        for preset in SimpleViewportPreset.allCases where preset != .custom {
+        for preset in SimpleViewportPreset.selectableCases where preset != .custom {
             let item = NSMenuItem(title: preset.menuTitle, action: #selector(setWindowSizeFromMenu(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = preset.rawValue
-            item.state = preset == renderingProfile.sizePreset ? .on : .off
+            item.state = preset == renderingProfile.sizePreset.presentationPreset ? .on : .off
             windowSizeMenu.addItem(item)
         }
+        let customTitle: String
         if renderingProfile.sizePreset == .custom {
-            windowSizeMenu.addItem(.separator())
-            let custom = NSMenuItem(
-                title: L10n.tr(
-                    "Custom  \(Int(renderingProfile.viewportWidth)) × \(Int(renderingProfile.viewportHeight))",
-                    "自定义  \(Int(renderingProfile.viewportWidth)) × \(Int(renderingProfile.viewportHeight))"
-                ),
-                action: nil,
-                keyEquivalent: ""
-            )
-            custom.state = .on
-            custom.isEnabled = false
-            windowSizeMenu.addItem(custom)
+            let size = renderingProfile.customViewportFraction.map { "\(Int(($0.width * 100).rounded()))% × \(Int(($0.height * 100).rounded()))%" } ?? "\(Int(renderingProfile.viewportWidth)) × \(Int(renderingProfile.viewportHeight)) pt"
+            customTitle = L10n.tr("Custom  \(size)…", "自定义  \(size)…")
+        } else {
+            customTitle = L10n.tr("Custom…", "自定义…")
         }
+        let custom = NSMenuItem(title: customTitle, action: #selector(editFromMenu(_:)), keyEquivalent: "")
+        custom.target = self
+        custom.state = renderingProfile.sizePreset == .custom ? .on : .off
+        windowSizeMenu.addItem(custom)
         windowSize.submenu = windowSizeMenu
         windowSize.isEnabled = windowSizeEditingEnabled
         windowSize.toolTip = windowSizeEditingEnabled
@@ -6975,7 +6972,7 @@ final class WebAppGroupControl: NSView, RailHoverInteractionOwner {
     }
 
     private var effectiveBorderTheme: PanelBorderTheme {
-        option.borderTheme ?? globalBorderTheme
+        option.borderTheme ?? .rainbow
     }
 
     private var effectiveAccentColor: NSColor {
@@ -6983,7 +6980,7 @@ final class WebAppGroupControl: NSView, RailHoverInteractionOwner {
         case .rainbow:
             return .systemPurple
         case .custom:
-            return option.resolvedCustomColor ?? globalCustomBorderColor
+            return option.resolvedCustomColor ?? .systemBlue
         default:
             return effectiveBorderTheme.solidColor ?? .systemBlue
         }
@@ -6999,7 +6996,7 @@ final class WebAppGroupControl: NSView, RailHoverInteractionOwner {
             ? L10n.tr("1 tab", "1 个标签")
             : L10n.tr("\(option.slotCount) tabs", "\(option.slotCount) 个标签")
         let borderDesc = option.borderTheme?.displayName
-            ?? L10n.tr("Global (\(globalBorderTheme.displayName))", "全局（\(globalBorderTheme.displayName)）")
+            ?? L10n.tr("Default group color", "默认分组颜色")
         let unreadDesc: String
         if !option.isActive && option.unreadCount > 0 {
             unreadDesc = L10n.tr(" · \(option.unreadCount) unread", " · \(option.unreadCount) 条未读")
@@ -7125,7 +7122,7 @@ final class WebAppGroupControl: NSView, RailHoverInteractionOwner {
         menu.addItem(newGroup)
 
         let editGroup = NSMenuItem(
-            title: L10n.tr("Edit \"\(displayGroupName)\" & Border…", "编辑“\(displayGroupName)”与边框…"),
+            title: L10n.tr("Edit \"\(displayGroupName)\" & Color…", "编辑“\(displayGroupName)”与颜色…"),
             action: #selector(editGroupFromMenu(_:)),
             keyEquivalent: ""
         )
@@ -7162,7 +7159,7 @@ final class WebAppGroupControl: NSView, RailHoverInteractionOwner {
         }
 
         let editItem = NSMenuItem(
-            title: L10n.tr("Edit \"\(displayGroupName)\" & Border…", "编辑“\(displayGroupName)”与边框…"),
+            title: L10n.tr("Edit \"\(displayGroupName)\" & Color…", "编辑“\(displayGroupName)”与颜色…"),
             action: #selector(editGroupFromMenu(_:)),
             keyEquivalent: ""
         )

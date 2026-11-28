@@ -46,6 +46,7 @@ final class FloatTabsBackupServiceTests: XCTestCase {
                 followPreferredSize: false,
                 borderTheme: .green,
                 customBorderColorHex: "#123456FF",
+                fixedViewportFraction: ViewportFraction(width: 0.42, height: 0.83),
                 isTabRailCollapsed: true,
                 menuBarDisplayMode: .iconOnly,
                 attentionSoundEnabled: false,
@@ -78,6 +79,7 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         XCTAssertFalse(decoded.globalPreferences.followPreferredSize)
         XCTAssertEqual(decoded.globalPreferences.borderTheme, .green)
         XCTAssertEqual(decoded.globalPreferences.customBorderColorHex, "#123456FF")
+        XCTAssertEqual(decoded.globalPreferences.fixedViewportFraction, ViewportFraction(width: 0.42, height: 0.83))
         XCTAssertEqual(decoded.globalPreferences.isTabRailCollapsed, true)
         XCTAssertEqual(decoded.globalPreferences.menuBarDisplayMode, .iconOnly)
         XCTAssertEqual(decoded.globalPreferences.attentionSoundEnabled, false)
